@@ -1,0 +1,316 @@
+"""
+train_bvr.py  —  MaskablePPO training for 1v1 BVR
+=================================================
+
+    pip install sb3-contrib
+
+    python train_bvr.py                            # curriculum from STRAIGHT
+    python train_bvr.py --opponent shooter         # fixed opponent
+    python train_bvr.py --resume models_bvr/latest
+    python train_bvr.py --n-envs 8                 # once C++ supports --instance
+
+TensorBoard:
+    bvr/win_rate            KILL fraction over last 50 TERMINAL episodes
+    bvr/loss_rate           SHOT_DOWN fraction
+    bvr/mutual_rate         MUTUAL_KILL fraction
+    bvr/exchange_ratio      kills / losses
+    bvr/realized_pk         kills / shots fired
+    bvr/shots_per_episode
+    bvr/mean_launch_range   km
+    bvr/launch_r_over_rmax  where in the envelope it shoots (target ~0.6-0.85)
+    bvr/track_frac          fraction of steps with a valid TRACK
+    bvr/timeout_rate        watch this: a rising timeout rate means the
+                            passivity collapse is starting
+
+Win rate is computed over TERMINAL episode outcomes only. Per-step outcome
+counting dilutes it by ~the episode length and makes the curriculum advance
+on a number that means nothing.
+"""
+
+import argparse
+import json
+import os
+import time
+from collections import deque
+
+import numpy as np
+
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.maskable.evaluation import evaluate_policy
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack
+
+from bvr_env import BvrEnv
+from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
+from bvr_policy import AsymmetricMaskablePolicy
+
+
+# ═════════════════════════════════════════════════════════════════════
+PPO_KWARGS = dict(
+    # GAMMA. The single most important hyperparameter here. At 1 Hz with a
+    # 40 s missile flight, the launch decision is 40 steps from its outcome.
+    #   gamma=0.95  -> 0.13 of the terminal reward reaches the launch. Dead.
+    #   gamma=0.99  -> 0.67. Marginal.
+    #   gamma=0.997 -> 0.89. Works.
+    gamma=0.997,
+    gae_lambda=0.95,
+
+    learning_rate=2.5e-4,
+
+    # n_steps must comfortably span a full engagement (up to 300 decisions),
+    # otherwise GAE truncates inside the episode and the launch→impact credit
+    # path is cut exactly where it matters.
+    n_steps=1024,
+    batch_size=256,
+    n_epochs=6,
+
+    clip_range=0.2,
+    clip_range_vf=0.2,      # bounded value updates — the WVR lesson
+    target_kl=0.02,         # hard stop on oversized updates
+
+    ent_coef=0.01,          # discrete actions need real exploration pressure
+    vf_coef=0.5,
+    max_grad_norm=0.5,
+
+    verbose=1,
+)
+
+# Frame stacking supplies short-term memory. The EKF already carries the
+# belief state, so a recurrent policy is usually unnecessary; try stacking
+# first and only reach for RecurrentPPO if it plateaus.
+N_STACK = 8
+
+ADVANCE_WIN_RATE = 0.65
+ADVANCE_MIN_EPISODES = 60
+
+
+# ═════════════════════════════════════════════════════════════════════
+class BvrCallback(BaseCallback):
+
+    def __init__(self, envs, opponent_type, save_dir="models_bvr",
+                 auto_curriculum=True, verbose=1):
+        super().__init__(verbose)
+        self.envs = envs
+        self.opponent_type = opponent_type
+        self.save_dir = save_dir
+        self.auto_curriculum = auto_curriculum
+
+        self.outcomes = deque(maxlen=50)
+        self.shots = deque(maxlen=50)
+        self.launch_rngs = deque(maxlen=200)
+        self.launch_ratios = deque(maxlen=200)
+        self.track_hits = deque(maxlen=5000)
+        self.ep_count = 0
+        self.best_win = -1.0
+        os.makedirs(save_dir, exist_ok=True)
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            if "track_state" in info:
+                self.track_hits.append(1.0 if info["track_state"] == "TRACK" else 0.0)
+
+            outcome = info.get("terminal_outcome")
+            if outcome is None:
+                continue
+
+            self.ep_count += 1
+            self.outcomes.append(outcome)
+            self.shots.append(int(info.get("shots_fired", 0)))
+            for lg in info.get("launch_log", []):
+                self.launch_rngs.append(lg["range_true"] if lg["range_true"] > 0 else lg["range_est"])
+                self.launch_ratios.append(lg["r_over_rmax"])
+
+            if self.ep_count % 10 == 0:
+                self._log()
+
+        return True
+
+    def _log(self):
+        n = len(self.outcomes)
+        if n < 5:
+            return
+        kills = self.outcomes.count("KILL")
+        losses = self.outcomes.count("SHOT_DOWN")
+        mutual = self.outcomes.count("MUTUAL_KILL")
+        timeouts = self.outcomes.count("TIMEOUT")
+
+        win_rate = kills / n
+        total_shots = max(sum(self.shots), 1)
+
+        rec = self.logger.record
+        rec("bvr/win_rate", win_rate)
+        rec("bvr/loss_rate", losses / n)
+        rec("bvr/mutual_rate", mutual / n)
+        rec("bvr/timeout_rate", timeouts / n)
+        rec("bvr/escape_rate", self.outcomes.count("ESCAPE") / n)
+        rec("bvr/exchange_ratio", kills / max(losses + mutual, 1))
+        rec("bvr/realized_pk", (kills + mutual) / total_shots)
+        rec("bvr/shots_per_episode", total_shots / n)
+        if self.launch_rngs:
+            rec("bvr/mean_launch_range_km", float(np.mean(self.launch_rngs)) / 1000.0)
+            rec("bvr/launch_r_over_rmax", float(np.mean(self.launch_ratios)))
+        if self.track_hits:
+            rec("bvr/track_frac", float(np.mean(self.track_hits)))
+        rec("bvr/episodes", self.ep_count)
+        rec("bvr/opponent", CURRICULUM.index(self.opponent_type))
+
+        if self.verbose:
+            print(f"[bvr] ep {self.ep_count:5d} | {self.opponent_type.name:16s} | "
+                  f"win {win_rate:5.1%} loss {losses/n:5.1%} mut {mutual/n:5.1%} "
+                  f"to {timeouts/n:5.1%} | Pk {(kills+mutual)/total_shots:4.2f} | "
+                  f"shots/ep {total_shots/n:4.2f}")
+
+        # Write metrics for the GUI. Appended to a rolling history list so
+        # the browser can draw trend charts without accumulating unbounded data.
+        try:
+            mpath = os.path.join(self.save_dir, "..", "bvr_metrics.json")
+            mpath = os.path.normpath(mpath)
+            prev = {}
+            if os.path.exists(mpath):
+                try: prev = json.loads(open(mpath).read())
+                except Exception: pass
+            hist = prev.get("history", [])
+            hist.append([self.ep_count, round(win_rate, 3),
+                         round((kills+mutual)/max(losses+mutual,1), 2)])
+            if len(hist) > 300: hist = hist[-300:]   # keep last 300 points
+            metrics = {
+                "episode":       self.ep_count,
+                "opponent":      self.opponent_type.name,
+                "win_rate":      round(win_rate, 3),
+                "loss_rate":     round(losses/n, 3),
+                "mutual_rate":   round(mutual/n, 3),
+                "timeout_rate":  round(timeouts/n, 3),
+                "escape_rate":   round(self.outcomes.count("ESCAPE")/n, 3),
+                "exchange_ratio": round(kills/max(losses+mutual,1), 2),
+                "realized_pk":   round((kills+mutual)/total_shots, 3),
+                "shots_per_ep":  round(total_shots/n, 2),
+                "mean_launch_km": round(float(np.mean(self.launch_rngs))/1000,2) if self.launch_rngs else 0,
+                "launch_r_rmax": round(float(np.mean(self.launch_ratios)),3) if self.launch_ratios else 0,
+                "track_frac":    round(float(np.mean(self.track_hits)),3) if self.track_hits else 0,
+                "history":       hist,
+                "steps_done":    int(self.model.num_timesteps),
+            }
+            with open(mpath, "w") as f:
+                json.dump(metrics, f)
+        except Exception:
+            pass
+
+        # Archive the best checkpoint OUTSIDE the rolling save directory.
+        # Self-play regressions can and do destroy good policies, and a
+        # checkpoint that lives in the same folder the trainer overwrites is
+        # not a backup.
+        if n >= 30 and win_rate > self.best_win:
+            self.best_win = win_rate
+            path = os.path.join(self.save_dir, "archive",
+                                f"best_{self.opponent_type.name}_{win_rate:.3f}")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self.model.save(path)
+
+        if (self.auto_curriculum and n >= ADVANCE_MIN_EPISODES
+                and win_rate >= ADVANCE_WIN_RATE):
+            self._advance()
+
+    def _advance(self):
+        nxt = advance_curriculum(self.opponent_type)
+        if nxt == self.opponent_type:
+            return
+        self.model.save(os.path.join(self.save_dir, "archive",
+                                     f"pre_{nxt.name}"))
+        print(f"[bvr] === CURRICULUM: {self.opponent_type.name} -> {nxt.name} ===")
+        self.opponent_type = nxt
+        for e in self.envs:
+            e._opponent_type = nxt
+        self.outcomes.clear()
+        self.shots.clear()
+        self.best_win = -1.0
+
+
+# ═════════════════════════════════════════════════════════════════════
+def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma):
+    def _init():
+        return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
+                      seed=seed + idx, instance_id=idx,
+                      privileged_critic=privileged,
+                      enable_viz=(viz and idx == 0),
+                      envelope_table=envelope_table)
+    return _init
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--steps", type=int, default=20_000_000)
+    ap.add_argument("--n-envs", type=int, default=1)
+    ap.add_argument("--opponent", type=str, default="straight")
+    ap.add_argument("--resume", type=str, default=None)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--no-curriculum", action="store_true")
+    ap.add_argument("--no-privileged", action="store_true")
+    ap.add_argument("--viz", action="store_true")
+    ap.add_argument("--save-dir", type=str, default="models_bvr")
+    ap.add_argument("--gamma", type=float, default=0.997)
+    ap.add_argument("--lr",    type=float, default=2.5e-4)
+    ap.add_argument("--batch-size", type=int, default=256)
+    ap.add_argument("--envelope-table", type=str, default="envelope.npz",
+                     help="calibrated Rmax/Rnez table from sweep_envelope.py. "
+                          "Falls back to the (uncalibrated, ~1.5-3x optimistic) "
+                          "analytic model if the file is missing.")
+    args = ap.parse_args()
+
+    opponent = BvrOpponentType[args.opponent.upper()]
+    privileged = not args.no_privileged
+
+    envelope_table = args.envelope_table if os.path.exists(args.envelope_table) else None
+    if envelope_table is None:
+        print(f"[bvr] WARNING: {args.envelope_table} not found — training against the "
+              f"UNCALIBRATED analytic envelope model. Run sweep_envelope.py first; "
+              f"see bvr_envelope.py's module docstring for why this matters.")
+
+    # gamma MUST match the value PPO trains with (passed below via kwargs) —
+    # potential-based shaping (bvr_env._potential / step()'s `gamma*phi -
+    # prev_phi`) is only guaranteed policy-invariant (Ng, Harada & Russell,
+    # 1999) when its discount matches the agent's. This used to read
+    # PPO_KWARGS["gamma"] here, the module DEFAULT, so a --gamma override on
+    # the CLI silently desynced the two and broke that guarantee.
+    fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma)
+           for i in range(args.n_envs)]
+    vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
+
+    # VecFrameStack over a Dict space stacks every sub-key, which is what we
+    # want — the critic benefits from privileged history too.
+    vec = VecFrameStack(vec, n_stack=N_STACK)
+
+    raw_envs = [e for e in getattr(vec.venv, "envs", [])] if args.n_envs == 1 else []
+
+    kwargs = dict(PPO_KWARGS)
+    kwargs["gamma"]         = args.gamma
+    kwargs["learning_rate"] = args.lr
+    kwargs["batch_size"]    = args.batch_size
+    if privileged:
+        policy = AsymmetricMaskablePolicy
+        kwargs["policy_kwargs"] = dict(pi_arch=(256, 256), vf_arch=(256, 256))
+    else:
+        policy = "MlpPolicy"
+        kwargs["policy_kwargs"] = dict(net_arch=dict(pi=[256, 256], vf=[256, 256]))
+
+    if args.resume:
+        model = MaskablePPO.load(args.resume, env=vec, **{
+            k: v for k, v in kwargs.items() if k not in ("policy_kwargs",)})
+        print(f"[bvr] resumed from {args.resume}")
+    else:
+        model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
+
+    cb = BvrCallback(raw_envs, opponent, save_dir=args.save_dir,
+                     auto_curriculum=not args.no_curriculum)
+
+    try:
+        model.learn(total_timesteps=args.steps, callback=cb,
+                    tb_log_name=f"bvr_{int(time.time())}")
+    except KeyboardInterrupt:
+        print("\n[bvr] interrupted")
+    finally:
+        model.save(os.path.join(args.save_dir, "latest"))
+        vec.close()
+
+
+if __name__ == "__main__":
+    main()
