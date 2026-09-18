@@ -354,7 +354,7 @@ select option{background:#050810}
           </div>
         </div>
 
-        <div class="row2">
+        <div class="row3">
           <div class="field">
             <div class="field-label">
               <span>AUTO-CURRICULUM</span>
@@ -368,11 +368,21 @@ select option{background:#050810}
           </div>
           <div class="field">
             <div class="field-label">
+              <span>MODEL NAME</span>
+              <button class="help-btn" onclick="help(this,'MODEL NAME',
+                'Name for the model file this run saves.\n\nThe final policy is written to:\n  models_bvr/<name>.zip\n\nLeave as "latest" to keep overwriting the default checkpoint, or give each run its own name (e.g. shooter_v2) to keep multiple trained models side by side.\n\nThis file — and the archive/best_* / archive/pre_* snapshots the curriculum saves along the way — is what shows up in RESUME FROM and CHECKPOINT TO LOAD once training finishes.')">?</button>
+            </div>
+            <input type="text" id="cfg-runname" placeholder="latest" value="latest">
+          </div>
+          <div class="field">
+            <div class="field-label">
               <span>RESUME FROM</span>
               <button class="help-btn" onclick="help(this,'RESUME CHECKPOINT',
-                'Continue training from a saved model instead of starting fresh.\n\nLeave blank to start from scratch (random policy).\n\nTo resume: type the path to a checkpoint file, for example:\n  models_bvr/latest\n  models_bvr/archive/best_STRAIGHT_0.82\n\nCheckpoints are saved automatically every ~500 steps into the models_bvr/ folder inside your BVR directory.')">?</button>
+                'Continue training from a saved model instead of starting fresh.\n\nLeave at "fresh start" to begin from a random policy.\n\nThe list is read live from your models_bvr/ folder — top-level saves (e.g. latest.zip) and archive/ snapshots (best_*, pre_*) both show up here.')">?</button>
             </div>
-            <input type="text" id="cfg-resume" placeholder="blank = fresh start">
+            <select id="cfg-resume">
+              <option value="">— fresh start —</option>
+            </select>
           </div>
         </div>
 
@@ -550,9 +560,11 @@ select option{background:#050810}
           <div class="field-label">
             <span>CHECKPOINT TO LOAD</span>
             <button class="help-btn" onclick="help(this,'CHECKPOINT TO LOAD',
-              'The saved model file to load for evaluation.\n\n• models_bvr/latest — the most recent auto-save (updated every ~500 steps)\n• models_bvr/archive/best_SHOOTER_0.72 — a specific best checkpoint\n• Leave blank — runs a random (untrained) policy\n\nCheckpoints are saved in models_bvr/ inside your BVR folder. You can evaluate during training — the file is only overwritten at save intervals so a partial read is safe.')">?</button>
+              'The saved model file to load for evaluation.\n\nThe list is read live from your models_bvr/ folder — the most recent save is pre-selected. Pick an archive/best_* or archive/pre_* snapshot to evaluate an earlier checkpoint instead.\n\nSelect "random / untrained policy" to run without a trained model.')">?</button>
           </div>
-          <input type="text" id="eval-ckpt" value="models_bvr/latest">
+          <select id="eval-ckpt">
+            <option value="">— random / untrained policy —</option>
+          </select>
         </div>
 
         <div class="btn-row">
@@ -653,6 +665,42 @@ function connect() {
 connect();
 function send(o) { if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
 
+// ─── Checkpoint dropdowns (RESUME FROM / CHECKPOINT TO LOAD) ──────
+function fmtSize(n) { return n>1e6 ? (n/1e6).toFixed(1)+'MB' : n>1e3 ? (n/1e3).toFixed(0)+'KB' : n+'B'; }
+function fmtAgo(mtime) {
+  const s = Math.max(0, Date.now()/1000 - mtime);
+  if (s<90) return 'just now';
+  if (s<3600) return Math.round(s/60)+'m ago';
+  if (s<86400) return Math.round(s/3600)+'h ago';
+  return Math.round(s/86400)+'d ago';
+}
+function populateModelSelect(sel, models, blankLabel, selectMostRecent) {
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = blankLabel;
+  sel.appendChild(blank);
+  for (const m of models) {
+    const o = document.createElement('option');
+    o.value = m.path;
+    o.textContent = `${m.path}  (${fmtSize(m.size)}, ${fmtAgo(m.mtime)})`;
+    sel.appendChild(o);
+  }
+  if (prev && models.some(m => m.path === prev)) sel.value = prev;
+  else if (selectMostRecent && models.length) sel.value = models[0].path;
+  else sel.value = '';
+}
+async function refreshModelList() {
+  let data;
+  try { data = await (await fetch('/models')).json(); }
+  catch (e) { return; }
+  const models = data.models || [];
+  populateModelSelect(document.getElementById('cfg-resume'), models, '— fresh start —', false);
+  populateModelSelect(document.getElementById('eval-ckpt'),  models, '— random / untrained policy —', true);
+}
+refreshModelList();
+
 // ─── App state ────────────────────────────────────────────────────
 let appState='idle', lastFrame=null, lastDecisions=[];
 // 3D camera orbit state
@@ -679,6 +727,7 @@ function handle(m) {
 }
 
 function setState(s, msg='') {
+  const prevState = appState;
   appState = s;
   const p = document.getElementById('state-pill');
   p.className = 'pill '+s; p.textContent = s.toUpperCase();
@@ -689,6 +738,10 @@ function setState(s, msg='') {
   document.getElementById('btn-stop-train').style.display = training ? ''     : 'none';
   document.getElementById('btn-eval').style.display       = eval_    ? 'none' : '';
   document.getElementById('btn-stop-eval').style.display  = eval_    ? ''     : 'none';
+  // A training run only writes its final model on exit, and eval-loaded
+  // checkpoints don't change the dir at all — refresh right when either one
+  // stops so a just-finished run's model shows up without a page reload.
+  if (s==='idle' && (prevState==='training' || prevState==='eval')) refreshModelList();
 }
 
 // ─── Log ─────────────────────────────────────────────────────────
@@ -984,6 +1037,7 @@ document.getElementById('btn-train').onclick=()=>{
   const batch=parseInt(document.getElementById('cfg-batch').value)||256;
   const curr=document.getElementById('cfg-curriculum').value==='1';
   const resume=document.getElementById('cfg-resume').value.trim();
+  const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   totalSteps=steps; epStartTime=Date.now(); epCount=0; stepsDone=0;
   logArr=[];
   // Clear all displays so old-run values don't mislead
@@ -1007,10 +1061,10 @@ document.getElementById('btn-train').onclick=()=>{
   ['straight','evasive','notcher','shooter','adaptive','self_play'].forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
-  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  γ=${gamma}  lr=${lr}`,'log-ok');
+  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
-    batch_size:batch,curriculum:curr,resume:resume||undefined}});
+    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{addLog('■ Stop requested...','log-warn');send({cmd:'stop_training'})};
 document.getElementById('btn-eval').onclick=()=>{

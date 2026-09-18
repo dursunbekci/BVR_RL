@@ -35,6 +35,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
@@ -44,6 +45,7 @@ import numpy as np
 HERE       = Path(__file__).parent
 METRICS_F  = HERE / "bvr_metrics.json"
 GUI_HTML   = HERE / "bvr_gui.html"
+MODEL_DIR  = HERE / "models_bvr"   # overwritten from --model-dir in main()
 
 RECORD_BUFFER_SIZE = 3000   # frames per recorded episode
 
@@ -119,8 +121,42 @@ class GUIHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+        elif self.path == "/models":
+            data = json.dumps(_list_models()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         else:
             self.send_error(404)
+
+
+def _list_models() -> dict:
+    """
+    Scan MODEL_DIR (recursively — checkpoints live both at the top level,
+    e.g. "latest.zip", and under "archive/") for saved SB3 checkpoints.
+    SB3's save() only appends ".zip" when the given path has no suffix at
+    all, so a name like "best_STRAIGHT_0.720" is written WITHOUT a .zip
+    extension — filtering by extension would silently drop it. Filtering by
+    zipfile.is_zipfile() catches every real checkpoint regardless of name.
+    """
+    items = []
+    root = Path(MODEL_DIR)
+    if root.is_dir():
+        for p in sorted(root.rglob("*")):
+            if not p.is_file():
+                continue
+            try:
+                if not zipfile.is_zipfile(p):
+                    continue
+                st = p.stat()
+            except OSError:
+                continue
+            items.append({"path": p.relative_to(root).as_posix(),
+                          "mtime": st.st_mtime, "size": st.st_size})
+    items.sort(key=lambda d: d["mtime"], reverse=True)
+    return {"models": items, "model_dir": str(root)}
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -149,7 +185,13 @@ class TrainingManager:
             "--batch-size", str(config.get("batch_size", 256)),
         ]
         if config.get("resume"):
-            cmd += ["--resume", config["resume"]]
+            # The GUI's dropdown sends a path relative to the model dir (as
+            # listed by /models, e.g. "latest.zip" or "archive/best_..."),
+            # not relative to this process's cwd — join it with the same
+            # model_dir this manager was constructed with.
+            cmd += ["--resume", os.path.join(self._model_dir, config["resume"])]
+        if config.get("run_name"):
+            cmd += ["--run-name", str(config["run_name"]).strip()]
         if not config.get("curriculum", True):
             cmd += ["--no-curriculum"]
         self._proc = subprocess.Popen(
@@ -223,13 +265,20 @@ class EvalRunner:
 
             model = None
             ckpt = config.get("checkpoint")
-            if ckpt and Path(ckpt).exists():
+            # The GUI's dropdown sends a path relative to the model dir (as
+            # listed by /models, e.g. "latest.zip" or "archive/best_..."),
+            # not relative to the process cwd — resolve it against the same
+            # model_dir this runner was constructed with.
+            ckpt_path = Path(self._model_dir) / ckpt if ckpt else None
+            if ckpt_path and ckpt_path.exists():
                 try:
                     from sb3_contrib import MaskablePPO
-                    model = MaskablePPO.load(ckpt, env=None)
-                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt}"})
+                    model = MaskablePPO.load(str(ckpt_path), env=None)
+                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt_path}"})
                 except Exception as e:
                     HUB.push({"type":"log","msg":f"Could not load checkpoint: {e}; using random policy"})
+            elif ckpt:
+                HUB.push({"type":"log","msg":f"Checkpoint not found: {ckpt_path}; using random policy"})
 
             HUB.set_status("eval", f"Eval vs {opponent_name}")
             episode = 0
@@ -445,13 +494,14 @@ async def run_ws(port: int):
 
 
 def main():
-    global TRAINING_MGR, EVAL_RUNNER
+    global TRAINING_MGR, EVAL_RUNNER, MODEL_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--port",      type=int, default=5006)
     ap.add_argument("--ws-port",   type=int, default=5010)
     ap.add_argument("--model-dir", type=str, default="models_bvr")
     args = ap.parse_args()
 
+    MODEL_DIR    = HERE / args.model_dir
     TRAINING_MGR = TrainingManager(args.model_dir)
     EVAL_RUNNER  = EvalRunner(args.model_dir)
 
