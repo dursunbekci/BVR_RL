@@ -35,6 +35,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
@@ -44,6 +45,7 @@ import numpy as np
 HERE       = Path(__file__).parent
 METRICS_F  = HERE / "bvr_metrics.json"
 GUI_HTML   = HERE / "bvr_gui.html"
+MODEL_DIR  = HERE / "models_bvr"   # overwritten from --model-dir in main()
 
 RECORD_BUFFER_SIZE = 3000   # frames per recorded episode
 
@@ -119,8 +121,42 @@ class GUIHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+        elif self.path == "/models":
+            data = json.dumps(_list_models()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         else:
             self.send_error(404)
+
+
+def _list_models() -> dict:
+    """
+    Scan MODEL_DIR (recursively — checkpoints live both at the top level,
+    e.g. "latest.zip", and under "archive/") for saved SB3 checkpoints.
+    SB3's save() only appends ".zip" when the given path has no suffix at
+    all, so a name like "best_STRAIGHT_0.720" is written WITHOUT a .zip
+    extension — filtering by extension would silently drop it. Filtering by
+    zipfile.is_zipfile() catches every real checkpoint regardless of name.
+    """
+    items = []
+    root = Path(MODEL_DIR)
+    if root.is_dir():
+        for p in sorted(root.rglob("*")):
+            if not p.is_file():
+                continue
+            try:
+                if not zipfile.is_zipfile(p):
+                    continue
+                st = p.stat()
+            except OSError:
+                continue
+            items.append({"path": p.relative_to(root).as_posix(),
+                          "mtime": st.st_mtime, "size": st.st_size})
+    items.sort(key=lambda d: d["mtime"], reverse=True)
+    return {"models": items, "model_dir": str(root)}
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -149,7 +185,13 @@ class TrainingManager:
             "--batch-size", str(config.get("batch_size", 256)),
         ]
         if config.get("resume"):
-            cmd += ["--resume", config["resume"]]
+            # The GUI's dropdown sends a path relative to the model dir (as
+            # listed by /models, e.g. "latest.zip" or "archive/best_..."),
+            # not relative to this process's cwd — join it with the same
+            # model_dir this manager was constructed with.
+            cmd += ["--resume", os.path.join(self._model_dir, config["resume"])]
+        if config.get("run_name"):
+            cmd += ["--run-name", str(config["run_name"]).strip()]
         if not config.get("curriculum", True):
             cmd += ["--no-curriculum"]
         self._proc = subprocess.Popen(
@@ -182,6 +224,66 @@ class TrainingManager:
 # ─────────────────────────────────────────────────────────────────────
 # Eval / visualisation runner
 # ─────────────────────────────────────────────────────────────────────
+# Every model this GUI can load was trained by train_bvr.py, which wraps the
+# vec env in VecFrameStack(n_stack=N_STACK) — the saved policy's actual input
+# is N_STACK stacked frames per key, not one. N_STACK is a module constant in
+# train_bvr.py (not a CLI flag), so it can't drift between a checkpoint and
+# this file without a code change on both sides.
+N_STACK = 8
+
+
+class FrameStacker:
+    """
+    Reproduces stable_baselines3.common.vec_env.stacked_observations.
+    StackedObservations for a single, non-vectorized env — verified
+    byte-for-byte identical to it (same seed, same action sequence, both
+    with and without a reset mid-sequence) before this was wired in.
+
+    EvalRunner drives BvrEnv directly, one frame at a time, so it can read
+    env._state for the telemetry websocket and control exactly when an
+    episode ends. Wrapping it in the real DummyVecEnv+VecFrameStack instead
+    would fight that: VecEnv auto-resets the underlying env the instant a
+    step returns done=True, so env._state would already belong to the NEXT
+    episode by the time this loop got to build the terminal frame or decide
+    to break. This class gets the same stacked observation without taking
+    stepping control away from the loop below.
+    """
+    def __init__(self, n_stack: int):
+        self.n_stack = n_stack
+        self._buf: dict = {}
+
+    def _ensure(self, key, dim, dtype):
+        cur = self._buf.get(key)
+        if cur is None or cur.shape[0] != dim * self.n_stack:
+            self._buf[key] = np.zeros(dim * self.n_stack, dtype=dtype)
+
+    def reset(self, obs):
+        if isinstance(obs, dict):
+            return {k: self._reset_one(k, v) for k, v in obs.items()}
+        return self._reset_one("__box__", obs)
+
+    def _reset_one(self, key, arr):
+        arr = np.asarray(arr)
+        self._ensure(key, arr.shape[0], arr.dtype)
+        buf = self._buf[key]
+        buf[:] = 0
+        buf[-arr.shape[0]:] = arr
+        return buf.copy()
+
+    def update(self, obs):
+        if isinstance(obs, dict):
+            return {k: self._update_one(k, v) for k, v in obs.items()}
+        return self._update_one("__box__", obs)
+
+    def _update_one(self, key, arr):
+        arr = np.asarray(arr)
+        dim = arr.shape[0]
+        buf = self._buf[key]
+        buf[:] = np.roll(buf, -dim)
+        buf[-dim:] = arr
+        return buf.copy()
+
+
 class EvalRunner:
     def __init__(self, model_dir="models_bvr"):
         self._model_dir = model_dir
@@ -212,36 +314,57 @@ class EvalRunner:
             from bvr_opponents import BvrOpponentType
             opponent_name = config.get("opponent", "STRAIGHT").upper()
             opponent = BvrOpponentType[opponent_name]
+
+            # Load the checkpoint FIRST — env construction below needs to know
+            # whether this model was trained with the privileged (Dict, "obs"
+            # + "priv") observation space or not, and building the env with
+            # the wrong one is exactly what used to blow up inside
+            # model.predict() with an opaque numpy IndexError: the policy's
+            # own observation_space is a Dict, obs[key] on a plain Box array
+            # is not valid indexing, and that's the whole error.
+            model = None
+            stacker = None
+            privileged = False
+            ckpt = config.get("checkpoint")
+            # The GUI's dropdown sends a path relative to the model dir (as
+            # listed by /models, e.g. "latest.zip" or "archive/best_..."),
+            # not relative to the process cwd — resolve it against the same
+            # model_dir this runner was constructed with.
+            ckpt_path = Path(self._model_dir) / ckpt if ckpt else None
+            if ckpt_path and ckpt_path.exists():
+                try:
+                    from sb3_contrib import MaskablePPO
+                    from gymnasium import spaces
+                    model = MaskablePPO.load(str(ckpt_path), env=None)
+                    privileged = isinstance(model.observation_space, spaces.Dict)
+                    stacker = FrameStacker(N_STACK)
+                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt_path}"})
+                except Exception as e:
+                    HUB.push({"type":"log","msg":f"Could not load checkpoint: {e}; using random policy"})
+            elif ckpt:
+                HUB.push({"type":"log","msg":f"Checkpoint not found: {ckpt_path}; using random policy"})
+
             # Use the same calibrated Rmax/Rnez table training used (see
             # sweep_envelope.py) — evaluating against a different envelope
             # than the one trained on silently invalidates every launch
             # decision in this GUI's HUD.
             envelope_table = "envelope.npz" if os.path.exists("envelope.npz") else None
             env = BvrEnv(opponent_type=opponent, seed=config.get("seed", 0),
-                         privileged_critic=False, gamma_discount=0.997,
+                         privileged_critic=privileged, gamma_discount=0.997,
                          envelope_table=envelope_table)
-
-            model = None
-            ckpt = config.get("checkpoint")
-            if ckpt and Path(ckpt).exists():
-                try:
-                    from sb3_contrib import MaskablePPO
-                    model = MaskablePPO.load(ckpt, env=None)
-                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt}"})
-                except Exception as e:
-                    HUB.push({"type":"log","msg":f"Could not load checkpoint: {e}; using random policy"})
 
             HUB.set_status("eval", f"Eval vs {opponent_name}")
             episode = 0
             while not self._stop_evt.is_set():
                 obs, info = env.reset()
+                sobs = stacker.reset(obs) if stacker else None
                 frames = []
                 ep_r = 0.0
                 while not self._stop_evt.is_set():
                     # action
                     if model is not None:
                         mask = env.action_masks()
-                        action, _ = model.predict(obs, deterministic=True,
+                        action, _ = model.predict(sobs, deterministic=True,
                                                   action_masks=mask)
                     else:
                         action = env.action_space.sample()
@@ -249,6 +372,7 @@ class EvalRunner:
 
                     _t0 = time.perf_counter()
                     obs, r, done, trunc, step_info = env.step(action)
+                    sobs = stacker.update(obs) if stacker else None
                     _step_ms = time.perf_counter() - _t0
                     ep_r += r
                     s = env._state
@@ -445,13 +569,14 @@ async def run_ws(port: int):
 
 
 def main():
-    global TRAINING_MGR, EVAL_RUNNER
+    global TRAINING_MGR, EVAL_RUNNER, MODEL_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--port",      type=int, default=5006)
     ap.add_argument("--ws-port",   type=int, default=5010)
     ap.add_argument("--model-dir", type=str, default="models_bvr")
     args = ap.parse_args()
 
+    MODEL_DIR    = HERE / args.model_dir
     TRAINING_MGR = TrainingManager(args.model_dir)
     EVAL_RUNNER  = EvalRunner(args.model_dir)
 

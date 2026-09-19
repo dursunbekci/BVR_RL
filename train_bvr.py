@@ -247,6 +247,9 @@ def main():
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
     ap.add_argument("--save-dir", type=str, default="models_bvr")
+    ap.add_argument("--run-name", type=str, default="latest",
+                     help="Base filename (no .zip) the final model is saved "
+                          "as inside --save-dir, e.g. models_bvr/<run-name>.zip")
     ap.add_argument("--gamma", type=float, default=0.997)
     ap.add_argument("--lr",    type=float, default=2.5e-4)
     ap.add_argument("--batch-size", type=int, default=256)
@@ -308,7 +311,9 @@ def main():
     except KeyboardInterrupt:
         print("\n[bvr] interrupted")
     finally:
-        model.save(os.path.join(args.save_dir, "latest"))
+        run_name = os.path.basename(args.run_name.strip()) or "latest"
+        model.save(os.path.join(args.save_dir, run_name))
+        print(f"[bvr] saved final model to {os.path.join(args.save_dir, run_name)}.zip")
         vec.close()
 
 

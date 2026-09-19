@@ -34,7 +34,23 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 .panel{background:var(--panel);border:1px solid var(--border);display:flex;flex-direction:column}
 .ph{font-size:11px;letter-spacing:2px;color:var(--blue);padding:5px 12px;
     border-bottom:1px solid var(--border);background:#080c14;display:flex;
-    align-items:center;justify-content:space-between;flex-shrink:0;font-weight:bold}
+    align-items:center;justify-content:space-between;flex-shrink:0;font-weight:bold;gap:10px}
+.ph-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.ph-toggle{cursor:pointer;background:none;border:1px solid var(--border);color:var(--blue);
+    font-size:10px;line-height:1;padding:3px 7px;border-radius:2px;flex-shrink:0;
+    font-family:inherit;letter-spacing:0}
+.ph-toggle:hover{filter:brightness(1.4);border-color:var(--blue)}
+/* Collapsed panel keeps just its header bar. Sizing is NOT done with CSS
+   flex-grow/max-height/display toggling here — layoutLeftCol() (see script)
+   sets each panel's height as an explicit pixel flex-basis instead. Every
+   variant of "change a size-affecting property on this panel, then change
+   it back" (flex-grow, max-height, even plain display:none) was tested in
+   isolation and left the panel's box stuck at the collapsed size even
+   though its computed style read back correctly — a real layout-engine
+   bug, not a specificity or timing issue. Explicit pixel heights sidestep
+   the browser's flex redistribution entirely, so there's nothing for that
+   bug to get stuck on. */
+.panel.collapsed>*:not(.ph){display:none}
 canvas{display:block;flex:1}
 
 /* SECTIONS */
@@ -192,6 +208,9 @@ select option{background:#050810}
        cursor:pointer}
 .t3lgr{display:flex;align-items:flex-start;gap:6px}
 .t3lgr i{width:11px;height:3px;border-radius:1px;flex-shrink:0;display:inline-block;margin-top:6px}
+.t3lgr.ck{cursor:pointer;border-radius:2px;margin:0 -4px;padding:2px 4px}
+.t3lgr.ck:hover{background:rgba(60,110,170,.18);color:#eef6ff}
+.t3lgr.ck input{flex-shrink:0;width:12px;height:12px;margin-top:4px;cursor:pointer;accent-color:#3a9fff}
 #t3-legend-pill{position:absolute;right:8px;bottom:8px;display:none;pointer-events:auto;
        font-family:inherit;font-size:10px;font-weight:bold;letter-spacing:1px;padding:4px 10px;
        cursor:pointer;border-radius:2px;background:rgba(8,14,26,.8);color:#9dc4e8;
@@ -203,18 +222,18 @@ select option{background:#050810}
 
 /* floating labels */
 #t3-labels{position:absolute;inset:0}
-.t3lbl{position:absolute;left:0;top:0;white-space:nowrap;font-size:10px;line-height:1.35;
-       padding:2px 6px;border-radius:2px;background:rgba(6,10,18,.72);
+.t3lbl{position:absolute;left:0;top:0;white-space:nowrap;font-size:11px;line-height:1.45;
+       padding:3px 7px;border-radius:2px;background:rgba(6,10,18,.8);
        border-left:2px solid #888;color:#eef6ff;pointer-events:none;
        transition:opacity .12s;will-change:transform;text-shadow:0 1px 2px #000}
-.t3lbl .sub{color:#9dc4e8;font-size:9px}
+.t3lbl .sub{color:#ffe9a8;font-size:10.5px;font-weight:bold}
 .t3lbl.blue{border-left-color:#37c8ff}
 .t3lbl.red {border-left-color:#ff4d54}
 .t3lbl.mid {border-left-color:transparent;background:rgba(6,10,18,.62);
             color:#cfe2ef;transform-origin:center;font-weight:bold;letter-spacing:.5px}
-.t3lbl.grn {border-left-color:#39ff9e;color:#39ff9e;font-size:9px;padding:1px 4px}
-.t3lbl.amb {border-left-color:#ffb020;color:#ffb020;font-size:9px;padding:1px 4px}
-.t3lbl.red2{border-left-color:#ff4d54;color:#ff8a8f;font-size:9px;padding:1px 4px}
+.t3lbl.grn {border-left-color:#39ff9e;color:#39ff9e;font-size:10.5px;font-weight:bold;padding:2px 5px}
+.t3lbl.amb {border-left-color:#ffb020;color:#ffb020;font-size:10.5px;font-weight:bold;padding:2px 5px}
+.t3lbl.red2{border-left-color:#ff4d54;color:#ff8a8f;font-size:10.5px;font-weight:bold;padding:2px 5px}
 .t3lbl.hot {background:rgba(0,60,55,.85);border-left-color:#22ffdd;color:#22ffdd;
             animation:t3pulse .7s ease-in-out infinite}
 @keyframes t3pulse{0%,100%{opacity:1}50%{opacity:.45}}
@@ -265,12 +284,21 @@ select option{background:#050810}
 
   <!-- LEFT: canvases -->
   <div id="left-col">
-    <div class="panel" style="flex:3">
-      <div class="ph"><span>TACTICAL VIEW</span><span id="tac-info" style="font-size:11px;color:var(--text)"></span></div>
+    <div class="panel" id="panel-tac" style="flex:3">
+      <div class="ph">
+        <span>TACTICAL VIEW</span>
+        <span class="ph-right">
+          <span id="tac-info" style="font-size:11px;color:var(--text)"></span>
+          <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+        </span>
+      </div>
       <div id="cv-tac" style="position:relative;overflow:hidden"></div>
     </div>
-    <div class="panel" style="flex:1">
-      <div class="ph"><span>ALTITUDE PROFILE</span></div>
+    <div class="panel" id="panel-alt" style="flex:1">
+      <div class="ph">
+        <span>ALTITUDE PROFILE</span>
+        <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+      </div>
       <canvas id="cv-alt"></canvas>
     </div>
   </div>
@@ -354,7 +382,7 @@ select option{background:#050810}
           </div>
         </div>
 
-        <div class="row2">
+        <div class="row3">
           <div class="field">
             <div class="field-label">
               <span>AUTO-CURRICULUM</span>
@@ -368,11 +396,21 @@ select option{background:#050810}
           </div>
           <div class="field">
             <div class="field-label">
+              <span>MODEL NAME</span>
+              <button class="help-btn" onclick="help(this,'MODEL NAME',
+                'Name for the model file this run saves.\n\nThe final policy is written to:\n  models_bvr/<name>.zip\n\nLeave as "latest" to keep overwriting the default checkpoint, or give each run its own name (e.g. shooter_v2) to keep multiple trained models side by side.\n\nThis file — and the archive/best_* / archive/pre_* snapshots the curriculum saves along the way — is what shows up in RESUME FROM and CHECKPOINT TO LOAD once training finishes.')">?</button>
+            </div>
+            <input type="text" id="cfg-runname" placeholder="latest" value="latest">
+          </div>
+          <div class="field">
+            <div class="field-label">
               <span>RESUME FROM</span>
               <button class="help-btn" onclick="help(this,'RESUME CHECKPOINT',
-                'Continue training from a saved model instead of starting fresh.\n\nLeave blank to start from scratch (random policy).\n\nTo resume: type the path to a checkpoint file, for example:\n  models_bvr/latest\n  models_bvr/archive/best_STRAIGHT_0.82\n\nCheckpoints are saved automatically every ~500 steps into the models_bvr/ folder inside your BVR directory.')">?</button>
+                'Continue training from a saved model instead of starting fresh.\n\nLeave at "fresh start" to begin from a random policy.\n\nThe list is read live from your models_bvr/ folder — top-level saves (e.g. latest.zip) and archive/ snapshots (best_*, pre_*) both show up here.')">?</button>
             </div>
-            <input type="text" id="cfg-resume" placeholder="blank = fresh start">
+            <select id="cfg-resume">
+              <option value="">— fresh start —</option>
+            </select>
           </div>
         </div>
 
@@ -550,9 +588,11 @@ select option{background:#050810}
           <div class="field-label">
             <span>CHECKPOINT TO LOAD</span>
             <button class="help-btn" onclick="help(this,'CHECKPOINT TO LOAD',
-              'The saved model file to load for evaluation.\n\n• models_bvr/latest — the most recent auto-save (updated every ~500 steps)\n• models_bvr/archive/best_SHOOTER_0.72 — a specific best checkpoint\n• Leave blank — runs a random (untrained) policy\n\nCheckpoints are saved in models_bvr/ inside your BVR folder. You can evaluate during training — the file is only overwritten at save intervals so a partial read is safe.')">?</button>
+              'The saved model file to load for evaluation.\n\nThe list is read live from your models_bvr/ folder — the most recent save is pre-selected. Pick an archive/best_* or archive/pre_* snapshot to evaluate an earlier checkpoint instead.\n\nSelect "random / untrained policy" to run without a trained model.')">?</button>
           </div>
-          <input type="text" id="eval-ckpt" value="models_bvr/latest">
+          <select id="eval-ckpt">
+            <option value="">— random / untrained policy —</option>
+          </select>
         </div>
 
         <div class="btn-row">
@@ -653,6 +693,42 @@ function connect() {
 connect();
 function send(o) { if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
 
+// ─── Checkpoint dropdowns (RESUME FROM / CHECKPOINT TO LOAD) ──────
+function fmtSize(n) { return n>1e6 ? (n/1e6).toFixed(1)+'MB' : n>1e3 ? (n/1e3).toFixed(0)+'KB' : n+'B'; }
+function fmtAgo(mtime) {
+  const s = Math.max(0, Date.now()/1000 - mtime);
+  if (s<90) return 'just now';
+  if (s<3600) return Math.round(s/60)+'m ago';
+  if (s<86400) return Math.round(s/3600)+'h ago';
+  return Math.round(s/86400)+'d ago';
+}
+function populateModelSelect(sel, models, blankLabel, selectMostRecent) {
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = blankLabel;
+  sel.appendChild(blank);
+  for (const m of models) {
+    const o = document.createElement('option');
+    o.value = m.path;
+    o.textContent = `${m.path}  (${fmtSize(m.size)}, ${fmtAgo(m.mtime)})`;
+    sel.appendChild(o);
+  }
+  if (prev && models.some(m => m.path === prev)) sel.value = prev;
+  else if (selectMostRecent && models.length) sel.value = models[0].path;
+  else sel.value = '';
+}
+async function refreshModelList() {
+  let data;
+  try { data = await (await fetch('/models')).json(); }
+  catch (e) { return; }
+  const models = data.models || [];
+  populateModelSelect(document.getElementById('cfg-resume'), models, '— fresh start —', false);
+  populateModelSelect(document.getElementById('eval-ckpt'),  models, '— random / untrained policy —', true);
+}
+refreshModelList();
+
 // ─── App state ────────────────────────────────────────────────────
 let appState='idle', lastFrame=null, lastDecisions=[];
 // 3D camera orbit state
@@ -679,6 +755,7 @@ function handle(m) {
 }
 
 function setState(s, msg='') {
+  const prevState = appState;
   appState = s;
   const p = document.getElementById('state-pill');
   p.className = 'pill '+s; p.textContent = s.toUpperCase();
@@ -689,6 +766,10 @@ function setState(s, msg='') {
   document.getElementById('btn-stop-train').style.display = training ? ''     : 'none';
   document.getElementById('btn-eval').style.display       = eval_    ? 'none' : '';
   document.getElementById('btn-stop-eval').style.display  = eval_    ? ''     : 'none';
+  // A training run only writes its final model on exit, and eval-loaded
+  // checkpoints don't change the dir at all — refresh right when either one
+  // stops so a just-finished run's model shows up without a page reload.
+  if (s==='idle' && (prevState==='training' || prevState==='eval')) refreshModelList();
 }
 
 // ─── Log ─────────────────────────────────────────────────────────
@@ -984,6 +1065,7 @@ document.getElementById('btn-train').onclick=()=>{
   const batch=parseInt(document.getElementById('cfg-batch').value)||256;
   const curr=document.getElementById('cfg-curriculum').value==='1';
   const resume=document.getElementById('cfg-resume').value.trim();
+  const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   totalSteps=steps; epStartTime=Date.now(); epCount=0; stepsDone=0;
   logArr=[];
   // Clear all displays so old-run values don't mislead
@@ -1007,10 +1089,10 @@ document.getElementById('btn-train').onclick=()=>{
   ['straight','evasive','notcher','shooter','adaptive','self_play'].forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
-  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  γ=${gamma}  lr=${lr}`,'log-ok');
+  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
-    batch_size:batch,curriculum:curr,resume:resume||undefined}});
+    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{addLog('■ Stop requested...','log-warn');send({cmd:'stop_training'})};
 document.getElementById('btn-eval').onclick=()=>{
@@ -1070,12 +1152,67 @@ function toggle(h){
   b.classList.toggle('collapsed');a.textContent=b.classList.contains('collapsed')?'▼':'▲';
 }
 
+// Left-column panels (TACTICAL VIEW / ALTITUDE PROFILE) collapse to just
+// their header bar, so training — which never looks at either — can get
+// that screen space back without losing the panel entirely.
+function panelToggle(btn){
+  const panel = btn.closest('.panel');
+  const collapsed = panel.classList.toggle('collapsed');
+  btn.textContent = (collapsed ? '▼ SHOW' : '▲ HIDE');
+  btn.title = collapsed ? 'Show this panel again' : 'Hide this panel to reclaim screen space';
+  resize();
+}
+
+// TACTICAL VIEW gets 3 parts of #left-col's height to ALTITUDE PROFILE's 1
+// (matching their original flex:3 / flex:1) — but layoutLeftCol() below
+// assigns that split as an explicit pixel flex-basis on each panel rather
+// than leaving the browser to redistribute flex-grow on its own. Every
+// size-affecting toggle tried instead (flex-grow, max-height, even plain
+// display:none on the whole panel) left the panel's box stuck at whatever
+// size it had when collapsed, even after being restored to its original
+// value and even across a forced reflow — a real layout-engine bug in this
+// environment, not a specificity or timing issue. Explicit pixel heights,
+// recomputed fresh on every toggle and on window resize, never ask the
+// browser to redistribute anything, so there's nothing for that bug to
+// catch on.
+const LEFT_PANEL_WEIGHT = {'panel-tac':3, 'panel-alt':1};
+const LEFT_PANEL_COLLAPSED_H = 33;   // matches .ph's rendered height
+function layoutLeftCol(){
+  const left = document.getElementById('left-col');
+  if(!left) return;
+  const panels = Array.from(left.querySelectorAll('.panel'));
+  if(!panels.length) return;
+  const cs = getComputedStyle(left);
+  const gap = parseFloat(cs.rowGap||cs.gap)||0;
+  const padV = (parseFloat(cs.paddingTop)||0) + (parseFloat(cs.paddingBottom)||0);
+  let avail = left.clientHeight - padV - gap*(panels.length-1);
+  const collapsed = panels.filter(p=>p.classList.contains('collapsed'));
+  const expanded  = panels.filter(p=>!p.classList.contains('collapsed'));
+  avail -= collapsed.length * LEFT_PANEL_COLLAPSED_H;
+  const totalWeight = expanded.reduce((s,p)=>s+(LEFT_PANEL_WEIGHT[p.id]||1),0) || 1;
+  panels.forEach(p=>{
+    const h = p.classList.contains('collapsed')
+      ? LEFT_PANEL_COLLAPSED_H
+      : Math.max(60, avail*(LEFT_PANEL_WEIGHT[p.id]||1)/totalWeight);
+    // flex-basis is what's stuck (see the comment above): shrinking a panel
+    // back down through the "flex" shorthand doesn't take even though its
+    // computed style reads back correctly. flex is pinned to a plain
+    // 0 0 auto once and never touched again; plain `height` — verified in
+    // isolation to grow AND shrink correctly every time — does the sizing.
+    p.style.flex = '0 0 auto';
+    p.style.height = h.toFixed(1)+'px';
+  });
+}
+
 // Resize
 function resize(){
-  // Three.js renderer resize
+  layoutLeftCol();
+  // Three.js renderer resize. Guard against a 0-height box (the tactical
+  // panel collapsed, or not laid out yet) — an aspect of Infinity/NaN would
+  // otherwise get baked into the camera and produce a broken view on expand.
   if(T3.init && T3.rdr){
     const c=document.getElementById('cv-tac');
-    if(c && T3.cam){
+    if(c && T3.cam && c.clientWidth>0 && c.clientHeight>0){
       T3.W=c.clientWidth; T3.H=c.clientHeight;      // label projection needs these
       T3.rdr.setSize(T3.W,T3.H);
       T3.cam.aspect=T3.W/T3.H; T3.cam.updateProjectionMatrix();
@@ -1126,6 +1263,7 @@ const T3 = {
   follow:'fit',        // 'fit' | 'blue' | 'red' | 'free'
   autoFit:true,
   showRings:true, showLabels:true, showTrails:true, showGrid:true,
+  showBlue:true, showRed:true, showMslBlue:true, showMslRed:true, showLinks:true,
   labels:{}, seen:new Set(),
   zx:1,                // altitude exaggeration (1/3/6) — see the ALT chip
 
@@ -1467,6 +1605,11 @@ function t3Sync(){
   document.querySelectorAll('#t3-toggles .t3chip').forEach(c=>{
     const k=c.dataset.t; if(k) c.classList.toggle('on', !!T3[k]);
   });
+  // The legend's RINGS checkbox shares T3.showRings with the RINGS chip
+  // above (and the G keyboard shortcut) — keep it mirrored either way.
+  document.querySelectorAll('#t3-legend input[data-t3show]').forEach(cb=>{
+    cb.checked = !!T3[cb.dataset.t3show];
+  });
 }
 
 // ── controls ───────────────────────────────────────────────────────
@@ -1483,7 +1626,12 @@ function t3Controls(el, box){
     const dx=e.clientX-T3.lx, dy=e.clientY-T3.ly;
     T3.lx=e.clientX; T3.ly=e.clientY;
     if(T3.drag===1){
-      T3.theta -= dx*0.008;
+      // Orbit theta is the compass BEARING FROM the target TO the camera (see
+      // t3UpdateCam). Chasing BLUE from behind, dragging left must swing the
+      // camera to BLUE's right side, not its left — verified against
+      // t3UpdateCam's sin/cos convention. += on dx is the direction that
+      // does that (a -= here is the inverted-feeling drag).
+      T3.theta += dx*0.008;
       T3.phi = Math.max(0.03, Math.min(1.50, T3.phi - dy*0.006));
     } else {                                    // right-drag = pan, drops to free cam
       const right=new THREE.Vector3().setFromMatrixColumn(T3.cam.matrixWorld,0);
@@ -1532,7 +1680,7 @@ function t3Controls(el, box){
       return;
     }
     if(T3.drag!==1 || e.touches.length!==1) return;
-    T3.theta -= (e.touches[0].clientX-T3.lx)*0.010;
+    T3.theta += (e.touches[0].clientX-T3.lx)*0.010;   // same fix as the mouse handler above
     T3.phi = Math.max(0.03,Math.min(1.50,T3.phi-(e.touches[0].clientY-T3.ly)*0.008));
     T3.lx=e.touches[0].clientX; T3.ly=e.touches[0].clientY;
   },{passive:false});
@@ -1590,13 +1738,14 @@ function t3BuildOverlay(box){
     </div>
     <div id="t3-legend">
       <div class="t3lgh" id="t3-lgh">LEGEND <span style="float:right;opacity:.6">hide &times;</span></div>
-      <div class="t3lgr"><i style="background:#37c8ff"></i>BLUE — the agent</div>
-      <div class="t3lgr"><i style="background:#ff4d54"></i>RED — bandit</div>
-      <div class="t3lgr"><i style="background:#ffdd22"></i>Blue missile in flight</div>
-      <div class="t3lgr"><i style="background:#ff5566"></i>Red missile (inbound)</div>
+      <div style="font-size:9px;opacity:.6;letter-spacing:.5px;margin:-2px 0 3px">checkbox = show/hide on the 3D view</div>
+      <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showBlue"><i style="background:#37c8ff"></i>BLUE — the agent</label>
+      <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showRed"><i style="background:#ff4d54"></i>RED — bandit</label>
+      <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showMslBlue"><i style="background:#ffdd22"></i>Blue missile in flight</label>
+      <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showMslRed"><i style="background:#ff5566"></i>Red missile (inbound)</label>
       <div class="t3lgr"><i style="background:#22ffdd"></i>Seeker active — pitbull, no support needed</div>
-      <div class="t3lgr"><i class="dash" style="background:#ffb020"></i>Datalink support link (blue must keep the track)</div>
-      <div class="t3lgr"><i class="ring" style="border-color:#39ff9e"></i>Blue Rmax &nbsp;<i class="ring" style="border-color:#ffb020"></i>NEZ &nbsp;<i class="ring" style="border-color:#ff4d54"></i>Red Rmax</div>
+      <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showLinks"><i class="dash" style="background:#ffb020"></i>Datalink support link (blue must keep the track)</label>
+      <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showRings"><i class="ring" style="border-color:#39ff9e"></i>Blue Rmax &nbsp;<i class="ring" style="border-color:#ffb020"></i>NEZ &nbsp;<i class="ring" style="border-color:#ff4d54"></i>Red Rmax</label>
       <div class="t3lgr" style="opacity:.75;margin-top:6px">
         <b>ALT &times;N</b> stretches altitude only — range and bearing stay true.<br>
         drag orbit · right-drag pan · wheel zoom · click a jet to follow<br>
@@ -1624,6 +1773,8 @@ function t3BuildOverlay(box){
   o.querySelector('#t3-zx').addEventListener('click',t3CycleZx);
   o.querySelector('#t3-lgh').addEventListener('click',t3Legend);
   o.querySelector('#t3-legend-pill').addEventListener('click',t3Legend);
+  o.querySelectorAll('#t3-legend input[data-t3show]').forEach(cb=>
+    cb.addEventListener('change',()=>{ T3[cb.dataset.t3show]=cb.checked; t3Sync(); }));
 }
 
 function t3Label(key, cls){
@@ -1732,13 +1883,21 @@ function t3DrawFrame(A,B,t){
   t3Orient(T3.jet1, own[0],own[1],ZX(own[2]), psi,  theta,  phi,  jetS);
   t3Orient(T3.jet2, tgt[0],tgt[1],ZX(tgt[2]), psi_t,theta_t,phi_t,jetS);
 
+  // legend checkboxes: BLUE/RED gate the jet plus everything that belongs to
+  // it — trail, ground track, shadow, altitude stalk.
+  T3.jet1.visible = T3.tr1.line.visible = T3.gt1.line.visible
+                   = T3.shadow1.visible = T3.stalk1.visible = T3.showBlue;
+  T3.jet2.visible = T3.tr2.line.visible = T3.gt2.line.visible
+                   = T3.shadow2.visible = T3.stalk2.visible = T3.showRed;
+
   // ground shadow + altitude stalk — the depth cue that makes 3D readable
   T3.shadow1.position.set(own[0],own[1],6); T3.shadow1.scale.setScalar(jetS*0.38);
   T3.shadow2.position.set(tgt[0],tgt[1],6); T3.shadow2.scale.setScalar(jetS*0.38);
   t3Stalk(T3.stalk1, own[0],own[1],own[2]);
   t3Stalk(T3.stalk2, tgt[0],tgt[1],tgt[2]);
 
-  // line of sight
+  // line of sight — only means something with both ends actually on screen
+  T3.los.visible = T3.showBlue && T3.showRed;
   const lp=T3.los.geometry.attributes.position.array;
   lp[0]=own[0];lp[1]=own[1];lp[2]=ZX(own[2]); lp[3]=tgt[0];lp[4]=tgt[1];lp[5]=ZX(tgt[2]);
   T3.los.geometry.attributes.position.needsUpdate=true;
@@ -1766,12 +1925,16 @@ function t3DrawFrame(A,B,t){
     mo.mesh.userData.mat.color.setHex(hot);
     mo.stalk.material.color.setHex(hot);
     t3Stalk(mo.stalk, pos[0],pos[1],pos[2]);
+    const showMsl = m.owner===1 ? T3.showMslBlue : T3.showMslRed;
+    mo.mesh.visible = mo.trail.line.visible = mo.stalk.visible = showMsl;
 
     if(m.owner===2){ inbound++;
       if(m.tgo>0 && m.tgo<900 && (nearestTgo==null || m.tgo<nearestTgo)) nearestTgo=m.tgo; }
 
-    // datalink support: while the missile is blind it is flying on BLUE's track
-    if(m.owner===1 && m.needs_support && !m.seeker_active && linkN<T3.links.length){
+    // datalink support: while the missile is blind it is flying on BLUE's track.
+    // Gated on showMsl too — a link dangling to a missile you've hidden looks
+    // like a stray line, not a control.
+    if(T3.showLinks && showMsl && m.owner===1 && m.needs_support && !m.seeker_active && linkN<T3.links.length){
       const L=T3.links[linkN++];
       const p=L.geometry.attributes.position.array;
       p[0]=own[0];p[1]=own[1];p[2]=ZX(own[2]); p[3]=pos[0];p[4]=pos[1];p[5]=ZX(pos[2]);
@@ -1781,7 +1944,7 @@ function t3DrawFrame(A,B,t){
       L.visible=true;
     }
 
-    if(T3.showLabels){
+    if(T3.showLabels && showMsl){
       const el=t3Label('m'+m.id, m.owner===1?'blue':'red');
       // tgo reads 999 until the missile has a usable solution — don't print that
       const ttg = (m.tgo>0 && m.tgo<900) ? ' · TTG '+m.tgo.toFixed(0)+'s' : '';
@@ -1800,18 +1963,25 @@ function t3DrawFrame(A,B,t){
 
   // ── aircraft labels ──
   if(T3.showLabels){
-    const l1=t3Label('ac1','blue');
-    l1.innerHTML = `<b>BLUE</b> ${(own[2]/1000).toFixed(1)}km · M${(B.mach||0).toFixed(2)}`
-                 + `<br><span class="sub">${(B.nz||1).toFixed(1)}G · ${B.wpn} msl</span>`;
-    t3PlaceLabel(l1, own[0],own[1],own[2], 16, -34);
-    const l2=t3Label('ac2','red');
-    l2.innerHTML = `<b>RED</b> ${(tgt[2]/1000).toFixed(1)}km · M${(B.mach_t||0).toFixed(2)}`
-                 + `<br><span class="sub">${(B.nz_t||1).toFixed(1)}G · ${B.wpn_t} msl</span>`;
-    t3PlaceLabel(l2, tgt[0],tgt[1],tgt[2], 16, -34);
-    // range read-out sitting on the LOS midpoint
-    const lr=t3Label('rng','mid');
-    lr.textContent = (B.rng/1000).toFixed(1)+' km  '+(B.clos>=0?'+':'')+B.clos.toFixed(0)+' m/s';
-    t3PlaceLabel(lr,(own[0]+tgt[0])/2,(own[1]+tgt[1])/2,(own[2]+tgt[2])/2, 0, -14);
+    if(T3.showBlue){
+      const l1=t3Label('ac1','blue');
+      l1.innerHTML = `<b>BLUE</b> ${(own[2]/1000).toFixed(1)}km · M${(B.mach||0).toFixed(2)}`
+                   + `<br><span class="sub">${(B.nz||1).toFixed(1)}G · ${B.wpn} msl</span>`;
+      t3PlaceLabel(l1, own[0],own[1],own[2], 16, -34);
+    }
+    if(T3.showRed){
+      const l2=t3Label('ac2','red');
+      l2.innerHTML = `<b>RED</b> ${(tgt[2]/1000).toFixed(1)}km · M${(B.mach_t||0).toFixed(2)}`
+                   + `<br><span class="sub">${(B.nz_t||1).toFixed(1)}G · ${B.wpn_t} msl</span>`;
+      t3PlaceLabel(l2, tgt[0],tgt[1],tgt[2], 16, -34);
+    }
+    // range read-out sitting on the LOS midpoint — only means something with
+    // both ends actually on screen (matches T3.los.visible above)
+    if(T3.showBlue && T3.showRed){
+      const lr=t3Label('rng','mid');
+      lr.textContent = (B.rng/1000).toFixed(1)+' km  '+(B.clos>=0?'+':'')+B.clos.toFixed(0)+' m/s';
+      t3PlaceLabel(lr,(own[0]+tgt[0])/2,(own[1]+tgt[1])/2,(own[2]+tgt[2])/2, 0, -14);
+    }
     // ring callouts, placed on the side of the ring facing the bandit
     if(T3.showRings){
       const ux=tgt[0]-own[0], uy=tgt[1]-own[1], un=Math.hypot(ux,uy)||1;
