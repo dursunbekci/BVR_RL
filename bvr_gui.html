@@ -25,10 +25,19 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 
 /* MAIN LAYOUT */
 #main{display:flex;flex:1;overflow:hidden}
-#left-col{display:flex;flex-direction:column;flex:1;min-width:0;gap:3px;padding:4px 2px 4px 4px}
-#right-col{width:360px;flex-shrink:0;overflow-y:auto;display:flex;flex-direction:column;
+#left-col{display:flex;flex-direction:column;min-width:0;gap:0;padding:4px 2px 4px 4px}
+#right-col{overflow-y:auto;display:flex;flex-direction:column;
            gap:3px;padding:4px 4px 4px 2px;scrollbar-width:thin;
            scrollbar-color:var(--border) var(--bg)}
+
+/* SPLITTERS — drag to resize. Both are a plain, never-dynamically-toggled
+   flex-basis (6px), so they're unaffected by the flex-basis bug documented
+   on .panel.collapsed below; the panels either side of them are sized by
+   JS via plain `height`/`width`, not flex, for the same reason. */
+.vsplit{flex:0 0 6px;height:6px;cursor:row-resize;background:var(--border)}
+.vsplit:hover,.vsplit.dragging{background:var(--blue)}
+.hsplit{flex:0 0 6px;width:6px;cursor:col-resize;background:var(--border)}
+.hsplit:hover,.hsplit.dragging{background:var(--blue)}
 
 /* CANVAS PANELS */
 .panel{background:var(--panel);border:1px solid var(--border);display:flex;flex-direction:column}
@@ -50,7 +59,7 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
    bug, not a specificity or timing issue. Explicit pixel heights sidestep
    the browser's flex redistribution entirely, so there's nothing for that
    bug to get stuck on. */
-.panel.collapsed>*:not(.ph){display:none}
+.panel.collapsed>*:not(.ph):not(#log-header){display:none}
 canvas{display:block;flex:1}
 
 /* SECTIONS */
@@ -147,9 +156,9 @@ select option{background:#050810}
 .hud-val{color:var(--bright);text-align:right;font-size:13px;font-weight:bold}
 .hud-val.good{color:var(--green)} .hud-val.bad{color:var(--red)} .hud-val.warn{color:var(--amber)}
 
-/* LOG BAR */
-#log-bar{height:115px;flex-shrink:0;background:var(--card);border-top:2px solid var(--border);
-         display:flex;flex-direction:column}
+/* LOG BAR — a .panel now (moved inside #left-col, sized the same JS-driven
+   way as TACTICAL VIEW / ALTITUDE PROFILE); this rule only adds what
+   .panel doesn't already give it. */
 #log-header{display:flex;align-items:center;gap:8px;padding:4px 12px;
             background:#080c14;border-bottom:1px solid var(--border);flex-shrink:0}
 #log-header>span{font-size:11px;letter-spacing:2px;color:var(--bright);font-weight:bold}
@@ -157,9 +166,7 @@ select option{background:#050810}
 .badge.amber{background:#1a1000;color:var(--amber);border-color:var(--amber)}
 .badge.green{background:#001a08;color:var(--green);border-color:var(--green)}
 .badge.teal {background:#001a18;color:var(--teal); border-color:var(--teal)}
-#log-toggle{margin-left:auto;cursor:pointer;color:var(--text);font-size:11px}
-#log-toggle:hover{color:var(--bright)}
-#log-lines{flex:1;overflow-y:auto;padding:4px 12px;scrollbar-width:thin;
+#log-lines{flex:1;min-height:0;overflow-y:auto;padding:4px 12px;scrollbar-width:thin;
            scrollbar-color:var(--border) var(--card)}
 #log-lines div{padding:1px 0;font-size:12px;line-height:1.4;color:#b8d4ee}
 .log-ok{color:var(--green)} .log-warn{color:var(--amber)}
@@ -294,6 +301,7 @@ select option{background:#050810}
       </div>
       <div id="cv-tac" style="position:relative;overflow:hidden"></div>
     </div>
+    <div class="vsplit" data-above="panel-tac" data-below="panel-alt" title="Drag to resize"></div>
     <div class="panel" id="panel-alt" style="flex:1">
       <div class="ph">
         <span>ALTITUDE PROFILE</span>
@@ -301,7 +309,26 @@ select option{background:#050810}
       </div>
       <canvas id="cv-alt"></canvas>
     </div>
+    <div class="vsplit" data-above="panel-alt" data-below="log-bar" title="Drag to resize"></div>
+
+    <!-- LOG -->
+    <div class="panel" id="log-bar">
+      <div id="log-header">
+        <span>LOG</span>
+        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
+        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
+        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
+        <button class="btn" id="btn-decisions"
+          style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
+        <button class="ph-toggle" style="margin-left:auto" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+      </div>
+      <div id="log-lines">
+        <div class="log-info">Waiting for training to start...</div>
+      </div>
+    </div>
   </div>
+
+  <div class="hsplit" title="Drag to resize"></div>
 
   <!-- RIGHT: controls -->
   <div id="right-col">
@@ -619,22 +646,6 @@ select option{background:#050810}
   </div><!-- right-col -->
 </div><!-- main -->
 
-<!-- LOG BAR -->
-<div id="log-bar">
-  <div id="log-header">
-    <span>LOG</span>
-    <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
-    <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
-    <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
-    <button class="btn" id="btn-decisions"
-      style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
-    <span id="log-toggle" onclick="toggleLog()">▼</span>
-  </div>
-  <div id="log-lines">
-    <div class="log-info">Waiting for training to start...</div>
-  </div>
-</div>
-
 <!-- SHOT TRACE MODAL -->
 <div id="modal">
   <div id="modal-box">
@@ -806,16 +817,6 @@ function handleLog(msg) {
   }
 }
 
-let logCollapsed=false;
-function toggleLog() {
-  logCollapsed=!logCollapsed;
-  const bar=document.getElementById('log-bar');
-  const lines=document.getElementById('log-lines');
-  const tog=document.getElementById('log-toggle');
-  bar.style.height   = logCollapsed?'28px':'115px';
-  lines.style.display= logCollapsed?'none':'';
-  tog.textContent    = logCollapsed?'▲':'▼';
-}
 
 // ─── Metrics ──────────────────────────────────────────────────────
 function handleMetrics(d) {
@@ -1152,61 +1153,171 @@ function toggle(h){
   b.classList.toggle('collapsed');a.textContent=b.classList.contains('collapsed')?'▼':'▲';
 }
 
-// Left-column panels (TACTICAL VIEW / ALTITUDE PROFILE) collapse to just
-// their header bar, so training — which never looks at either — can get
-// that screen space back without losing the panel entirely.
-function panelToggle(btn){
-  const panel = btn.closest('.panel');
-  const collapsed = panel.classList.toggle('collapsed');
-  btn.textContent = (collapsed ? '▼ SHOW' : '▲ HIDE');
-  btn.title = collapsed ? 'Show this panel again' : 'Hide this panel to reclaim screen space';
-  resize();
+// ═══════════════════════════════════════════════════════════════════
+// RESIZABLE LAYOUT — left column's 3 panels (TACTICAL VIEW / ALTITUDE
+// PROFILE / LOG), and the left/right column split.
+//
+// Every panel and column here is sized with a plain pixel `height` or
+// `width` set directly in JS, on an element pinned to `flex:0 0 auto` that
+// is NEVER changed again — never flex-grow, never flex-basis, never
+// max-height, never display:none on the sized element itself. All of
+// those were tried for the collapse feature this replaced and each one
+// left the panel's box stuck at whatever size it had at the moment of the
+// LAST change, even when set back to its original value and even across a
+// forced reflow — a real layout-engine bug in this environment's
+// Chromium, not a specificity or timing issue. Plain height/width,
+// verified to grow AND shrink correctly every time, is what actually
+// works here, so that's the only thing that ever touches these elements'
+// size.
+// ═══════════════════════════════════════════════════════════════════
+
+// ── left column: TACTICAL VIEW / ALTITUDE PROFILE / LOG ────────────
+const LEFT_IDS = ['panel-tac', 'panel-alt', 'log-bar'];
+const LEFT_WEIGHT = {'panel-tac':3, 'panel-alt':1, 'log-bar':1};  // first-load split
+const LEFT_MIN_H = 60;
+const LEFT_COLLAPSED_H = 33;   // matches a header row's rendered height
+const LEFT_H = {};             // id -> current height, px — source of truth
+const LEFT_COLLAPSED = {};     // id -> bool
+const LEFT_RESTORE_H = {};     // id -> height to return to on expand
+
+function leftColAvail(){
+  const left = document.getElementById('left-col');
+  const cs = getComputedStyle(left);
+  const padV = (parseFloat(cs.paddingTop)||0) + (parseFloat(cs.paddingBottom)||0);
+  let splitH = 0;
+  left.querySelectorAll(':scope > .vsplit').forEach(s => splitH += s.offsetHeight||6);
+  return Math.max(0, left.clientHeight - padV - splitH);
 }
 
-// TACTICAL VIEW gets 3 parts of #left-col's height to ALTITUDE PROFILE's 1
-// (matching their original flex:3 / flex:1) — but layoutLeftCol() below
-// assigns that split as an explicit pixel flex-basis on each panel rather
-// than leaving the browser to redistribute flex-grow on its own. Every
-// size-affecting toggle tried instead (flex-grow, max-height, even plain
-// display:none on the whole panel) left the panel's box stuck at whatever
-// size it had when collapsed, even after being restored to its original
-// value and even across a forced reflow — a real layout-engine bug in this
-// environment, not a specificity or timing issue. Explicit pixel heights,
-// recomputed fresh on every toggle and on window resize, never ask the
-// browser to redistribute anything, so there's nothing for that bug to
-// catch on.
-const LEFT_PANEL_WEIGHT = {'panel-tac':3, 'panel-alt':1};
-const LEFT_PANEL_COLLAPSED_H = 33;   // matches .ph's rendered height
-function layoutLeftCol(){
-  const left = document.getElementById('left-col');
-  if(!left) return;
-  const panels = Array.from(left.querySelectorAll('.panel'));
-  if(!panels.length) return;
-  const cs = getComputedStyle(left);
-  const gap = parseFloat(cs.rowGap||cs.gap)||0;
-  const padV = (parseFloat(cs.paddingTop)||0) + (parseFloat(cs.paddingBottom)||0);
-  let avail = left.clientHeight - padV - gap*(panels.length-1);
-  const collapsed = panels.filter(p=>p.classList.contains('collapsed'));
-  const expanded  = panels.filter(p=>!p.classList.contains('collapsed'));
-  avail -= collapsed.length * LEFT_PANEL_COLLAPSED_H;
-  const totalWeight = expanded.reduce((s,p)=>s+(LEFT_PANEL_WEIGHT[p.id]||1),0) || 1;
-  panels.forEach(p=>{
-    const h = p.classList.contains('collapsed')
-      ? LEFT_PANEL_COLLAPSED_H
-      : Math.max(60, avail*(LEFT_PANEL_WEIGHT[p.id]||1)/totalWeight);
-    // flex-basis is what's stuck (see the comment above): shrinking a panel
-    // back down through the "flex" shorthand doesn't take even though its
-    // computed style reads back correctly. flex is pinned to a plain
-    // 0 0 auto once and never touched again; plain `height` — verified in
-    // isolation to grow AND shrink correctly every time — does the sizing.
-    p.style.flex = '0 0 auto';
-    p.style.height = h.toFixed(1)+'px';
+// Ensures every panel has a starting height, then rescales the EXPANDED
+// ones proportionally to fill whatever room is actually available — a
+// manually-dragged ratio survives a window resize or another panel's
+// collapse/expand instead of overflowing or leaving a gap.
+function leftColNormalize(){
+  const avail = leftColAvail();
+  const totalWeight = LEFT_IDS.reduce((s,k)=>s+LEFT_WEIGHT[k],0);
+  LEFT_IDS.forEach(id => {
+    if (LEFT_H[id] == null) LEFT_H[id] = avail * LEFT_WEIGHT[id] / totalWeight;
+  });
+  const collapsedH = LEFT_IDS.filter(id=>LEFT_COLLAPSED[id]).length * LEFT_COLLAPSED_H;
+  const expandedIds = LEFT_IDS.filter(id=>!LEFT_COLLAPSED[id]);
+  if (expandedIds.length){
+    const room = Math.max(expandedIds.length*LEFT_MIN_H, avail-collapsedH);
+    const curSum = expandedIds.reduce((s,id)=>s+LEFT_H[id],0) || 1;
+    expandedIds.forEach(id => { LEFT_H[id] = Math.max(LEFT_MIN_H, LEFT_H[id]*room/curSum); });
+  }
+  LEFT_IDS.forEach(id => { if (LEFT_COLLAPSED[id]) LEFT_H[id] = LEFT_COLLAPSED_H; });
+  leftColApply();
+}
+
+function leftColApply(){
+  LEFT_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.flex = '0 0 auto';
+    el.style.height = LEFT_H[id].toFixed(1)+'px';
   });
 }
 
+// TACTICAL VIEW / ALTITUDE PROFILE / LOG each collapse to just their
+// header bar, so training — which usually only needs one of the three —
+// can get the rest of that space back without losing any panel entirely.
+function panelToggle(btn){
+  const panel = btn.closest('.panel');
+  const id = panel.id;
+  const collapsed = !LEFT_COLLAPSED[id];
+  LEFT_COLLAPSED[id] = collapsed;
+  panel.classList.toggle('collapsed', collapsed);
+  if (collapsed) LEFT_RESTORE_H[id] = LEFT_H[id];
+  else LEFT_H[id] = LEFT_RESTORE_H[id] || (leftColAvail()/LEFT_IDS.length);
+  btn.textContent = collapsed ? '▼ SHOW' : '▲ HIDE';
+  btn.title = collapsed ? 'Show this panel again' : 'Hide this panel to reclaim screen space';
+  leftColNormalize();
+  resize();
+}
+
+// Drag a splitter between two adjacent left-column panels: pixels move 1:1
+// between them, so nothing else's size is touched by the drag itself.
+function leftColSplitterDrag(e, splitEl, aboveId, belowId){
+  if (LEFT_COLLAPSED[aboveId] || LEFT_COLLAPSED[belowId]) return;
+  e.preventDefault();
+  const startY = e.clientY, startA = LEFT_H[aboveId], startB = LEFT_H[belowId];
+  splitEl.classList.add('dragging');
+  document.body.style.cursor = 'row-resize';
+  document.body.style.userSelect = 'none';
+  function onMove(ev){
+    let dy = ev.clientY - startY;
+    dy = Math.max(LEFT_MIN_H-startA, Math.min(startB-LEFT_MIN_H, dy));
+    LEFT_H[aboveId] = startA + dy;
+    LEFT_H[belowId] = startB - dy;
+    leftColApply();
+    resize();
+  }
+  function onUp(){
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    splitEl.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
+document.querySelectorAll('#left-col > .vsplit').forEach(el => {
+  el.addEventListener('mousedown', e => leftColSplitterDrag(e, el, el.dataset.above, el.dataset.below));
+});
+
+// ── main row: left column vs. right column ──────────────────────────
+const MAIN_MIN_LEFT = 340, MAIN_MIN_RIGHT = 280;
+let MAIN_RIGHT_W = null;   // px — source of truth; left-col always takes the rest
+
+function mainColAvail(){
+  const main = document.getElementById('main');
+  let splitW = 0;
+  main.querySelectorAll(':scope > .hsplit').forEach(s => splitW += s.offsetWidth||6);
+  return Math.max(0, main.clientWidth - splitW);
+}
+
+function mainColNormalize(){
+  const avail = mainColAvail();
+  if (MAIN_RIGHT_W == null) MAIN_RIGHT_W = 360;   // matches the old fixed width
+  MAIN_RIGHT_W = Math.max(MAIN_MIN_RIGHT, Math.min(MAIN_RIGHT_W, avail-MAIN_MIN_LEFT));
+  const leftW = Math.max(MAIN_MIN_LEFT, avail-MAIN_RIGHT_W);
+  const left = document.getElementById('left-col'), right = document.getElementById('right-col');
+  left.style.flex  = '0 0 auto'; left.style.width  = leftW.toFixed(1)+'px';
+  right.style.flex = '0 0 auto'; right.style.width = MAIN_RIGHT_W.toFixed(1)+'px';
+}
+
+function mainColSplitterDrag(e, splitEl){
+  e.preventDefault();
+  const startX = e.clientX, startRight = MAIN_RIGHT_W, avail = mainColAvail();
+  splitEl.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  function onMove(ev){
+    const dx = ev.clientX - startX;              // drag right -> right panel narrower
+    MAIN_RIGHT_W = Math.max(MAIN_MIN_RIGHT, Math.min(startRight-dx, avail-MAIN_MIN_LEFT));
+    mainColNormalize();
+    resize();
+  }
+  function onUp(){
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    splitEl.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
+document.querySelectorAll('#main > .hsplit').forEach(el => {
+  el.addEventListener('mousedown', e => mainColSplitterDrag(e, el));
+});
+
 // Resize
 function resize(){
-  layoutLeftCol();
+  mainColNormalize();
+  leftColNormalize();
   // Three.js renderer resize. Guard against a 0-height box (the tactical
   // panel collapsed, or not laid out yet) — an aspect of Infinity/NaN would
   // otherwise get baked into the camera and produce a broken view on expand.
