@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -58,7 +59,11 @@ class Hub:
         self._lock   = threading.Lock()
         self._latest_telemetry = None   # most recent eval frame
         self._latest_metrics   = None   # most recent training metrics
-        self._status  = {"state": "idle", "msg": "Ready"}
+        # Training and eval are independent: training is a subprocess, eval is
+        # a thread in this process, and running both at once is supported. A
+        # single "state" string cannot represent that, so each has its own flag.
+        self._status  = {"type": "status", "training": False,
+                         "eval": False, "msg": "Ready"}
         self._clients = set()
         self._queue   = []              # outbound message queue
         self._replay_frames = []        # last episode recording
@@ -73,8 +78,19 @@ class Hub:
             out, self._queue = self._queue, []
         return out
 
-    def set_status(self, state: str, msg: str = ""):
-        self.push({"type": "status", "state": state, "msg": msg})
+    def set_status(self, *, training: bool = None, evaluating: bool = None,
+                   msg: str = None):
+        """Update only the fields given, then broadcast the whole snapshot."""
+        with self._lock:
+            if training is not None:   self._status["training"] = bool(training)
+            if evaluating is not None: self._status["eval"]     = bool(evaluating)
+            if msg is not None:        self._status["msg"]      = msg
+            snapshot = dict(self._status)
+        self.push(snapshot)
+
+    def status_snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._status)
 
     def set_replay(self, frames: list, meta: dict):
         with self._lock:
@@ -194,18 +210,78 @@ class TrainingManager:
             cmd += ["--run-name", str(config["run_name"]).strip()]
         if not config.get("curriculum", True):
             cmd += ["--no-curriculum"]
+        # CREATE_NEW_PROCESS_GROUP (Windows only) is what makes it possible to
+        # send CTRL_BREAK to the trainer alone in stop() without also signalling
+        # this server. On POSIX the default group is already fine.
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         self._proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            bufsize=1, text=True)
+            bufsize=1, text=True, creationflags=flags)
         self._thread = threading.Thread(target=self._tail, daemon=True)
         self._thread.start()
-        HUB.set_status("training", f"Training: {config.get('opponent','straight')}")
+        HUB.set_status(training=True,
+                       msg=f"Training: {config.get('opponent','straight')}")
+
+    # Seconds to let the trainer write its checkpoint before escalating.
+    GRACE_TIMEOUT = 60.0
 
     def stop(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+        """
+        Ask the trainer to shut down CLEANLY so it saves its model.
+
+        train_bvr.py saves in a `finally:` after catching KeyboardInterrupt.
+        SIGTERM (what terminate() sends) does NOT run `finally` — Python exits
+        immediately — so terminating here silently threw away every step since
+        the last archived checkpoint. An interrupt raises KeyboardInterrupt in
+        the child instead, which reaches that `finally` and writes the model.
+        Escalation to terminate/kill still exists, but only as a last resort
+        after the trainer has been given time to save.
+        """
+        if not (self._proc and self._proc.poll() is None):
+            self._stop_evt.set()
+            HUB.set_status(training=False, msg="Training stopped")
+            return
         self._stop_evt.set()
-        HUB.set_status("idle", "Training stopped")
+        # Waiting must not block the asyncio loop that dispatches commands.
+        threading.Thread(target=self._graceful_stop, daemon=True).start()
+
+    def stop_blocking(self):
+        """stop(), but wait for the trainer to finish saving before returning."""
+        if not (self._proc and self._proc.poll() is None):
+            return
+        self._stop_evt.set()
+        self._graceful_stop()
+
+    def _graceful_stop(self):
+        proc = self._proc
+        HUB.set_status(training=True, msg="Stopping — saving checkpoint…")
+        HUB.push({"type": "log", "msg": "[bvr_gui] interrupting trainer; "
+                                        "waiting for it to save its model…"})
+        try:
+            if os.name == "nt":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                proc.send_signal(signal.SIGINT)
+        except Exception as e:
+            HUB.push({"type": "log", "msg": f"[bvr_gui] interrupt failed ({e}); terminating"})
+            proc.terminate()
+
+        try:
+            proc.wait(timeout=self.GRACE_TIMEOUT)
+            HUB.push({"type": "log", "msg": "[bvr_gui] trainer exited cleanly — model saved."})
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        HUB.push({"type": "log",
+                  "msg": f"[bvr_gui] no clean exit after {self.GRACE_TIMEOUT:.0f}s — "
+                         f"terminating (checkpoint may be lost)."})
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            HUB.push({"type": "log", "msg": "[bvr_gui] still alive — killing."})
+            proc.kill()
 
     def _tail(self):
         """Read subprocess stdout line by line, push to hub."""
@@ -214,7 +290,8 @@ class TrainingManager:
             if line:
                 HUB.push({"type": "log", "msg": line})
         self._proc.wait()
-        HUB.set_status("idle", f"Training ended (exit {self._proc.returncode})")
+        HUB.set_status(training=False,
+                       msg=f"Training ended (exit {self._proc.returncode})")
 
     @property
     def running(self) -> bool:
@@ -306,7 +383,7 @@ class EvalRunner:
 
     def stop(self):
         self._stop_evt.set()
-        HUB.set_status("idle", "Eval stopped")
+        HUB.set_status(evaluating=False, msg="Eval stopped")
 
     def _run(self, config: dict):
         try:
@@ -353,7 +430,7 @@ class EvalRunner:
                          privileged_critic=privileged, gamma_discount=0.997,
                          envelope_table=envelope_table)
 
-            HUB.set_status("eval", f"Eval vs {opponent_name}")
+            HUB.set_status(evaluating=True, msg=f"Eval vs {opponent_name}")
             episode = 0
             while not self._stop_evt.is_set():
                 obs, info = env.reset()
@@ -405,7 +482,7 @@ class EvalRunner:
         except Exception as e:
             import traceback
             HUB.push({"type":"log","msg":f"Eval error: {e}\n{traceback.format_exc()}"})
-            HUB.set_status("idle", f"Eval error: {e}")
+            HUB.set_status(evaluating=False, msg=f"Eval error: {e}")
 
 
 def _build_frame(s: dict, env, info: dict) -> dict:
@@ -516,7 +593,7 @@ EVAL_RUNNER  = None
 
 async def handle_client(ws):
     HUB._clients.add(ws)
-    await ws.send(json.dumps(HUB._status))
+    await ws.send(json.dumps(HUB.status_snapshot()))
     try:
         while True:
             try:
@@ -591,8 +668,14 @@ def main():
     try:
         asyncio.run(run_ws(args.ws_port))
     except KeyboardInterrupt:
-        TRAINING_MGR.stop()
         EVAL_RUNNER.stop()
+        # Block here: stop() hands the wait to a daemon thread, and daemon
+        # threads die the moment main() returns — which would cut the trainer
+        # off mid-save, the exact data loss this path exists to prevent.
+        if TRAINING_MGR.running:
+            print("[bvr_gui]  stopping trainer — waiting for it to save…")
+            TRAINING_MGR.stop_blocking()
+        print("[bvr_gui]  bye")
 
 
 if __name__ == "__main__":

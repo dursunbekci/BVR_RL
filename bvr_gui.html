@@ -758,29 +758,39 @@ const TRACK_C=['var(--text)','var(--amber)','var(--green)','var(--red)'];
 const STAGE_IDS=['straight','evasive','notcher','shooter','adaptive','self_play'];
 
 function handle(m) {
-  if(m.type==='status')    setState(m.state, m.msg);
+  if(m.type==='status')    setState(m);
   if(m.type==='telemetry') handleFrame(m.data);
   if(m.type==='metrics')   handleMetrics(m.data);
   if(m.type==='log')       handleLog(m.msg);
   if(m.type==='episode_end') onEpEnd(m.meta);
 }
 
-function setState(s, msg='') {
-  const prevState = appState;
-  appState = s;
+// Training (a subprocess) and eval (a thread in the server) are independent
+// and may run at once, so the server sends a flag for each rather than one
+// state word. appState stays as the derived label the progress/ETA code reads.
+let isTraining=false, isEval=false;
+function setState(st) {
+  const wasTraining=isTraining, wasEval=isEval;
+  isTraining = !!st.training;
+  isEval     = !!st.eval;
+  appState   = isTraining ? 'training' : (isEval ? 'eval' : 'idle');
+
   const p = document.getElementById('state-pill');
-  p.className = 'pill '+s; p.textContent = s.toUpperCase();
-  if(msg) addLog('[status] '+msg, 'log-info');
-  const training = s==='training';
-  const eval_    = s==='eval';
-  document.getElementById('btn-train').style.display      = training ? 'none' : '';
-  document.getElementById('btn-stop-train').style.display = training ? ''     : 'none';
-  document.getElementById('btn-eval').style.display       = eval_    ? 'none' : '';
-  document.getElementById('btn-stop-eval').style.display  = eval_    ? ''     : 'none';
+  let cls='idle', txt='IDLE';
+  if(isTraining && isEval) { cls='training'; txt='TRAINING + EVAL'; }
+  else if(isTraining)      { cls='training'; txt='TRAINING'; }
+  else if(isEval)          { cls='eval';     txt='EVAL'; }
+  p.className = 'pill '+cls; p.textContent = txt;
+
+  if(st.msg) addLog('[status] '+st.msg, 'log-info');
+  document.getElementById('btn-train').style.display      = isTraining ? 'none' : '';
+  document.getElementById('btn-stop-train').style.display = isTraining ? ''     : 'none';
+  document.getElementById('btn-eval').style.display       = isEval    ? 'none' : '';
+  document.getElementById('btn-stop-eval').style.display  = isEval    ? ''     : 'none';
   // A training run only writes its final model on exit, and eval-loaded
   // checkpoints don't change the dir at all — refresh right when either one
   // stops so a just-finished run's model shows up without a page reload.
-  if (s==='idle' && (prevState==='training' || prevState==='eval')) refreshModelList();
+  if ((wasTraining && !isTraining) || (wasEval && !isEval)) refreshModelList();
 }
 
 // ─── Log ─────────────────────────────────────────────────────────
@@ -1095,7 +1105,15 @@ document.getElementById('btn-train').onclick=()=>{
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
     batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName}});
 };
-document.getElementById('btn-stop-train').onclick=()=>{addLog('■ Stop requested...','log-warn');send({cmd:'stop_training'})};
+document.getElementById('btn-stop-train').onclick=()=>{
+  const runName=document.getElementById('cfg-runname').value.trim()||'latest';
+  if(!confirm(`Stop training?\n\nThe trainer will be interrupted and will save its `
+             +`current model as "${runName}.zip" before exiting. This can take a `
+             +`few seconds.\n\nTraining cannot be resumed in place — you would have `
+             +`to start a new run with RESUME FROM set to that checkpoint.`)) return;
+  addLog('■ Stop requested — waiting for the trainer to save...','log-warn');
+  send({cmd:'stop_training'});
+};
 document.getElementById('btn-eval').onclick=()=>{
   const opp=document.getElementById('eval-opponent').value;
   const ckpt=document.getElementById('eval-ckpt').value.trim();
