@@ -419,7 +419,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>AUTO-CURRICULUM</span>
               <button class="help-btn" onclick="help(this,'AUTO-CURRICULUM',
-                'When ON, the system automatically advances to the next harder opponent once your win rate stays above 65% for at least 50 episodes.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
+                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes is at least 65% and at least 60 episodes have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE\n\nADAPTIVE is the last stage: self-play is planned but not implemented yet.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
             </div>
             <select id="cfg-curriculum">
               <option value="1" selected>ON (auto-advance)</option>
@@ -469,8 +469,6 @@ select option{background:#050810}
           <div class="curr-stage" id="cs-shooter">SHOOTER</div>
           <div style="color:var(--border);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-adaptive">ADAPTIVE</div>
-          <div style="color:var(--border);padding:0 2px">›</div>
-          <div class="curr-stage" id="cs-self_play">SELF_PLAY</div>
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 2px">
@@ -770,7 +768,7 @@ const wrHist=[];
 let totalSteps=2000000, epStartTime=Date.now(), epCount=0, stepsDone=0;
 const TRACK_N=['NONE','ACQUIRING','TRACK','COAST'];
 const TRACK_C=['var(--text)','var(--amber)','var(--green)','var(--red)'];
-const STAGE_IDS=['straight','evasive','notcher','shooter','adaptive','self_play'];
+const STAGE_IDS=['straight','evasive','notcher','shooter','adaptive'];
 
 function handle(m) {
   if(m.type==='status')    setState(m);
@@ -1138,7 +1136,7 @@ document.getElementById('btn-train').onclick=()=>{
   document.getElementById('log-rate-badge').style.display='none';
   document.getElementById('log-shots-badge').style.display='none';
   // Reset curriculum to STRAIGHT (first stage) display
-  ['straight','evasive','notcher','shooter','adaptive','self_play'].forEach(id=>{
+  STAGE_IDS.forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
   addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');

@@ -324,8 +324,13 @@ class BvrEnv(gym.Env):
         base={"KILL":self.R_KILL,"SHOT_DOWN":self.R_KILLED,"MUTUAL_KILL":self.R_MUTUAL,
               "CRASH":self.R_CRASH,"BANDIT_CRASH":self.R_BANDIT_CRASH,
               "ESCAPE":self.R_ESCAPE,"TIMEOUT":self.R_TIMEOUT}.get(outcome,0.0)
-        if outcome=="KILL":
-            base+=self.R_WASTED_MSL*float(self._state.get("wpn_remaining",0))
+        # Every missile fired that did not produce the kill is wasted. This
+        # used to multiply missiles still ON BOARD at a kill, which rewarded
+        # emptying the rails: a one-shot kill scored 0.91, a four-shot 1.00.
+        # Counting fired missiles also catches redundant shots still in the
+        # air when the episode ends, which a count of resolved misses would not.
+        productive = 1 if outcome in ("KILL","MUTUAL_KILL") else 0
+        base+=self.R_WASTED_MSL*float(max(self._shots_fired-productive,0))
         return float(base)
 
     # ── radar / track adapter ─────────────────────────────────────────

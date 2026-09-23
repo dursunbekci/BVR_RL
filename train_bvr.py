@@ -294,6 +294,9 @@ def main():
     args = ap.parse_args()
 
     opponent = BvrOpponentType[args.opponent.upper()]
+    if opponent not in CURRICULUM:
+        ap.error(f"opponent {opponent.name} is not implemented; choose one of "
+                 f"{', '.join(o.name.lower() for o in CURRICULUM)}")
     privileged = not args.no_privileged
 
     envelope_table = args.envelope_table if os.path.exists(args.envelope_table) else None

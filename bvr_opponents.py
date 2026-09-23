@@ -6,7 +6,10 @@ Same contract as opponents.py: act(state, t_sim) returns an UNSUFFIXED command
 dict; bvr_env adds the `_t` suffix.
 
 Curriculum, easiest → hardest:
-    STRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE_SHOOTER → SELF_PLAY
+    STRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE_SHOOTER
+
+SELF_PLAY is planned but has no implementation yet, so it is not in the
+curriculum and create() refuses it.
 
 SHOOTER is the important one. A rule-based BVR opponent that commits, shoots,
 cranks and drags is a genuinely strong baseline — strong enough that beating
@@ -37,7 +40,7 @@ class BvrOpponentType(Enum):
     NOTCHER = auto()           # actively beams to break lock, unarmed
     SHOOTER = auto()           # armed, fixed doctrine
     ADAPTIVE_SHOOTER = auto()  # armed, randomised doctrine parameters
-    SELF_PLAY = auto()
+    SELF_PLAY = auto()         # planned; no opponent class yet
 
 
 CURRICULUM = [
@@ -46,7 +49,6 @@ CURRICULUM = [
     BvrOpponentType.NOTCHER,
     BvrOpponentType.SHOOTER,
     BvrOpponentType.ADAPTIVE_SHOOTER,
-    BvrOpponentType.SELF_PLAY,
 ]
 
 
@@ -75,13 +77,18 @@ class BvrOpponent:
 
     @staticmethod
     def create(opp_type: "BvrOpponentType", rng=None) -> "BvrOpponent":
-        return {
+        cls = {
             BvrOpponentType.STRAIGHT: StraightOpponent,
             BvrOpponentType.EVASIVE: EvasiveOpponent,
             BvrOpponentType.NOTCHER: NotchOpponent,
             BvrOpponentType.SHOOTER: ShooterOpponent,
             BvrOpponentType.ADAPTIVE_SHOOTER: AdaptiveShooterOpponent,
-        }.get(opp_type, StraightOpponent)(rng=rng)
+        }.get(opp_type)
+        # No silent fallback: defaulting to STRAIGHT turned SELF_PLAY into the
+        # easiest opponent while every log still reported SELF_PLAY.
+        if cls is None:
+            raise NotImplementedError(f"no opponent implementation for {opp_type.name}")
+        return cls(rng=rng)
 
     # ── helpers ─────────────────────────────────────────────────────
     def _cmd(self, hdg=0.0, alt=9000.0, V=290.0, fire=0) -> dict:
