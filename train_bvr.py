@@ -87,10 +87,13 @@ ADVANCE_MIN_EPISODES = 60
 # ═════════════════════════════════════════════════════════════════════
 class BvrCallback(BaseCallback):
 
-    def __init__(self, envs, opponent_type, save_dir="models_bvr",
+    def __init__(self, vec_env, opponent_type, save_dir="models_bvr",
                  auto_curriculum=True, verbose=1):
         super().__init__(verbose)
-        self.envs = envs
+        # The VecEnv itself, not a list of raw envs: with n_envs > 1 the envs
+        # live in other processes, where a Python reference cannot reach them.
+        # set_attr() is the only channel that works for both vec env types.
+        self.vec = vec_env
         self.opponent_type = opponent_type
         self.save_dir = save_dir
         self.auto_curriculum = auto_curriculum
@@ -218,8 +221,9 @@ class BvrCallback(BaseCallback):
                                      f"pre_{nxt.name}"))
         print(f"[bvr] === CURRICULUM: {self.opponent_type.name} -> {nxt.name} ===")
         self.opponent_type = nxt
-        for e in self.envs:
-            e._opponent_type = nxt
+        # Reaches worker processes too. BvrEnv builds its opponent from
+        # _opponent_type on reset(), so this takes effect next episode.
+        self.vec.set_attr("_opponent_type", nxt)
         self.outcomes.clear()
         self.shots.clear()
         self.best_win = -1.0
@@ -282,8 +286,6 @@ def main():
     # want — the critic benefits from privileged history too.
     vec = VecFrameStack(vec, n_stack=N_STACK)
 
-    raw_envs = [e for e in getattr(vec.venv, "envs", [])] if args.n_envs == 1 else []
-
     kwargs = dict(PPO_KWARGS)
     kwargs["gamma"]         = args.gamma
     kwargs["learning_rate"] = args.lr
@@ -302,7 +304,7 @@ def main():
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
 
-    cb = BvrCallback(raw_envs, opponent, save_dir=args.save_dir,
+    cb = BvrCallback(vec, opponent, save_dir=args.save_dir,
                      auto_curriculum=not args.no_curriculum)
 
     try:

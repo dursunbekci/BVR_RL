@@ -358,7 +358,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>TRAINING STEPS</span>
               <button class="help-btn" onclick="help(this,'TRAINING STEPS',
-                'Total policy decisions to train on. More steps = better policy, but takes longer.\n\nOn this machine (43× realtime, 1 env):\n• 500 000 → ~3 hours\n• 2 000 000 → ~13 hours\n• 5 000 000 → ~32 hours\n\nWith n_envs=4, divide by 4. One \"step\" = one 1-second decision per environment.')">?</button>
+                'Total policy decisions to train on. More steps = better policy, but takes longer.\n\nSingle env, at the reference 43× realtime:\n• 500 000 → ~3 hours\n• 2 000 000 → ~13 hours\n• 5 000 000 → ~32 hours\n\nParallel envs cut this, but by less than the env count — the estimate below already accounts for that. One \"step\" = one 1-second decision per environment.')">?</button>
             </div>
             <input type="number" id="cfg-steps" value="2000000" min="100000" step="100000" oninput="updateETA()">
             <div id="steps-eta" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
@@ -367,13 +367,17 @@ select option{background:#050810}
             <div class="field-label">
               <span>PARALLEL ENVS</span>
               <button class="help-btn" onclick="help(this,'PARALLEL ENVS (n_envs)',
-                'Runs N independent simulation worlds simultaneously, one per CPU core. Directly multiplies training speed.\n\n• 1 env → baseline (~43×)\n• 2 envs → ~2× faster\n• 4 envs → ~4× faster\n\nStart with 1 to confirm everything works. On a typical 8-core machine, 2–4 is safe. Each env is a fully separate Python process with its own F-16 simulation.')">?</button>
+                'Runs N independent simulation worlds at once, each a separate Python process with its own F-16 sim. This is the main speed lever: simulation is ~94% of training wall-clock, so parallelising it scales almost linearly until you run out of cores.\n\nPick N a little below your PHYSICAL core count — the main process still needs a core for the policy update, plus one for this GUI. Hyperthreads add little: the sim is compute-bound.\n\nScaling is sub-linear in practice. All envs step in lockstep, so every step waits for the slowest worker. On CPUs with mixed fast/efficiency cores (Intel 12th gen and later), workers landing on efficiency cores set the pace — total throughput still rises, just not by the full factor.\n\nNote: the rollout buffer is n_steps PER env, so raising N also multiplies data per policy update, meaning fewer updates for the same total steps.')">?</button>
             </div>
             <select id="cfg-nenvs" onchange="updateETA()">
               <option value="1" selected>1 (safe start)</option>
-              <option value="2">2 (2× faster)</option>
-              <option value="4">4 (4× faster)</option>
-              <option value="8">8 (8× faster)</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="12">12</option>
+              <option value="16">16</option>
+              <option value="24">24</option>
+              <option value="32">32</option>
             </select>
           </div>
         </div>
@@ -1131,7 +1135,11 @@ document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval.
 function updateETA() {
   const steps=parseInt(document.getElementById('cfg-steps').value)||2000000;
   const ne=parseInt(document.getElementById('cfg-nenvs').value)||1;
-  const secs=steps/(43*ne);
+  // Parallel envs step in lockstep, so each added worker returns a little less
+  // than a full core's worth: the round is paced by the slowest one. Assuming
+  // linear ne× here made the estimate wildly optimistic at high env counts.
+  const eff=1/(1+0.03*(ne-1));
+  const secs=steps/(43*ne*eff);
   const h=secs/3600;
   document.getElementById('steps-eta').textContent=
     h>1?`≈ ${h.toFixed(1)} hours`:secs>60?`≈ ${(secs/60).toFixed(0)} min`:`≈ ${secs.toFixed(0)} s`;
