@@ -107,6 +107,10 @@ class BvrCallback(BaseCallback):
         # is actually driving the reward rather than only the total.
         self.term_abs = {k: deque(maxlen=5000) for k in PHI_TERMS}
         self.ep_count = 0
+        # Episodes finished against the CURRENT opponent. The advance gate
+        # cannot use len(self.outcomes): that deque is capped at 50, so a
+        # 60-episode minimum measured on it could never be met.
+        self.stage_episodes = 0
         self.best_win = -1.0
         os.makedirs(save_dir, exist_ok=True)
 
@@ -125,6 +129,7 @@ class BvrCallback(BaseCallback):
                 continue
 
             self.ep_count += 1
+            self.stage_episodes += 1
             self.outcomes.append(outcome)
             self.shots.append(int(info.get("shots_fired", 0)))
             for lg in info.get("launch_log", []):
@@ -144,6 +149,8 @@ class BvrCallback(BaseCallback):
         losses = self.outcomes.count("SHOT_DOWN")
         mutual = self.outcomes.count("MUTUAL_KILL")
         timeouts = self.outcomes.count("TIMEOUT")
+        crashes = self.outcomes.count("CRASH")
+        bandit_crashes = self.outcomes.count("BANDIT_CRASH")
 
         win_rate = kills / n
         total_shots = max(sum(self.shots), 1)
@@ -154,6 +161,8 @@ class BvrCallback(BaseCallback):
         rec("bvr/mutual_rate", mutual / n)
         rec("bvr/timeout_rate", timeouts / n)
         rec("bvr/escape_rate", self.outcomes.count("ESCAPE") / n)
+        rec("bvr/crash_rate", crashes / n)
+        rec("bvr/bandit_crash_rate", bandit_crashes / n)
         rec("bvr/exchange_ratio", kills / max(losses + mutual, 1))
         rec("bvr/realized_pk", (kills + mutual) / total_shots)
         rec("bvr/shots_per_episode", total_shots / n)
@@ -174,7 +183,8 @@ class BvrCallback(BaseCallback):
         if self.verbose:
             print(f"[bvr] ep {self.ep_count:5d} | {self.opponent_type.name:16s} | "
                   f"win {win_rate:5.1%} loss {losses/n:5.1%} mut {mutual/n:5.1%} "
-                  f"to {timeouts/n:5.1%} | Pk {(kills+mutual)/total_shots:4.2f} | "
+                  f"to {timeouts/n:5.1%} crash {crashes/n:5.1%} bcrash {bandit_crashes/n:5.1%} | "
+                  f"Pk {(kills+mutual)/total_shots:4.2f} | "
                   f"shots/ep {total_shots/n:4.2f}")
 
         # Write metrics for the GUI. Appended to a rolling history list so
@@ -198,6 +208,8 @@ class BvrCallback(BaseCallback):
                 "mutual_rate":   round(mutual/n, 3),
                 "timeout_rate":  round(timeouts/n, 3),
                 "escape_rate":   round(self.outcomes.count("ESCAPE")/n, 3),
+                "crash_rate":    round(crashes/n, 3),
+                "bandit_crash_rate": round(bandit_crashes/n, 3),
                 "exchange_ratio": round(kills/max(losses+mutual,1), 2),
                 "realized_pk":   round((kills+mutual)/total_shots, 3),
                 "shots_per_ep":  round(total_shots/n, 2),
@@ -226,7 +238,7 @@ class BvrCallback(BaseCallback):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.model.save(path)
 
-        if (self.auto_curriculum and n >= ADVANCE_MIN_EPISODES
+        if (self.auto_curriculum and self.stage_episodes >= ADVANCE_MIN_EPISODES
                 and win_rate >= ADVANCE_WIN_RATE):
             self._advance()
 
@@ -243,6 +255,7 @@ class BvrCallback(BaseCallback):
         self.vec.set_attr("_opponent_type", nxt)
         self.outcomes.clear()
         self.shots.clear()
+        self.stage_episodes = 0
         self.best_win = -1.0
 
 
