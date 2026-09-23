@@ -573,6 +573,16 @@ select option{background:#050810}
           </div>
         </div>
 
+        <!-- REWARD DRIVERS -->
+        <div style="margin-top:12px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+            <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">REWARD DRIVERS</span>
+            <button class="help-btn" onclick="help(this,'REWARD DRIVERS',
+              'Which of the five shaping terms is actually moving the reward.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — time-to-go on the nearest inbound missile\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button>
+          </div>
+          <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+
       </div>
     </div>
 
@@ -882,12 +892,38 @@ function handleMetrics(d) {
   }
 
   updateCurriculum(d.opponent);
+  updateTermBars(d.term_share, d.term_abs);
 
   if(d.history) {
     wrHist.length=0;
     for(const [,w] of d.history) wrHist.push(w);
     drawMini('cv-wr', wrHist, 0, 1, 'var(--green)', 0.65);
   }
+}
+
+// Order and weights mirror PHI_TERMS / W_* in bvr_env.py.
+const TERM_INFO=[['envelope','ENVELOPE','var(--green)'],
+                 ['track',   'TRACK',   'var(--amber)'],
+                 ['energy',  'ENERGY',  'var(--blue)'],
+                 ['support', 'SUPPORT', 'var(--teal)'],
+                 ['defence', 'DEFENCE', 'var(--red)']];
+function updateTermBars(share, abs) {
+  const el=document.getElementById('term-bars');
+  if(!share){
+    el.innerHTML='<div style="font-size:11px;color:var(--dim)">waiting for training data…</div>';
+    return;
+  }
+  el.innerHTML=TERM_INFO.map(([k,label,color])=>{
+    const s=share[k]||0, a=(abs&&abs[k]!=null)?abs[k]:0;
+    return `<div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:11px;color:var(--text);width:66px">${label}</span>
+      <div style="flex:1;height:9px;background:var(--card);border:1px solid var(--border)">
+        <div style="height:100%;width:${(s*100).toFixed(1)}%;background:${color}"></div>
+      </div>
+      <span style="font-size:11px;color:var(--bright);width:34px;text-align:right">${(s*100).toFixed(0)}%</span>
+      <span style="font-size:10px;color:var(--dim);width:54px;text-align:right">${a.toFixed(4)}</span>
+    </div>`;
+  }).join('');
 }
 
 function setKPI(boxId,valId,val,good,bad) {
@@ -1164,6 +1200,7 @@ document.getElementById('cfg-steps').oninput=updateETA;
 document.getElementById('cfg-nenvs').onchange=updateETA;
 document.getElementById('cfg-batch').onchange=updateRolloutInfo;
 updateETA();
+updateTermBars(null);
 
 // Shot trace modal
 document.getElementById('btn-decisions').onclick=()=>{

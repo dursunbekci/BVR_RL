@@ -81,6 +81,10 @@ PRIV_DIM  = len(PRIV_LABELS)
 PRIV_PHYS_LOW  = np.array([0,-900,-1,-1,-1,-1,-1,-1,-12000,0,-12000,0,0,0,0,0],dtype=np.float32)
 PRIV_PHYS_HIGH = np.array([RANGE_MAX,900,1,1,1,1,1,1,12000,700,12000,6,1,120,120,3],dtype=np.float32)
 
+# The five components of the shaping potential, in the order _potential()
+# builds them. Consumers (trainer logging, GUI panel) key off this.
+PHI_TERMS = ["envelope","track","energy","support","defence"]
+
 
 class BvrEnv(gym.Env):
     metadata = {"render_modes":[]}
@@ -134,6 +138,8 @@ class BvrEnv(gym.Env):
         self._events_seen=set(); self._launch_log=[]; self._last_convert_t=-1e9
         self._cmd_hdg=0.0; self._cmd_alt=9000.0; self._cmd_spd=300.0
         self._prev_phi=0.0
+        self._phi_terms={k:0.0 for k in PHI_TERMS}
+        self._prev_phi_terms=dict(self._phi_terms)
 
         self._viz=None
         if enable_viz:
@@ -167,6 +173,7 @@ class BvrEnv(gym.Env):
         self._advance(0.5, self._encode_cmd(0,2,2,0), fire=False)
         self._ready=True
         obs=self._build_obs(); self._prev_phi=self._potential()
+        self._prev_phi_terms=dict(self._phi_terms)
         return obs, {"ic":ic,"episode_id":self._episode_id}
 
     # ── step ──────────────────────────────────────────────────────────
@@ -183,11 +190,18 @@ class BvrEnv(gym.Env):
         phi   = self._potential()
         shaping = self._gamma*phi - self._prev_phi
         self._prev_phi = phi
+        # Same gamma*new - old applied per term, so these sum to `shaping`
+        # exactly and show which part of the potential moved the reward.
+        terms = self._phi_terms
+        shaping_terms = {k: self._gamma*terms[k] - self._prev_phi_terms[k]
+                         for k in PHI_TERMS}
+        self._prev_phi_terms = dict(terms)
         reward = float(shaping)
 
         terminated = self._outcome is not None
         truncated  = (not terminated) and (self._step_num >= self.MAX_STEPS)
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
+                "phi_terms":dict(terms),"shaping_terms":shaping_terms,
                 "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._track.state],
                 "fired":want_fire,"opponent":self._opponent_type.name}
 
@@ -506,6 +520,11 @@ class BvrEnv(gym.Env):
             ps=self.W_SUPPORT*math.exp(-est["pos_sigma"]/600)
         pd=0.0
         if tm: pd=self.W_DEFENCE*math.tanh(float(tm.get("tgo_est",60))/25)
+        # Recorded from the very variables summed below, so the breakdown can
+        # never drift from the potential it explains.
+        self._phi_terms={"envelope":float(pe),"track":float(pt),
+                         "energy":float(pe2),"support":float(ps),
+                         "defence":float(pd)}
         return float(pe+pt+pe2+ps+pd)
 
     # ── action → command ───────────────────────────────────────────────

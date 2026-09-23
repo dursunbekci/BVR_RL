@@ -40,7 +40,7 @@ from sb3_contrib.common.maskable.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack
 
-from bvr_env import BvrEnv
+from bvr_env import BvrEnv, PHI_TERMS
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
 
@@ -103,6 +103,9 @@ class BvrCallback(BaseCallback):
         self.launch_rngs = deque(maxlen=200)
         self.launch_ratios = deque(maxlen=200)
         self.track_hits = deque(maxlen=5000)
+        # |per-term shaping contribution|, to show which part of the potential
+        # is actually driving the reward rather than only the total.
+        self.term_abs = {k: deque(maxlen=5000) for k in PHI_TERMS}
         self.ep_count = 0
         self.best_win = -1.0
         os.makedirs(save_dir, exist_ok=True)
@@ -111,6 +114,11 @@ class BvrCallback(BaseCallback):
         for info in self.locals.get("infos", []):
             if "track_state" in info:
                 self.track_hits.append(1.0 if info["track_state"] == "TRACK" else 0.0)
+
+            st = info.get("shaping_terms")
+            if st:
+                for k in PHI_TERMS:
+                    self.term_abs[k].append(abs(st.get(k, 0.0)))
 
             outcome = info.get("terminal_outcome")
             if outcome is None:
@@ -154,6 +162,12 @@ class BvrCallback(BaseCallback):
             rec("bvr/launch_r_over_rmax", float(np.mean(self.launch_ratios)))
         if self.track_hits:
             rec("bvr/track_frac", float(np.mean(self.track_hits)))
+        term_mean = {k: float(np.mean(v)) if v else 0.0
+                     for k, v in self.term_abs.items()}
+        term_total = sum(term_mean.values())
+        for k, v in term_mean.items():
+            rec(f"bvr/term_{k}", v)
+            rec(f"bvr/termshare_{k}", v / term_total if term_total > 0 else 0.0)
         rec("bvr/episodes", self.ep_count)
         rec("bvr/opponent", CURRICULUM.index(self.opponent_type))
 
@@ -190,6 +204,9 @@ class BvrCallback(BaseCallback):
                 "mean_launch_km": round(float(np.mean(self.launch_rngs))/1000,2) if self.launch_rngs else 0,
                 "launch_r_rmax": round(float(np.mean(self.launch_ratios)),3) if self.launch_ratios else 0,
                 "track_frac":    round(float(np.mean(self.track_hits)),3) if self.track_hits else 0,
+                "term_abs":      {k: round(v, 5) for k, v in term_mean.items()},
+                "term_share":    {k: round(v/term_total, 4) if term_total > 0 else 0.0
+                                  for k, v in term_mean.items()},
                 "history":       hist,
                 "steps_done":    int(self.model.num_timesteps),
             }
