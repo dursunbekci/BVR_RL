@@ -379,6 +379,7 @@ select option{background:#050810}
               <option value="24">24</option>
               <option value="32">32</option>
             </select>
+            <div id="rollout-info" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
           </div>
         </div>
 
@@ -1144,9 +1145,24 @@ function updateETA() {
   document.getElementById('steps-eta').textContent=
     h>1?`≈ ${h.toFixed(1)} hours`:secs>60?`≈ ${(secs/60).toFixed(0)} min`:`≈ ${secs.toFixed(0)} s`;
   totalSteps=steps;
+  updateRolloutInfo();
+}
+
+// n_steps is PPO_KWARGS["n_steps"] in train_bvr.py — a module constant, not a
+// flag, so it can only drift from this mirror via a code change on both sides.
+const N_STEPS = 1024;
+function updateRolloutInfo() {
+  const ne=parseInt(document.getElementById('cfg-nenvs').value)||1;
+  const batch=parseInt(document.getElementById('cfg-batch').value)||256;
+  const rollout=N_STEPS*ne;
+  // not fmt(): it rounds 1024 to "1k", which hides exactly what this shows
+  const g=n=>n.toLocaleString('en-US');
+  document.getElementById('rollout-info').textContent =
+    `${ne} × ${g(N_STEPS)} = ${g(rollout)} per update · ${rollout/batch} minibatches`;
 }
 document.getElementById('cfg-steps').oninput=updateETA;
 document.getElementById('cfg-nenvs').onchange=updateETA;
+document.getElementById('cfg-batch').onchange=updateRolloutInfo;
 updateETA();
 
 // Shot trace modal
