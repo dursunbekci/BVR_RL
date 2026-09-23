@@ -109,6 +109,10 @@ class F16Cfg:
     # FPA → load factor
     K_GAM_NZ   = 3.0         # nz correction per rad of FPA error
 
+    # Fraction of available load factor a turn may spend on holding the
+    # aircraft level; the rest stays in reserve for the altitude loop.
+    BANK_NZ_MARGIN = 0.85
+
     # Speed → throttle
     K_V_THROT  = 0.012       # throttle change per m/s of speed error
     THROT_TC   = 2.5         # s engine lag time constant
@@ -216,38 +220,46 @@ class F16Aircraft:
             ff  = F16Cfg.FF_MIL + fab * (F16Cfg.FF_AB - F16Cfg.FF_MIL)
         self.fuel_kg = max(0.0, self.fuel_kg - ff * dt)
 
-        # ── 3. altitude autopilot → nz command ──────────────────────
-        alt_err   = alt_cmd - self.z
-        gamma_cmd = float(np.clip(F16Cfg.K_ALT_GAM * alt_err, -fpa_lim, fpa_lim))
-        gamma_err = gamma_cmd - self.gamma
-        nz_cmd    = math.cos(self.gamma) + F16Cfg.K_GAM_NZ * gamma_err
-
-        # cap to available lift (aero limit) and structural limit
+        # ── 3. available load factor (aero limit and structural limit) ──
         if q_dyn > 100.0:
             nz_aero = q_dyn * F16Cfg.S_REF * F16Cfg.CL_MAX / max(W, 1.0)
         else:
             nz_aero = F16Cfg.NZ_POS_MAX
-        nz_cmd = float(np.clip(nz_cmd, F16Cfg.NZ_NEG_MAX,
-                               min(F16Cfg.NZ_POS_MAX, nz_aero)))
+        nz_avail = min(F16Cfg.NZ_POS_MAX, nz_aero)
 
         # ── 4. heading autopilot → bank → roll rate ──────────────────
+        # Holding level at bank φ takes nz = cos(γ)/cos φ. Banking past what
+        # nz_avail can support means losing altitude no matter how hard the
+        # aircraft pulls, so bank is capped at that point, less a margin.
+        phi_lim  = min(F16Cfg.PHI_MAX,
+                       math.acos(min(1.0, math.cos(self.gamma)
+                                     / (F16Cfg.BANK_NZ_MARGIN * nz_avail))))
         hdg_err  = _wrap_pi(hdg_cmd - self.chi)
-        phi_cmd  = float(np.clip(F16Cfg.K_HDG_PHI * hdg_err,
-                                  -F16Cfg.PHI_MAX, F16Cfg.PHI_MAX))
+        phi_cmd  = float(np.clip(F16Cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
         phi_err  = phi_cmd - self.phi
         phi_dot  = float(np.clip(F16Cfg.K_PHI_ROLL * phi_err,
                                   -F16Cfg.ROLL_MAX, F16Cfg.ROLL_MAX))
         self.phi = float(np.clip(self.phi + phi_dot * dt,
                                   -F16Cfg.PHI_MAX, F16Cfg.PHI_MAX))
 
-        # ── 5. aerodynamics ──────────────────────────────────────────
+        # ── 5. altitude autopilot → nz command ──────────────────────
+        alt_err   = alt_cmd - self.z
+        gamma_cmd = float(np.clip(F16Cfg.K_ALT_GAM * alt_err, -fpa_lim, fpa_lim))
+        gamma_err = gamma_cmd - self.gamma
+        # Only nz·cos φ acts vertically. Without the division a steep turn
+        # spirals into the ground while altitude hold is commanded.
+        nz_cmd    = ((math.cos(self.gamma) + F16Cfg.K_GAM_NZ * gamma_err)
+                     / max(math.cos(self.phi), 0.1))
+        nz_cmd    = float(np.clip(nz_cmd, F16Cfg.NZ_NEG_MAX, nz_avail))
+
+        # ── 6. aerodynamics ──────────────────────────────────────────
         CL   = float(np.clip(nz_cmd * W / max(q_dyn * F16Cfg.S_REF, 1.0),
                               F16Cfg.CL_MIN, F16Cfg.CL_MAX))
         CD   = F16Cfg.CD0 + F16Cfg.K_IND * CL ** 2 + _cd_rise(mach)
         D    = q_dyn * F16Cfg.S_REF * CD
         alpha = float(np.clip(CL / F16Cfg.CL_ALPHA, -0.25, 0.45))
 
-        # ── 6. equations of motion ───────────────────────────────────
+        # ── 7. equations of motion ───────────────────────────────────
         # Axial: speed change from net thrust minus drag minus gravity-along-path
         V_dot = (T * math.cos(alpha) - D) / self.mass - G * math.sin(self.gamma)
 
@@ -259,7 +271,7 @@ class F16Aircraft:
         chi_dot = G * nz_cmd * math.sin(self.phi) \
                   / max(self.V * math.cos(self.gamma), 1.0)
 
-        # ── 7. integrate ─────────────────────────────────────────────
+        # ── 8. integrate ─────────────────────────────────────────────
         self.V     = float(np.clip(self.V + V_dot * dt,
                                     F16Cfg.V_STALL, F16Cfg.MACH_MAX * self._a_sound))
         self.gamma = float(np.clip(self.gamma + gamma_dot * dt, -1.20, 1.20))
@@ -271,7 +283,7 @@ class F16Aircraft:
         self.y += self.V * cg * cc * dt
         self.z  = float(np.clip(self.z + self.V * sg * dt, 10.0, F16Cfg.ALT_CEIL))
 
-        # ── 8. derived observation quantities ────────────────────────
+        # ── 9. derived observation quantities ────────────────────────
         self.mach  = mach
         self.alpha = alpha
         self.beta  = 0.0
