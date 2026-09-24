@@ -114,6 +114,24 @@ COST_TERMS = ["heading","shots"]
 REWARD_TERMS = PHI_TERMS + COST_TERMS
 
 
+class OpponentError(RuntimeError):
+    """The opponent raised while flying; the episode cannot be trusted."""
+    def __init__(self, env=None, cause=None):
+        if env is None:                     # unpickling across processes
+            super().__init__(cause); return
+        who = getattr(env._opponent, "label", env._opponent_type.name)
+        hint = ""
+        if isinstance(cause, (AttributeError, ImportError, TypeError)):
+            hint = (" This kind of error usually means the .py files on disk are from"
+                    " different versions: run `git status` and restore any file you did"
+                    " not change on purpose (git checkout -- <file>).")
+        super().__init__(f"opponent {who} failed at t={env._t_sim:.1f} s: "
+                         f"{type(cause).__name__}: {cause}.{hint}")
+
+    def __reduce__(self):                   # keep the message when sent between processes
+        return (OpponentError, (None, str(self)))
+
+
 class BvrEnv(gym.Env):
     metadata = {"render_modes":[]}
 
@@ -339,9 +357,13 @@ class BvrEnv(gym.Env):
             pkt["fire"]         = 1 if k<fire_frames else 0
             pkt["msl_guidance"] = self._guidance_packet()
 
+            # An opponent that fails must stop the run. This used to print and
+            # substitute an empty command, which quietly turned any opponent
+            # into a straight-flying, unarmed target while every log still
+            # reported the real opponent's name.
             try:    opp = self._opponent.act(self._state, self._t_sim)
             except Exception as e:
-                print(f"[bvr_env] opponent: {e}"); opp={}
+                raise OpponentError(self, e) from e
 
             tlm = self._world.step(pkt, opp)
             self._ingest(tlm)

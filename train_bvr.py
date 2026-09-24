@@ -33,7 +33,9 @@ on a number that means nothing.
 import argparse
 import json
 import os
+import sys
 import time
+import traceback
 from collections import deque
 
 import numpy as np
@@ -425,16 +427,30 @@ def main():
     cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
                      auto_curriculum=not args.no_curriculum)
 
+    failure = None
     try:
         model.learn(total_timesteps=args.steps, callback=cb,
                     tb_log_name=f"bvr_{int(time.time())}")
     except KeyboardInterrupt:
         print("\n[bvr] interrupted")
+    except (EOFError, BrokenPipeError, ConnectionResetError):
+        # A SubprocVecEnv worker raised and died; it printed its own traceback
+        # (e.g. an OpponentError) above. Here the only symptom is a dead pipe.
+        failure = "an environment worker process failed; its error is printed above"
+    except Exception as e:
+        traceback.print_exc()
+        failure = f"{type(e).__name__}: {e}"
     finally:
         run_name = os.path.basename(args.run_name.strip()) or "latest"
         model.save(os.path.join(args.save_dir, run_name))
         print(f"[bvr] saved final model to {os.path.join(args.save_dir, run_name)}.zip")
-        vec.close()
+        try:
+            vec.close()
+        except (EOFError, BrokenPipeError, ConnectionResetError, OSError):
+            pass            # a worker is already dead; nothing left to close cleanly
+    if failure:
+        print(f"[bvr] TRAINING STOPPED BY AN ERROR: {failure}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
