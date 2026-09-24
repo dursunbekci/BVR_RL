@@ -257,6 +257,10 @@ class BvrEnv(gym.Env):
         sim_dt      = self._world.SIM_DT
         n_frames    = max(1,int(round(duration/sim_dt)))
         fire_frames = 1 if fire else 0
+        # The opponent flies on truth, so it times its shots against its true
+        # R-max on us from the same calibrated envelope the agent uses. Once per
+        # decision: it changes slowly, and at 50 Hz it cost ~30% of throughput.
+        self._opponent.rmax_t = self._bandit_rmax()
 
         for k in range(n_frames):
             pkt = dict(cmd)
@@ -334,6 +338,15 @@ class BvrEnv(gym.Env):
         return float(base)
 
     # ── radar / track adapter ─────────────────────────────────────────
+    def _bandit_rmax(self) -> float:
+        """The bandit's true R-max against us, from ground truth."""
+        s=self._state
+        tp=self._to_enu(s.get("lat_t",REF_LAT),s.get("lon_t",REF_LON),s.get("alt_t",9000))
+        ua=aspect_deg_from_vectors(tp,self._own_pos_enu(),self._own_vel_enu())
+        rmt,_=self._env_mdl.compute(s.get("speed_t",280)/A_SOUND,s.get("alt_t",9000),ua,
+                                    s.get("speed",280)/A_SOUND)
+        return float(rmt)
+
     def _own_pos_enu(self) -> np.ndarray:
         s=self._state
         return self._to_enu(s.get("lat",REF_LAT),s.get("lon",REF_LON),s.get("alt",9000))
@@ -485,10 +498,7 @@ class BvrEnv(gym.Env):
         altt=s.get("alt_t",9000); spdt=s.get("speed_t",280)
         eo=alt+spd**2/(2*G); et=altt+spdt**2/(2*G)
         rng=s.get("range",RANGE_MAX)
-        ov=self._own_vel_enu()
-        tp=self._to_enu(s.get("lat_t",REF_LAT),s.get("lon_t",REF_LON),altt)
-        ua=aspect_deg_from_vectors(tp,self._own_pos_enu(),ov)
-        rmt,_=self._env_mdl.compute(spdt/A_SOUND,altt,ua,spd/A_SOUND)
+        rmt=self._bandit_rmax()
         p=np.array([
             rng,s.get("closure",0),
             math.cos(aa),math.sin(aa),math.cos(aat),math.sin(aat),
