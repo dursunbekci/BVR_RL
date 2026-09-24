@@ -154,7 +154,12 @@ def make_selfplay_opponent(env, pool_dir: str, rng):
 class PolicyOpponent:
     """AC2 flown by a frozen policy that sees the fight through its own radar."""
 
-    def __init__(self, env, model, privileged: bool, label: str):
+    def __init__(self, env, model, privileged: bool, label: str,
+                 deterministic: bool = False, doctrine: str = None):
+        # Training samples actions (deterministic=False) for opponent variety;
+        # evaluation may fix both the action choice and the doctrine.
+        self._deterministic = bool(deterministic)
+        self._doctrine = doctrine
         self._env = env
         self._model = model
         self._obs = env.selfplay_observer(privileged)
@@ -170,6 +175,8 @@ class PolicyOpponent:
         o._state = {}
         o._last_shot_t = -999.0
         o._last_convert_t = -1e9
+        if self._doctrine is not None:
+            o._doctrine_cfg = str(self._doctrine).upper()
         o._pick_doctrine()          # the snapshot fights under its own doctrine
         o._prev_hdg_off = 0.0
         self._next_decision = -1.0
@@ -198,7 +205,8 @@ class PolicyOpponent:
             obs = self._stack.update(raw) if self._started else self._stack.reset(raw)
             self._started = True
             mask = o.action_masks()
-            a, _ = self._model.predict(obs, action_masks=mask, deterministic=False)
+            a, _ = self._model.predict(obs, action_masks=mask,
+                                       deterministic=self._deterministic)
             a = [int(x) for x in np.asarray(a).reshape(-1)]
             self._cmd = o._encode_cmd(a[0], a[1], a[2], 0)
             if a[3] == 1 and mask[-1]:

@@ -156,6 +156,9 @@ class BvrEnv(gym.Env):
         # Directory of policy snapshots for the SELF_PLAY stage (bvr_selfplay).
         self._selfplay_pool = selfplay_pool
         self._sp_observers = {}
+        # Optional callable(env) -> opponent, overriding opponent_type for every
+        # episode. The cross-play evaluator uses it to pit two chosen policies.
+        self._opponent_factory = None
         self._opponent_type = opponent_type
         self._gamma = float(gamma_discount)
         if self._gamma < 0.99:
@@ -217,7 +220,9 @@ class BvrEnv(gym.Env):
 
         ic = self._random_ic()
         self._episode_id = int(self._rng.integers(1,2_000_000_000))
-        if self._opponent_type==BvrOpponentType.SELF_PLAY:
+        if self._opponent_factory is not None:
+            self._opponent = self._opponent_factory(self)
+        elif self._opponent_type==BvrOpponentType.SELF_PLAY:
             from bvr_selfplay import make_selfplay_opponent
             self._opponent = make_selfplay_opponent(self,self._selfplay_pool,self._rng)
         else:
@@ -393,6 +398,11 @@ class BvrEnv(gym.Env):
         s=self._state
         if not s: return False
         if s.get("alt",9000)<self.MIN_ALT:    self._outcome="CRASH";  return True
+        # The world never reports a crash (the flight model just clamps at
+        # 10 m), so the same floor must be applied to the bandit here. Without
+        # it BANDIT_CRASH could not happen and a self-play snapshot could fly
+        # into the ground and keep fighting while the agent could not.
+        if s.get("alt_t",9000)<self.MIN_ALT:  self._outcome="BANDIT_CRASH"; return True
         if s.get("range",0)>self.ESCAPE_RANGE: self._outcome="ESCAPE"; return True
         return False
 

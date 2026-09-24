@@ -6,3 +6,6 @@ __pycache__/
 # machine that trained them.
 models_bvr/*.zip
 models_bvr/selfplay_pool/
+
+# Cross-play evaluation output
+crossplay_results/
