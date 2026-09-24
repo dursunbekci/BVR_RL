@@ -1,0 +1,8 @@
+# Python bytecode: regenerated on every run, and differs per Python version.
+__pycache__/
+*.py[cod]
+
+# Training outputs. Models are large, change every run and belong to the
+# machine that trained them.
+models_bvr/*.zip
+models_bvr/selfplay_pool/
