@@ -14,6 +14,8 @@ scripted opponent in disguise:
     to truth guidance for scripted opponents), so the 3-second support rule
     binds both sides.
   * Fire is gated by the same _can_fire() rule the agent's mask uses.
+  * The snapshot draws its own missile doctrine each episode, independent of
+    the agent's, and sees it through the same doctrine input.
 
 Opponents per episode: with probability SCRIPTED_FRAC an ADAPTIVE_SHOOTER,
 which keeps a committed aggressor in the mix so self-play cannot settle into
@@ -114,11 +116,12 @@ def load_policy(path: str):
         return hit
     import torch
     from gymnasium import spaces
-    from sb3_contrib import MaskablePPO
+    from bvr_compat import load_model
     # Each vec-env worker would otherwise start a full-width torch thread pool
     # for a batch-of-one forward pass, oversubscribing the CPU many times over.
     torch.set_num_threads(1)
-    model = MaskablePPO.load(path, device="cpu")
+    # Snapshots taken before an observation input was added are widened.
+    model = load_model(path, device="cpu", log=None)
     entry = (model, isinstance(model.observation_space, spaces.Dict))
     _CACHE[path] = entry
     while len(_CACHE) > _CACHE_MAX:
@@ -167,6 +170,8 @@ class PolicyOpponent:
         o._state = {}
         o._last_shot_t = -999.0
         o._last_convert_t = -1e9
+        o._pick_doctrine()          # the snapshot fights under its own doctrine
+        o._prev_hdg_off = 0.0
         self._next_decision = -1.0
         self._started = False
         self._cmd = None

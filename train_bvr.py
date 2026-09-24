@@ -21,6 +21,9 @@ TensorBoard:
     bvr/track_frac          fraction of steps with a valid TRACK
     bvr/timeout_rate        watch this: a rising timeout rate means the
                             passivity collapse is starting
+    bvr/bank_rev_per_min    wing-rocking: bank reversals per minute of flight
+    bvr/<DOCTRINE>_shots    shots per episode under each missile doctrine
+    bvr/<DOCTRINE>_pk       (with --doctrine mixed, they should separate)
 
 Win rate is computed over TERMINAL episode outcomes only. Per-step outcome
 counting dilutes it by ~the episode length and makes the curriculum advance
@@ -40,7 +43,8 @@ from sb3_contrib.common.maskable.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack
 
-from bvr_env import BvrEnv, PHI_TERMS
+from bvr_env import BvrEnv, REWARD_TERMS, DOCTRINES, DOCTRINE_MIXED
+from bvr_compat import load_model
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
 from bvr_selfplay import snapshot as selfplay_snapshot
@@ -110,7 +114,7 @@ class BvrCallback(BaseCallback):
         self.track_hits = deque(maxlen=5000)
         # |per-term shaping contribution|, to show which part of the potential
         # is actually driving the reward rather than only the total.
-        self.term_abs = {k: deque(maxlen=5000) for k in PHI_TERMS}
+        self.term_abs = {k: deque(maxlen=5000) for k in REWARD_TERMS}
         self.ep_count = 0
         # Episodes finished against the CURRENT opponent. The advance gate
         # cannot use len(self.outcomes): that deque is capped at 50, so a
@@ -122,6 +126,11 @@ class BvrCallback(BaseCallback):
         # Opponent behind each of the last 50 outcomes, for the SELF_PLAY split
         # between policy snapshots and the scripted shooter in the mix.
         self.opp_kinds = deque(maxlen=50)
+        # (doctrine, outcome, shots) — longer than 50 so each of the three
+        # doctrines in a mixed run still gets a usable sample.
+        self.doctrine_eps = deque(maxlen=150)
+        # (bank reversals, seconds flown) per episode.
+        self.bank = deque(maxlen=50)
         os.makedirs(save_dir, exist_ok=True)
 
     def _on_step(self) -> bool:
@@ -134,7 +143,8 @@ class BvrCallback(BaseCallback):
 
             st = info.get("shaping_terms")
             if st:
-                for k in PHI_TERMS:
+                st = {**st, **info.get("cost_terms", {})}
+                for k in REWARD_TERMS:
                     self.term_abs[k].append(abs(st.get(k, 0.0)))
 
             outcome = info.get("terminal_outcome")
@@ -147,6 +157,10 @@ class BvrCallback(BaseCallback):
             self.opp_kinds.append("policy" if str(info.get("opponent_detail", "")).startswith("policy:")
                                   else "scripted")
             self.shots.append(int(info.get("shots_fired", 0)))
+            self.doctrine_eps.append((info.get("doctrine", "AGGRESSIVE"), outcome,
+                                      int(info.get("shots_fired", 0))))
+            self.bank.append((int(info.get("bank_reversals", 0)),
+                              float(info.get("flight_time", 0.0))))
             for lg in info.get("launch_log", []):
                 self.launch_rngs.append(lg["range_true"] if lg["range_true"] > 0 else lg["range_est"])
                 self.launch_ratios.append(lg["r_over_rmax"])
@@ -200,6 +214,25 @@ class BvrCallback(BaseCallback):
                     wr = outs.count("KILL") / len(outs)
                     rec(f"bvr/win_rate_vs_{kind}", wr)
                     split += f" | vs {kind} {wr:5.1%} ({len(outs)})"
+        flown = sum(t for _, t in self.bank)
+        bank_rpm = 60.0 * sum(r for r, _ in self.bank) / flown if flown > 0 else 0.0
+        rec("bvr/bank_rev_per_min", bank_rpm)
+        doctrine = {}
+        for d in DOCTRINES:
+            eps = [(o, sh) for dd, o, sh in self.doctrine_eps if dd == d]
+            if not eps:
+                continue
+            k = sum(o in ("KILL", "MUTUAL_KILL") for o, _ in eps)
+            fired = sum(sh for _, sh in eps)
+            doctrine[d] = {"n": len(eps),
+                           "win": round(sum(o == "KILL" for o, _ in eps) / len(eps), 3),
+                           "shots": round(fired / len(eps), 2),
+                           "pk": round(k / fired, 3) if fired else 0.0}
+            rec(f"bvr/{d}_win", doctrine[d]["win"])
+            rec(f"bvr/{d}_shots", doctrine[d]["shots"])
+            rec(f"bvr/{d}_pk", doctrine[d]["pk"])
+        dline = "".join(f" | {d[:3]} {v['shots']:.1f}sh Pk{v['pk']:.2f}"
+                        for d, v in doctrine.items()) if len(doctrine) > 1 else ""
         rec("bvr/episodes", self.ep_count)
         rec("bvr/opponent", CURRICULUM.index(self.opponent_type))
 
@@ -208,7 +241,7 @@ class BvrCallback(BaseCallback):
                   f"win {win_rate:5.1%} loss {losses/n:5.1%} mut {mutual/n:5.1%} "
                   f"to {timeouts/n:5.1%} crash {crashes/n:5.1%} bcrash {bandit_crashes/n:5.1%} | "
                   f"Pk {(kills+mutual)/total_shots:4.2f} | "
-                  f"shots/ep {total_shots/n:4.2f}{split}")
+                  f"shots/ep {total_shots/n:4.2f} | rev/min {bank_rpm:4.1f}{split}{dline}")
 
         # Write metrics for the GUI. Appended to a rolling history list so
         # the browser can draw trend charts without accumulating unbounded data.
@@ -242,6 +275,8 @@ class BvrCallback(BaseCallback):
                 "term_abs":      {k: round(v, 5) for k, v in term_mean.items()},
                 "term_share":    {k: round(v/term_total, 4) if term_total > 0 else 0.0
                                   for k, v in term_mean.items()},
+                "bank_rev_per_min": round(bank_rpm, 2),
+                "doctrine":      doctrine,
                 "history":       hist,
                 "steps_done":    int(self.model.num_timesteps),
             }
@@ -283,6 +318,7 @@ class BvrCallback(BaseCallback):
         self.outcomes.clear()
         self.shots.clear()
         self.opp_kinds.clear()
+        self.doctrine_eps.clear()
         self.stage_episodes = 0
         self.best_win = -1.0
 
@@ -294,14 +330,15 @@ class BvrCallback(BaseCallback):
 
 
 # ═════════════════════════════════════════════════════════════════════
-def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool):
+def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool,
+             doctrine):
     def _init():
         return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
                       privileged_critic=privileged,
                       enable_viz=(viz and idx == 0),
                       envelope_table=envelope_table,
-                      selfplay_pool=selfplay_pool)
+                      selfplay_pool=selfplay_pool, doctrine=doctrine)
     return _init
 
 
@@ -322,6 +359,10 @@ def main():
     ap.add_argument("--gamma", type=float, default=0.997)
     ap.add_argument("--lr",    type=float, default=2.5e-4)
     ap.add_argument("--batch-size", type=int, default=256)
+    ap.add_argument("--doctrine", type=str, default=DOCTRINE_MIXED.lower(),
+                    choices=[DOCTRINE_MIXED.lower()] + [d.lower() for d in DOCTRINES],
+                    help="missile doctrine; 'mixed' draws one per episode, which the "
+                         "policy sees, so one model learns all three")
     ap.add_argument("--envelope-table", type=str, default="envelope.npz",
                      help="calibrated Rmax/Rnez table from sweep_envelope.py. "
                           "Falls back to the (uncalibrated, ~1.5-3x optimistic) "
@@ -348,7 +389,7 @@ def main():
     # the CLI silently desynced the two and broke that guarantee.
     selfplay_pool = os.path.join(args.save_dir, "selfplay_pool")
     fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
-                    selfplay_pool)
+                    selfplay_pool, args.doctrine.upper())
            for i in range(args.n_envs)]
     vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
@@ -368,7 +409,9 @@ def main():
         kwargs["policy_kwargs"] = dict(net_arch=dict(pi=[256, 256], vf=[256, 256]))
 
     if args.resume:
-        model = MaskablePPO.load(args.resume, env=vec, **{
+        # load_model also takes checkpoints saved before the latest observation
+        # inputs were added (bvr_compat), widening them without changing a choice.
+        model = load_model(args.resume, env=vec, **{
             k: v for k, v in kwargs.items() if k not in ("policy_kwargs",)})
         print(f"[bvr] resumed from {args.resume}")
     else:

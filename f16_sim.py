@@ -23,6 +23,7 @@ Autopilot outer loop (BVR command interface):
     altTarget (m)     altitude command
     V         (m/s)   speed command
     altFPA    (rad)   FPA limit  (optional, default ±35°)
+    climbFPA  (rad)   tighter limit on climbs only (optional; dives keep altFPA)
 
 Calibration against published F-16C Block 50 data:
     9000 m, Mach 0.9, mil thrust:
@@ -187,6 +188,7 @@ class F16Aircraft:
         V_cmd   = float(cmd.get("V", self.V))
         fpa_lim = abs(float(cmd.get("altFPA", F16Cfg.GAMMA_MAX)))
         fpa_lim = float(np.clip(fpa_lim, 0.05, F16Cfg.GAMMA_MAX))
+        climb_lim = min(fpa_lim, abs(float(cmd.get("climbFPA", fpa_lim))))
 
         mach = self.V / max(self._a_sound, 1.0)
         mach = float(np.clip(mach, 0.15, F16Cfg.MACH_MAX))
@@ -244,7 +246,7 @@ class F16Aircraft:
 
         # ── 5. altitude autopilot → nz command ──────────────────────
         alt_err   = alt_cmd - self.z
-        gamma_cmd = float(np.clip(F16Cfg.K_ALT_GAM * alt_err, -fpa_lim, fpa_lim))
+        gamma_cmd = float(np.clip(F16Cfg.K_ALT_GAM * alt_err, -fpa_lim, climb_lim))
         gamma_err = gamma_cmd - self.gamma
         # Only nz·cos φ acts vertically. Without the division a steep turn
         # spirals into the ground while altitude hold is commanded.

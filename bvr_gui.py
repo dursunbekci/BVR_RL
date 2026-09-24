@@ -199,6 +199,7 @@ class TrainingManager:
             "--gamma",      str(config.get("gamma", 0.997)),
             "--lr",         str(config.get("lr", 2.5e-4)),
             "--batch-size", str(config.get("batch_size", 256)),
+            "--doctrine",   str(config.get("doctrine", "mixed")).lower(),
         ]
         if config.get("resume"):
             # The GUI's dropdown sends a path relative to the model dir (as
@@ -358,9 +359,12 @@ class EvalRunner:
             ckpt_path = Path(self._model_dir) / ckpt if ckpt else None
             if ckpt_path and ckpt_path.exists():
                 try:
-                    from sb3_contrib import MaskablePPO
                     from gymnasium import spaces
-                    model = MaskablePPO.load(str(ckpt_path), env=None)
+                    from bvr_compat import load_model
+                    # Widens checkpoints saved before the latest observation
+                    # inputs (e.g. the doctrine input) were added.
+                    model = load_model(str(ckpt_path), env=None,
+                                       log=lambda m: HUB.push({"type":"log","msg":m}))
                     privileged = isinstance(model.observation_space, spaces.Dict)
                     stacker = FrameStacker(N_STACK)
                     HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt_path}"})
@@ -377,9 +381,11 @@ class EvalRunner:
             env = BvrEnv(opponent_type=opponent, seed=config.get("seed", 0),
                          privileged_critic=privileged, gamma_discount=0.997,
                          envelope_table=envelope_table,
-                         selfplay_pool=str(Path(self._model_dir) / "selfplay_pool"))
+                         selfplay_pool=str(Path(self._model_dir) / "selfplay_pool"),
+                         doctrine=config.get("doctrine", "BALANCED"))
 
-            HUB.set_status(evaluating=True, msg=f"Eval vs {opponent_name}")
+            HUB.set_status(evaluating=True,
+                           msg=f"Eval vs {opponent_name}, {env._doctrine_cfg} doctrine")
             episode = 0
             while not self._stop_evt.is_set():
                 obs, info = env.reset()
@@ -423,7 +429,10 @@ class EvalRunner:
                 meta = {"episode": episode, "outcome": step_info.get("terminal_outcome","?"),
                         "reward": round(ep_r, 3),
                         "shots": step_info.get("shots_fired", 0),
-                        "support_losses": step_info.get("support_losses", 0)}
+                        "support_losses": step_info.get("support_losses", 0),
+                        "doctrine": step_info.get("doctrine", ""),
+                        "bank_rev_per_min": round(60.0 * step_info.get("bank_reversals", 0)
+                                                  / max(step_info.get("flight_time", 0.0), 1.0), 1)}
                 HUB.set_replay(list(frames), meta)
                 HUB.push({"type":"episode_end","meta":meta})
                 episode += 1

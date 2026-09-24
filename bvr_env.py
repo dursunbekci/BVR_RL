@@ -38,6 +38,25 @@ SPEED_CMDS      = [220.0,280.0,340.0,400.0]
 FIRE_OPTIONS    = [0,1]
 ACTION_NVEC     = [len(HDG_OFFSETS_DEG),len(ALT_DELTAS_M),len(SPEED_CMDS),len(FIRE_OPTIONS)]
 
+# Climb angle limit, by altitude. A flat 25° let every +1200/+3000 choice
+# zoom-climb: 8 -> 14 km in a minute while bleeding ~50 m/s. Up high the
+# aircraft has little excess thrust, so a real climb there is shallow. This
+# schedule holds speed within a few m/s on a 3 km climb from any altitude.
+# Dives keep the full 25°.
+CLIMB_FPA_LO_DEG, CLIMB_FPA_HI_DEG = 20.0, 10.0
+CLIMB_FPA_ALT_LO, CLIMB_FPA_ALT_HI = 5_000.0, 11_000.0
+
+# ── missile doctrine ─────────────────────────────────────────────────
+# Reward cost charged per missile fired, at launch. The policy sees the value
+# (last observation input), so one network learns all three and the doctrine
+# is picked at eval time. A shot pays for itself when it raises the kill
+# probability by more than about cost / 1.5 (kill +1 vs timeout -0.5):
+# AGGRESSIVE fires whenever in range, BALANCED needs about +7%, CONSERVATIVE
+# about +20%.
+DOCTRINES = {"AGGRESSIVE":0.0,"BALANCED":0.10,"CONSERVATIVE":0.30}
+DOCTRINE_MIXED = "MIXED"          # training: a random doctrine each episode
+SHOT_COST_MAX = max(DOCTRINES.values())
+
 # ── observation layout ────────────────────────────────────────────────
 OBS_LABELS = [
     "own_mach","own_alt","own_gamma_fpa","own_phi_cos","own_phi_sin","own_nz",
@@ -52,6 +71,9 @@ OBS_LABELS = [
     "rwr_warn","rwr_age","rwr_bearing_cos","rwr_bearing_sin",
     "rwr_seeker_active","inbound_tti",
     "t_norm","since_last_shot",
+    # Appended last: bvr_compat widens older checkpoints by adding inputs at
+    # the end of each frame, so new inputs must always go at the end.
+    "doctrine_shot_cost",
 ]
 OBS_DIM = len(OBS_LABELS)
 
@@ -60,12 +82,14 @@ OBS_PHYS_LOW = np.array([
     0,0,0,0,0,-900,-1,-1,-1,-1,-1,0,0,0,
     0,-8000,-12000,-10,0,0,0,0,
     0,0,0,0,0,0,0,0,-1,-1,0,0,0,0,
+    0,
 ],dtype=np.float32)
 OBS_PHYS_HIGH = np.array([
     2,ALT_MAX_OP,0.6,1,1,9,30000,0.5,6,1,
     1,1,1,1,12,900,1,1,1,1,1,20,12,8,
     700,8000,12000,10,3,3,3,3,
     6,90,90,1,1,5,1,120,1,1,1,90,1,120,
+    SHOT_COST_MAX,
 ],dtype=np.float32)
 assert len(OBS_PHYS_LOW)==OBS_DIM==len(OBS_PHYS_HIGH)
 
@@ -84,6 +108,10 @@ PRIV_PHYS_HIGH = np.array([RANGE_MAX,900,1,1,1,1,1,1,12000,700,12000,6,1,120,120
 # The five components of the shaping potential, in the order _potential()
 # builds them. Consumers (trainer logging, GUI panel) key off this.
 PHI_TERMS = ["envelope","track","energy","support","defence"]
+# Reward terms outside the potential: the heading-change cost and the
+# doctrine's shot cost. Logged next to PHI_TERMS in the reward drivers panel.
+COST_TERMS = ["heading","shots"]
+REWARD_TERMS = PHI_TERMS + COST_TERMS
 
 
 class BvrEnv(gym.Env):
@@ -100,14 +128,31 @@ class BvrEnv(gym.Env):
     R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.5
     R_ESCAPE=-0.6; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
 
+    # Cost of changing the heading choice, per 180° of change. Heading
+    # choices are offsets from the line to the bandit, re-picked every second;
+    # when two score alike (+30/-30) the policy flipped between them and the
+    # aircraft rocked its wings once a second without turning. This makes
+    # holding a choice the tie-break. A deliberate 135° defensive turn costs
+    # 0.011, negligible next to the defence term; flipping +30/-30 every
+    # second for 100 s costs 0.5.
+    W_HDG_CHANGE = 0.015
+    # A bank reversal is counted when bank passes this far to the other side.
+    BANK_REV_DEG = 15.0
+
     RADAR_OMEGA_COMPENSATED = False
     TRACK_CONVERT_HZ        = 10.0
 
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT,
                  gamma_discount=0.997, seed=42, instance_id=0,
                  privileged_critic=True, envelope_table=None,
-                 radar_model="sim", enable_viz=False, selfplay_pool=None):
+                 radar_model="sim", enable_viz=False, selfplay_pool=None,
+                 doctrine=DOCTRINE_MIXED):
         super().__init__()
+        doctrine=str(doctrine).upper()
+        if doctrine!=DOCTRINE_MIXED and doctrine not in DOCTRINES:
+            raise ValueError(f"doctrine {doctrine!r}: choose {DOCTRINE_MIXED} or "
+                             f"{', '.join(DOCTRINES)}")
+        self._doctrine_cfg = doctrine
         # Directory of policy snapshots for the SELF_PLAY stage (bvr_selfplay).
         self._selfplay_pool = selfplay_pool
         self._sp_observers = {}
@@ -141,6 +186,9 @@ class BvrEnv(gym.Env):
         self._events_seen=set(); self._launch_log=[]; self._last_convert_t=-1e9
         self._cmd_hdg=0.0; self._cmd_alt=9000.0; self._cmd_spd=300.0
         self._prev_phi=0.0
+        self._doctrine="AGGRESSIVE"; self._shot_cost=0.0
+        self._pick_doctrine()
+        self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
         self._phi_terms={k:0.0 for k in PHI_TERMS}
         self._prev_phi_terms=dict(self._phi_terms)
 
@@ -162,6 +210,8 @@ class BvrEnv(gym.Env):
         self._last_shot_t=-999.0; self._shots_fired=0; self._misses=0
         self._support_losses=0; self._events_seen.clear(); self._launch_log=[]
         self._state={}; self._last_convert_t=-1e9
+        self._pick_doctrine()
+        self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
         self._track.reset()
         if self._radar is not None: self._radar.reset()
 
@@ -191,7 +241,12 @@ class BvrEnv(gym.Env):
         self._step_num += 1
         want_fire = bool(FIRE_OPTIONS[i_fire]) and self._can_fire()
         cmd = self._encode_cmd(i_hdg,i_alt,i_spd,i_fire)
+        off = HDG_OFFSETS_DEG[i_hdg]
+        hdg_cost = self.W_HDG_CHANGE*abs(_wrap_deg(off-self._prev_hdg_off))/180.0
+        self._prev_hdg_off = off
+        shots_before = self._shots_fired
         self._advance(1.0/self.DECISION_HZ, cmd, fire=want_fire)
+        shot_cost = self._shot_cost*(self._shots_fired-shots_before)
 
         obs   = self._build_obs()
         phi   = self._potential()
@@ -203,12 +258,14 @@ class BvrEnv(gym.Env):
         shaping_terms = {k: self._gamma*terms[k] - self._prev_phi_terms[k]
                          for k in PHI_TERMS}
         self._prev_phi_terms = dict(terms)
-        reward = float(shaping)
+        reward = float(shaping) - hdg_cost - shot_cost
 
         terminated = self._outcome is not None
         truncated  = (not terminated) and (self._step_num >= self.MAX_STEPS)
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
+                "cost_terms":{"heading":-hdg_cost,"shots":-shot_cost},
+                "doctrine":self._doctrine,
                 "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._track.state],
                 "fired":want_fire,"opponent":self._opponent_type.name,
                 "opponent_detail":getattr(self._opponent,"label",self._opponent_type.name)}
@@ -221,6 +278,8 @@ class BvrEnv(gym.Env):
                          "misses":self._misses,
                          "support_losses":self._support_losses,
                          "launch_log":list(self._launch_log),
+                         "bank_reversals":self._bank_revs,
+                         "flight_time":self._t_sim,
                          "wpn_remaining":self._state.get("wpn_remaining",0)})
             self._ready=False
 
@@ -281,6 +340,11 @@ class BvrEnv(gym.Env):
 
             tlm = self._world.step(pkt, opp)
             self._ingest(tlm)
+            ph = self._state.get("phi",0.0)
+            if abs(ph) > self.BANK_REV_DEG*DEG2RAD:
+                sg = 1 if ph > 0 else -1
+                if self._bank_sign and sg != self._bank_sign: self._bank_revs += 1
+                self._bank_sign = sg
             self._track.tick(sim_dt)
             if (self._track.t_now - self._last_convert_t) >= (1.0/self.TRACK_CONVERT_HZ):
                 conv_dt = min(self._track.t_now - self._last_convert_t, 1.0)
@@ -359,6 +423,14 @@ class BvrEnv(gym.Env):
             o._env_mdl=self._env_mdl          # same calibrated envelope
             self._sp_observers[privileged]=o
         return o
+
+    def _pick_doctrine(self) -> None:
+        """This episode's doctrine: the configured one, or a random one."""
+        d=self._doctrine_cfg
+        if d==DOCTRINE_MIXED:
+            names=list(DOCTRINES)
+            d=names[int(self._rng.integers(len(names)))]
+        self._doctrine=d; self._shot_cost=float(DOCTRINES[d])
 
     def _bandit_rmax(self) -> float:
         """The bandit's true R-max against us, from ground truth."""
@@ -507,6 +579,7 @@ class BvrEnv(gym.Env):
             float(tm.get("tgo_est",0)) if tm else 0,
             self._step_num/float(self.MAX_STEPS),
             min(self._t_sim-self._last_shot_t,120) if self._last_shot_t>-900 else 120,
+            self._shot_cost,
         ],dtype=np.float32)
         obs=self._norm(obs,self._obs_lo,self._obs_hi)
         if not self._privileged: return obs
@@ -575,7 +648,7 @@ class BvrEnv(gym.Env):
         self._cmd_spd=float(SPEED_CMDS[isp])
         return {"mode":0,"chiDot":0,"gamma":0,
                 "V":self._cmd_spd,"hdgCmd":self._cmd_hdg,"altTarget":self._cmd_alt,
-                "altFPA":25*DEG2RAD,"hdgTurnRate":12*DEG2RAD,
+                "altFPA":25*DEG2RAD,"climbFPA":_climb_fpa(s.get("alt",9000)),"hdgTurnRate":12*DEG2RAD,
                 "maneuver":"NONE","task":"NONE","radar_cmd":1,"fire":0}
 
     # ── IC generator ───────────────────────────────────────────────────
@@ -606,6 +679,10 @@ class BvrEnv(gym.Env):
 
 def _wrap_pi(a):  return (a+math.pi)%(2*math.pi)-math.pi
 def _wrap_2pi(a): return a%(2*math.pi)
+def _wrap_deg(a): return (a+180.0)%360.0-180.0
+def _climb_fpa(alt):
+    f=min(max((alt-CLIMB_FPA_ALT_LO)/(CLIMB_FPA_ALT_HI-CLIMB_FPA_ALT_LO),0.0),1.0)
+    return (CLIMB_FPA_LO_DEG+f*(CLIMB_FPA_HI_DEG-CLIMB_FPA_LO_DEG))*DEG2RAD
 def _band(r,rn,rm):
     if r<=rn: return 1.0
     if r>=rm: return 0.0

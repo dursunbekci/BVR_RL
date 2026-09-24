@@ -354,6 +354,20 @@ select option{background:#050810}
           </select>
         </div>
 
+        <div class="field">
+          <div class="field-label">
+            <span>MISSILE DOCTRINE</span>
+            <button class="help-btn" onclick="help(this,'MISSILE DOCTRINE (training)',
+              'The missile doctrine sets a reward cost for every missile fired, charged at launch. A shot is only worth taking when it raises the chance of a kill by more than about cost ÷ 1.5.\n\n• AGGRESSIVE — cost 0. Fires whenever in range, usually emptying the rack.\n• BALANCED — cost 0.10. Fires when a shot adds more than ~7% kill chance.\n• CONSERVATIVE — cost 0.30. Fires when a shot adds more than ~20%: closer, higher-Pk shots, and waits to see if the first missile hits.\n\nThe policy sees the doctrine as an input, so one model can fly all three\n\nMIXED (recommended) draws one of the three per episode, so a single model learns all of them and you pick the doctrine when you evaluate. Pick one doctrine only to specialise a model.')">?</button>
+          </div>
+          <select id="cfg-doctrine">
+            <option value="mixed" selected>MIXED — learn all three</option>
+            <option value="aggressive">AGGRESSIVE</option>
+            <option value="balanced">BALANCED</option>
+            <option value="conservative">CONSERVATIVE</option>
+          </select>
+        </div>
+
         <div class="row2">
           <div class="field">
             <div class="field-label">
@@ -574,12 +588,31 @@ select option{background:#050810}
           </div>
         </div>
 
+        <div class="row2" style="margin-top:8px">
+          <div>
+            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+              <span style="font-size:12px;font-weight:bold;color:var(--bright)">BANK REVERSALS / MIN</span>
+              <button class="help-btn" onclick="help(this,'BANK REVERSALS PER MINUTE',
+                'How often the aircraft rolls from one side to the other (past 15° of bank each way), per minute of flight, over the last 50 episodes.\n\nA real intercept reverses a few times a minute at most. Tens per minute is wing-rocking: the policy flipping between two heading choices every second. The heading-change cost is there to push this down; if it stays high, raise W_HDG_CHANGE in bvr_env.py.')">?</button>
+            </div>
+            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rev">—</div>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+              <span style="font-size:12px;font-weight:bold;color:var(--bright)">BY DOCTRINE</span>
+              <button class="help-btn" onclick="help(this,'BY DOCTRINE',
+                'Shots per episode and realised Pk under each missile doctrine, over the last 150 episodes (shown when the run trains more than one).\n\nIf the doctrine is being learned, shots fall and Pk rises from AGGRESSIVE to CONSERVATIVE. Identical rows mean the policy is still ignoring its doctrine input.')">?</button>
+            </div>
+            <div style="font-size:11px;line-height:1.5;color:var(--bright)" id="kv-doc">—</div>
+          </div>
+        </div>
+
         <!-- REWARD DRIVERS -->
         <div style="margin-top:12px">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
             <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">REWARD DRIVERS</span>
             <button class="help-btn" onclick="help(this,'REWARD DRIVERS',
-              'Which of the five shaping terms is actually moving the reward.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — time-to-go on the nearest inbound missile\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button>
+              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — time-to-go on the nearest inbound missile\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button>
           </div>
           <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
         </div>
@@ -626,6 +659,19 @@ select option{background:#050810}
               <option value="50">50× scan</option>
             </select>
           </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span>MISSILE DOCTRINE</span>
+            <button class="help-btn" onclick="help(this,'MISSILE DOCTRINE (eval)',
+              'The missile doctrine sets a reward cost for every missile fired, charged at launch. A shot is only worth taking when it raises the chance of a kill by more than about cost ÷ 1.5.\n\n• AGGRESSIVE — cost 0. Fires whenever in range, usually emptying the rack.\n• BALANCED — cost 0.10. Fires when a shot adds more than ~7% kill chance.\n• CONSERVATIVE — cost 0.30. Fires when a shot adds more than ~20%: closer, higher-Pk shots, and waits to see if the first missile hits.\n\nThe policy sees the doctrine as an input, so one model can fly all three\n\nOnly models trained with the doctrine input (MIXED or a fixed doctrine, after this feature was added) respond to it. An older checkpoint loads fine but flies the same under every doctrine.')">?</button>
+          </div>
+          <select id="eval-doctrine">
+            <option value="AGGRESSIVE">AGGRESSIVE — cost 0</option>
+            <option value="BALANCED" selected>BALANCED — cost 0.10</option>
+            <option value="CONSERVATIVE">CONSERVATIVE — cost 0.30</option>
+          </select>
         </div>
 
         <div class="field">
@@ -886,6 +932,17 @@ function handleMetrics(d) {
   document.getElementById('kv-rrm').textContent = d.launch_r_rmax.toFixed(3);
   document.getElementById('kv-sh').textContent  = d.shots_per_ep.toFixed(2);
   document.getElementById('kv-tf').textContent  = pct(d.track_frac);
+  if(d.bank_rev_per_min!=null)
+    document.getElementById('kv-rev').textContent = d.bank_rev_per_min.toFixed(1);
+  const docs=d.doctrine?Object.entries(d.doctrine):[];
+  document.getElementById('kv-doc').innerHTML = docs.length>1
+    ? `<div style="display:grid;grid-template-columns:auto auto auto auto;column-gap:8px">`
+      +`<span style="color:var(--dim)"></span><span style="color:var(--dim)">shots</span>`
+      +`<span style="color:var(--dim)">Pk</span><span style="color:var(--dim)">win</span>`
+      +docs.map(([k,v])=>`<span>${k.slice(0,3)}</span><span>${v.shots.toFixed(1)}</span>`
+        +`<span>${v.pk.toFixed(2)}</span><span>${(v.win*100).toFixed(0)}%</span>`).join('')
+      +`</div>`
+    : (docs.length?`${docs[0][0]} only`:'—');
 
   if(d.shots_per_ep>0) {
     document.getElementById('log-shots-badge').textContent =
@@ -903,12 +960,14 @@ function handleMetrics(d) {
   }
 }
 
-// Order and weights mirror PHI_TERMS / W_* in bvr_env.py.
+// Order mirrors REWARD_TERMS in bvr_env.py: PHI_TERMS, then COST_TERMS.
 const TERM_INFO=[['envelope','ENVELOPE','var(--green)'],
                  ['track',   'TRACK',   'var(--amber)'],
                  ['energy',  'ENERGY',  'var(--blue)'],
                  ['support', 'SUPPORT', 'var(--teal)'],
-                 ['defence', 'DEFENCE', 'var(--red)']];
+                 ['defence', 'DEFENCE', 'var(--red)'],
+                 ['heading', 'HEADING', 'var(--yellow)'],
+                 ['shots',   'SHOTS',   'var(--dim)']];
 function updateTermBars(share, abs) {
   const el=document.getElementById('term-bars');
   if(!share){
@@ -1005,7 +1064,9 @@ function onEpEnd(meta) {
   tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;
   for(const k in tacMsls)delete tacMsls[k];
   t3ClearTrails();
-  addLog(`[ep] outcome=${meta.outcome}  R=${meta.reward}  shots=${meta.shots}  support_losses=${meta.support_losses}`,'log-ok');
+  addLog(`[ep] outcome=${meta.outcome}  R=${meta.reward}  shots=${meta.shots}  support_losses=${meta.support_losses}`
+        +(meta.doctrine?`  doctrine=${meta.doctrine}`:'')
+        +(meta.bank_rev_per_min!=null?`  bank_rev/min=${meta.bank_rev_per_min}`:''),'log-ok');
   fetch('/replay').then(r=>r.json()).then(d=>{
     lastDecisions=d.frames?extractShots(d.frames):[];
   }).catch(()=>{});
@@ -1120,10 +1181,11 @@ document.getElementById('btn-train').onclick=()=>{
   const curr=document.getElementById('cfg-curriculum').value==='1';
   const resume=document.getElementById('cfg-resume').value.trim();
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
+  const doctrine=document.getElementById('cfg-doctrine').value;
   totalSteps=steps; epStartTime=Date.now(); epCount=0; stepsDone=0;
   logArr=[];
   // Clear all displays so old-run values don't mislead
-  ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf'].forEach(id=>{
+  ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf','kv-rev','kv-doc'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.textContent='—';
   });
   ['kpi-wr','kpi-ex','kpi-pk','kpi-to'].forEach(id=>{
@@ -1143,10 +1205,10 @@ document.getElementById('btn-train').onclick=()=>{
   STAGE_IDS.forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
-  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
+  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
-    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName}});
+    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
@@ -1161,11 +1223,12 @@ document.getElementById('btn-eval').onclick=()=>{
   const opp=document.getElementById('eval-opponent').value;
   const ckpt=document.getElementById('eval-ckpt').value.trim();
   const speed=parseFloat(document.getElementById('eval-speed').value)||3;
+  const doctrine=document.getElementById('eval-doctrine').value;
   tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;
   for(const k in tacMsls)delete tacMsls[k]; lastFrame=null;
   t3ClearTrails();
-  addLog(`▶ Eval: opponent=${opp}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok');
-  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed}});
+  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok');
+  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine}});
   send({cmd:'set_eval_speed',speed});
 };
 document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn');send({cmd:'stop_eval'})};
