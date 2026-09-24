@@ -6,10 +6,10 @@ Same contract as opponents.py: act(state, t_sim) returns an UNSUFFIXED command
 dict; bvr_env adds the `_t` suffix.
 
 Curriculum, easiest → hardest:
-    STRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE_SHOOTER
+    STRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE_SHOOTER → SELF_PLAY
 
-SELF_PLAY is planned but has no implementation yet, so it is not in the
-curriculum and create() refuses it.
+SELF_PLAY opponents are frozen policy snapshots, built by bvr_env through
+bvr_selfplay.py rather than by create(), which only builds scripted ones.
 
 SHOOTER is the important one. A rule-based BVR opponent that commits, shoots,
 cranks and drags is a genuinely strong baseline — strong enough that beating
@@ -40,7 +40,7 @@ class BvrOpponentType(Enum):
     NOTCHER = auto()           # actively beams to break lock, unarmed
     SHOOTER = auto()           # armed, fixed doctrine
     ADAPTIVE_SHOOTER = auto()  # armed, randomised doctrine parameters
-    SELF_PLAY = auto()         # planned; no opponent class yet
+    SELF_PLAY = auto()         # policy snapshots; built by bvr_selfplay
 
 
 CURRICULUM = [
@@ -49,6 +49,7 @@ CURRICULUM = [
     BvrOpponentType.NOTCHER,
     BvrOpponentType.SHOOTER,
     BvrOpponentType.ADAPTIVE_SHOOTER,
+    BvrOpponentType.SELF_PLAY,
 ]
 
 
@@ -84,10 +85,12 @@ class BvrOpponent:
             BvrOpponentType.SHOOTER: ShooterOpponent,
             BvrOpponentType.ADAPTIVE_SHOOTER: AdaptiveShooterOpponent,
         }.get(opp_type)
-        # No silent fallback: defaulting to STRAIGHT turned SELF_PLAY into the
-        # easiest opponent while every log still reported SELF_PLAY.
+        # No silent fallback: defaulting to STRAIGHT once turned SELF_PLAY into
+        # the easiest opponent while every log still reported SELF_PLAY.
         if cls is None:
-            raise NotImplementedError(f"no opponent implementation for {opp_type.name}")
+            raise NotImplementedError(
+                f"create() builds scripted opponents only; {opp_type.name} is "
+                "built by bvr_env via bvr_selfplay.make_selfplay_opponent()")
         return cls(rng=rng)
 
     # ── helpers ─────────────────────────────────────────────────────

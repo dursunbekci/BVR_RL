@@ -306,59 +306,7 @@ class TrainingManager:
 # is N_STACK stacked frames per key, not one. N_STACK is a module constant in
 # train_bvr.py (not a CLI flag), so it can't drift between a checkpoint and
 # this file without a code change on both sides.
-N_STACK = 8
-
-
-class FrameStacker:
-    """
-    Reproduces stable_baselines3.common.vec_env.stacked_observations.
-    StackedObservations for a single, non-vectorized env — verified
-    byte-for-byte identical to it (same seed, same action sequence, both
-    with and without a reset mid-sequence) before this was wired in.
-
-    EvalRunner drives BvrEnv directly, one frame at a time, so it can read
-    env._state for the telemetry websocket and control exactly when an
-    episode ends. Wrapping it in the real DummyVecEnv+VecFrameStack instead
-    would fight that: VecEnv auto-resets the underlying env the instant a
-    step returns done=True, so env._state would already belong to the NEXT
-    episode by the time this loop got to build the terminal frame or decide
-    to break. This class gets the same stacked observation without taking
-    stepping control away from the loop below.
-    """
-    def __init__(self, n_stack: int):
-        self.n_stack = n_stack
-        self._buf: dict = {}
-
-    def _ensure(self, key, dim, dtype):
-        cur = self._buf.get(key)
-        if cur is None or cur.shape[0] != dim * self.n_stack:
-            self._buf[key] = np.zeros(dim * self.n_stack, dtype=dtype)
-
-    def reset(self, obs):
-        if isinstance(obs, dict):
-            return {k: self._reset_one(k, v) for k, v in obs.items()}
-        return self._reset_one("__box__", obs)
-
-    def _reset_one(self, key, arr):
-        arr = np.asarray(arr)
-        self._ensure(key, arr.shape[0], arr.dtype)
-        buf = self._buf[key]
-        buf[:] = 0
-        buf[-arr.shape[0]:] = arr
-        return buf.copy()
-
-    def update(self, obs):
-        if isinstance(obs, dict):
-            return {k: self._update_one(k, v) for k, v in obs.items()}
-        return self._update_one("__box__", obs)
-
-    def _update_one(self, key, arr):
-        arr = np.asarray(arr)
-        dim = arr.shape[0]
-        buf = self._buf[key]
-        buf[:] = np.roll(buf, -dim)
-        buf[-dim:] = arr
-        return buf.copy()
+from bvr_selfplay import FrameStacker, N_STACK
 
 
 class EvalRunner:
@@ -428,7 +376,8 @@ class EvalRunner:
             envelope_table = "envelope.npz" if os.path.exists("envelope.npz") else None
             env = BvrEnv(opponent_type=opponent, seed=config.get("seed", 0),
                          privileged_critic=privileged, gamma_discount=0.997,
-                         envelope_table=envelope_table)
+                         envelope_table=envelope_table,
+                         selfplay_pool=str(Path(self._model_dir) / "selfplay_pool"))
 
             HUB.set_status(evaluating=True, msg=f"Eval vs {opponent_name}")
             episode = 0

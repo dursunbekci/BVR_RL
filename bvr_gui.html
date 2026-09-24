@@ -350,6 +350,7 @@ select option{background:#050810}
             <option value="notcher">NOTCHER</option>
             <option value="shooter">SHOOTER</option>
             <option value="adaptive_shooter">ADAPTIVE SHOOTER</option>
+            <option value="self_play">SELF PLAY</option>
           </select>
         </div>
 
@@ -419,7 +420,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>AUTO-CURRICULUM</span>
               <button class="help-btn" onclick="help(this,'AUTO-CURRICULUM',
-                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes is at least 65% and at least 60 episodes have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE\n\nADAPTIVE is the last stage: self-play is planned but not implemented yet.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
+                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes is at least 65% and at least 60 episodes have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nIn SELF_PLAY the opponent is a frozen snapshot of the agent itself, observing through its own radar, with an ADAPTIVE shooter in a third of episodes. Snapshots are taken on entering the stage and every 250k steps, into models_bvr/selfplay_pool. The log splits the win rate by opponent kind.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
             </div>
             <select id="cfg-curriculum">
               <option value="1" selected>ON (auto-advance)</option>
@@ -469,6 +470,8 @@ select option{background:#050810}
           <div class="curr-stage" id="cs-shooter">SHOOTER</div>
           <div style="color:var(--border);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-adaptive">ADAPTIVE</div>
+          <div style="color:var(--border);padding:0 2px">›</div>
+          <div class="curr-stage" id="cs-self_play">SELF_PLAY</div>
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 2px">
@@ -606,6 +609,7 @@ select option{background:#050810}
               <option value="NOTCHER">NOTCHER</option>
               <option value="SHOOTER" selected>SHOOTER</option>
               <option value="ADAPTIVE_SHOOTER">ADAPTIVE</option>
+              <option value="SELF_PLAY">SELF PLAY</option>
             </select>
           </div>
           <div class="field">
@@ -768,7 +772,7 @@ const wrHist=[];
 let totalSteps=2000000, epStartTime=Date.now(), epCount=0, stepsDone=0;
 const TRACK_N=['NONE','ACQUIRING','TRACK','COAST'];
 const TRACK_C=['var(--text)','var(--amber)','var(--green)','var(--red)'];
-const STAGE_IDS=['straight','evasive','notcher','shooter','adaptive'];
+const STAGE_IDS=['straight','evasive','notcher','shooter','adaptive','self_play'];
 
 function handle(m) {
   if(m.type==='status')    setState(m);

@@ -43,6 +43,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFram
 from bvr_env import BvrEnv, PHI_TERMS
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
+from bvr_selfplay import snapshot as selfplay_snapshot
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -83,12 +84,16 @@ N_STACK = 8
 ADVANCE_WIN_RATE = 0.65
 ADVANCE_MIN_EPISODES = 60
 
+# While in SELF_PLAY, add the current policy to the opponent pool this often,
+# so the agent keeps meeting versions of itself only a little behind it.
+SELFPLAY_SNAPSHOT_STEPS = 250_000
+
 
 # ═════════════════════════════════════════════════════════════════════
 class BvrCallback(BaseCallback):
 
     def __init__(self, vec_env, opponent_type, save_dir="models_bvr",
-                 auto_curriculum=True, verbose=1):
+                 auto_curriculum=True, selfplay_pool=None, verbose=1):
         super().__init__(verbose)
         # The VecEnv itself, not a list of raw envs: with n_envs > 1 the envs
         # live in other processes, where a Python reference cannot reach them.
@@ -112,9 +117,17 @@ class BvrCallback(BaseCallback):
         # 60-episode minimum measured on it could never be met.
         self.stage_episodes = 0
         self.best_win = -1.0
+        self.selfplay_pool = selfplay_pool
+        self.last_snapshot_step = 0
+        # Opponent behind each of the last 50 outcomes, for the SELF_PLAY split
+        # between policy snapshots and the scripted shooter in the mix.
+        self.opp_kinds = deque(maxlen=50)
         os.makedirs(save_dir, exist_ok=True)
 
     def _on_step(self) -> bool:
+        if (self.opponent_type == BvrOpponentType.SELF_PLAY
+                and self.num_timesteps - self.last_snapshot_step >= SELFPLAY_SNAPSHOT_STEPS):
+            self._snapshot()
         for info in self.locals.get("infos", []):
             if "track_state" in info:
                 self.track_hits.append(1.0 if info["track_state"] == "TRACK" else 0.0)
@@ -131,6 +144,8 @@ class BvrCallback(BaseCallback):
             self.ep_count += 1
             self.stage_episodes += 1
             self.outcomes.append(outcome)
+            self.opp_kinds.append("policy" if str(info.get("opponent_detail", "")).startswith("policy:")
+                                  else "scripted")
             self.shots.append(int(info.get("shots_fired", 0)))
             for lg in info.get("launch_log", []):
                 self.launch_rngs.append(lg["range_true"] if lg["range_true"] > 0 else lg["range_est"])
@@ -177,6 +192,14 @@ class BvrCallback(BaseCallback):
         for k, v in term_mean.items():
             rec(f"bvr/term_{k}", v)
             rec(f"bvr/termshare_{k}", v / term_total if term_total > 0 else 0.0)
+        split = ""
+        if self.opponent_type == BvrOpponentType.SELF_PLAY:
+            for kind in ("policy", "scripted"):
+                outs = [o for o, k in zip(self.outcomes, self.opp_kinds) if k == kind]
+                if outs:
+                    wr = outs.count("KILL") / len(outs)
+                    rec(f"bvr/win_rate_vs_{kind}", wr)
+                    split += f" | vs {kind} {wr:5.1%} ({len(outs)})"
         rec("bvr/episodes", self.ep_count)
         rec("bvr/opponent", CURRICULUM.index(self.opponent_type))
 
@@ -185,7 +208,7 @@ class BvrCallback(BaseCallback):
                   f"win {win_rate:5.1%} loss {losses/n:5.1%} mut {mutual/n:5.1%} "
                   f"to {timeouts/n:5.1%} crash {crashes/n:5.1%} bcrash {bandit_crashes/n:5.1%} | "
                   f"Pk {(kills+mutual)/total_shots:4.2f} | "
-                  f"shots/ep {total_shots/n:4.2f}")
+                  f"shots/ep {total_shots/n:4.2f}{split}")
 
         # Write metrics for the GUI. Appended to a rolling history list so
         # the browser can draw trend charts without accumulating unbounded data.
@@ -250,23 +273,35 @@ class BvrCallback(BaseCallback):
                                      f"pre_{nxt.name}"))
         print(f"[bvr] === CURRICULUM: {self.opponent_type.name} -> {nxt.name} ===")
         self.opponent_type = nxt
+        if nxt == BvrOpponentType.SELF_PLAY:
+            # Workers build SELF_PLAY opponents from the pool on their next
+            # reset, so it must hold a snapshot before they switch.
+            self._snapshot()
         # Reaches worker processes too. BvrEnv builds its opponent from
         # _opponent_type on reset(), so this takes effect next episode.
         self.vec.set_attr("_opponent_type", nxt)
         self.outcomes.clear()
         self.shots.clear()
+        self.opp_kinds.clear()
         self.stage_episodes = 0
         self.best_win = -1.0
 
 
+    def _snapshot(self):
+        path = selfplay_snapshot(self.model, self.selfplay_pool)
+        self.last_snapshot_step = self.num_timesteps
+        print(f"[bvr] self-play snapshot -> {path}")
+
+
 # ═════════════════════════════════════════════════════════════════════
-def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma):
+def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool):
     def _init():
         return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
                       privileged_critic=privileged,
                       enable_viz=(viz and idx == 0),
-                      envelope_table=envelope_table)
+                      envelope_table=envelope_table,
+                      selfplay_pool=selfplay_pool)
     return _init
 
 
@@ -311,7 +346,9 @@ def main():
     # 1999) when its discount matches the agent's. This used to read
     # PPO_KWARGS["gamma"] here, the module DEFAULT, so a --gamma override on
     # the CLI silently desynced the two and broke that guarantee.
-    fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma)
+    selfplay_pool = os.path.join(args.save_dir, "selfplay_pool")
+    fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
+                    selfplay_pool)
            for i in range(args.n_envs)]
     vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
@@ -337,7 +374,12 @@ def main():
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
 
-    cb = BvrCallback(vec, opponent, save_dir=args.save_dir,
+    if opponent == BvrOpponentType.SELF_PLAY:
+        # learn() resets every env before any callback runs, and a SELF_PLAY
+        # reset needs a snapshot in the pool — seed it with this policy now.
+        print(f"[bvr] self-play snapshot -> {selfplay_snapshot(model, selfplay_pool)}")
+
+    cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
                      auto_curriculum=not args.no_curriculum)
 
     try:

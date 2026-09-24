@@ -106,8 +106,11 @@ class BvrEnv(gym.Env):
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT,
                  gamma_discount=0.997, seed=42, instance_id=0,
                  privileged_critic=True, envelope_table=None,
-                 radar_model="sim", enable_viz=False):
+                 radar_model="sim", enable_viz=False, selfplay_pool=None):
         super().__init__()
+        # Directory of policy snapshots for the SELF_PLAY stage (bvr_selfplay).
+        self._selfplay_pool = selfplay_pool
+        self._sp_observers = {}
         self._opponent_type = opponent_type
         self._gamma = float(gamma_discount)
         if self._gamma < 0.99:
@@ -164,7 +167,11 @@ class BvrEnv(gym.Env):
 
         ic = self._random_ic()
         self._episode_id = int(self._rng.integers(1,2_000_000_000))
-        self._opponent   = BvrOpponent.create(self._opponent_type,rng=self._rng)
+        if self._opponent_type==BvrOpponentType.SELF_PLAY:
+            from bvr_selfplay import make_selfplay_opponent
+            self._opponent = make_selfplay_opponent(self,self._selfplay_pool,self._rng)
+        else:
+            self._opponent = BvrOpponent.create(self._opponent_type,rng=self._rng)
         self._opponent.reset(ic)
         self._world.reset(ic, episode_id=self._episode_id)
         self._cmd_hdg=float(ic["ac1_psi"]); self._cmd_alt=float(ic["ac1_alt"])
@@ -203,7 +210,8 @@ class BvrEnv(gym.Env):
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
                 "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._track.state],
-                "fired":want_fire,"opponent":self._opponent_type.name}
+                "fired":want_fire,"opponent":self._opponent_type.name,
+                "opponent_detail":getattr(self._opponent,"label",self._opponent_type.name)}
 
         if terminated or truncated:
             if truncated: self._outcome="TIMEOUT"
@@ -338,6 +346,20 @@ class BvrEnv(gym.Env):
         return float(base)
 
     # ── radar / track adapter ─────────────────────────────────────────
+    def selfplay_observer(self, privileged:bool) -> "BvrEnv":
+        """
+        A BvrEnv used only for its observation, mask, command and guidance
+        code, fed AC2's telemetry by a self-play opponent. Running the agent's
+        own code is what guarantees both sides see the fight the same way.
+        """
+        o=self._sp_observers.get(privileged)
+        if o is None:
+            o=BvrEnv(seed=self._instance*7919+17, instance_id=self._instance,
+                     privileged_critic=privileged, radar_model=self._radar_model)
+            o._env_mdl=self._env_mdl          # same calibrated envelope
+            self._sp_observers[privileged]=o
+        return o
+
     def _bandit_rmax(self) -> float:
         """The bandit's true R-max against us, from ground truth."""
         s=self._state
