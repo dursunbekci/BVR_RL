@@ -35,6 +35,7 @@ How games are played and scored
 
 import argparse
 import glob
+import sys
 import json
 import math
 import os
@@ -174,9 +175,21 @@ def expand(specs):
     return paths
 
 
+_LABELS = {}
+
+
 def label(path):
+    if path in _LABELS:
+        return _LABELS[path]
     return path[len(SCRIPTED_PREFIX):] if path.startswith(SCRIPTED_PREFIX) \
         else os.path.splitext(os.path.basename(path))[0]
+
+
+def assign_labels(paths):
+    """File stem, or parent/stem where two checkpoints share a file name."""
+    stems = [label(p) for p in paths]
+    for p, st in zip(paths, stems):
+        _LABELS[p] = (os.path.basename(os.path.dirname(p)) + "/" + st) if stems.count(st) > 1 else st
 
 
 def heatmap(rows, cols, cells, elo, out_png, title):
@@ -242,6 +255,7 @@ def main():
     if envelope is None:
         print(f"[crossplay] WARNING: {args.envelope_table} not found; using the analytic envelope")
 
+    assign_labels(models)
     rows, cols = models, models + scripted
     pairs = [(r, c) for r in rows for c in cols]
     tasks = [(r, c, k, min(CHUNK, args.episodes - k), args.seed, args.doctrine.upper(),
@@ -256,15 +270,18 @@ def main():
     games = defaultdict(list)
     t0 = time.time()
     done = 0
+    # One line per update when piped (the GUI reads lines); rewrite in place on a terminal.
+    tty = sys.stdout.isatty()
     with Pool(args.workers) as pool:
         for r, c, out in pool.imap_unordered(_play, tasks):
             games[(r, c)] += out
             done += len(out)
             el = time.time() - t0
             eta = el / done * (total - done)
-            print(f"\r[crossplay] {done}/{total} games  {el/60:5.1f} min elapsed, ~{eta/60:5.1f} min left",
-                  end="", flush=True)
-    print()
+            print(f"{chr(13) if tty else ''}[crossplay] {done}/{total} games  {el/60:5.1f} min elapsed, "
+                  f"~{eta/60:5.1f} min left", end="" if tty else "\n", flush=True)
+    if tty:
+        print()
 
     cells = {k: cell_stats(sorted(v, key=lambda g: g["i"])) for k, v in games.items()}
     results = {k: [score_of(g["outcome"]) for g in v] for k, v in games.items()}
@@ -288,6 +305,8 @@ def main():
 
     with open(os.path.join(args.out, "crossplay.json"), "w") as f:
         json.dump({"config": vars(args), "players": models + scripted,
+                   "rows": [label(r) for r in rows], "cols": [label(c) for c in cols],
+                   "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "cells": {f"{label(r)} | {label(c)}": {**cells[(r, c)], "row": r, "col": c}
                              for r, c in pairs},
                    "elo": {label(p): round(v, 1) for p, v in elo.items()},

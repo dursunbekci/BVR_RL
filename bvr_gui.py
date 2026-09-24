@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -47,6 +48,7 @@ HERE       = Path(__file__).parent
 METRICS_F  = HERE / "bvr_metrics.json"
 GUI_HTML   = HERE / "bvr_gui.html"
 MODEL_DIR  = HERE / "models_bvr"   # overwritten from --model-dir in main()
+XPLAY_DIR  = HERE / "crossplay_results"
 
 RECORD_BUFFER_SIZE = 3000   # frames per recorded episode
 
@@ -63,7 +65,7 @@ class Hub:
         # a thread in this process, and running both at once is supported. A
         # single "state" string cannot represent that, so each has its own flag.
         self._status  = {"type": "status", "training": False,
-                         "eval": False, "msg": "Ready"}
+                         "eval": False, "crossplay": False, "msg": "Ready"}
         self._clients = set()
         self._queue   = []              # outbound message queue
         self._replay_frames = []        # last episode recording
@@ -79,11 +81,12 @@ class Hub:
         return out
 
     def set_status(self, *, training: bool = None, evaluating: bool = None,
-                   msg: str = None):
+                   crossplay: bool = None, msg: str = None):
         """Update only the fields given, then broadcast the whole snapshot."""
         with self._lock:
             if training is not None:   self._status["training"] = bool(training)
             if evaluating is not None: self._status["eval"]     = bool(evaluating)
+            if crossplay is not None:  self._status["crossplay"] = bool(crossplay)
             if msg is not None:        self._status["msg"]      = msg
             snapshot = dict(self._status)
         self.push(snapshot)
@@ -137,6 +140,13 @@ class GUIHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+        elif self.path == "/crossplay":
+            data = json.dumps(_crossplay_summary()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         elif self.path == "/models":
             data = json.dumps(_list_models()).encode()
             self.send_response(200)
@@ -173,6 +183,109 @@ def _list_models() -> dict:
                           "mtime": st.st_mtime, "size": st.st_size})
     items.sort(key=lambda d: d["mtime"], reverse=True)
     return {"models": items, "model_dir": str(root)}
+
+
+def _crossplay_summary() -> dict:
+    """The last cross-play run, without the per-game list the page doesn't use."""
+    f = XPLAY_DIR / "crossplay.json"
+    if not f.exists():
+        return {}
+    try:
+        d = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return {}
+    d.pop("games", None)
+    return d
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Cross-play evaluation subprocess
+# ─────────────────────────────────────────────────────────────────────
+class CrossplayManager:
+    """
+    Runs crossplay.py as a subprocess, like training, so a long round-robin
+    never blocks the server and survives the browser closing. Progress lines
+    become progress messages; everything else goes to the log.
+    """
+    _PROGRESS = re.compile(r"\[crossplay\] (\d+)/(\d+) games")
+
+    def __init__(self, model_dir="models_bvr"):
+        self._proc = None
+        self._model_dir = model_dir
+
+    @property
+    def running(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def start(self, config: dict):
+        if self.running:
+            return
+        models = [os.path.join(self._model_dir, m) for m in config.get("models", [])]
+        if not models:
+            HUB.push({"type": "log", "msg": "[crossplay] no checkpoints selected"})
+            return
+        cmd = [sys.executable, str(HERE / "crossplay.py"), *models,
+               "--episodes", str(int(config.get("episodes", 40))),
+               "--workers",  str(int(config.get("workers", 8))),
+               "--doctrine", str(config.get("doctrine", "balanced")).lower(),
+               "--out",      str(XPLAY_DIR)]
+        scripted = [str(x).lower() for x in config.get("scripted", [])]
+        if scripted:
+            cmd += ["--scripted", *scripted]
+        if config.get("stochastic"):
+            cmd += ["--stochastic"]
+        # Own process group, so stop() can interrupt the run and its worker
+        # processes together without signalling this server.
+        kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+              else {"start_new_session": True})
+        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      bufsize=1, text=True, cwd=str(HERE), **kw)
+        threading.Thread(target=self._tail, daemon=True).start()
+        HUB.set_status(crossplay=True, msg=f"Cross-play: {len(models)} checkpoints")
+
+    def _tail(self):
+        proc = self._proc
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            m = self._PROGRESS.search(line)
+            if m:
+                HUB.push({"type": "crossplay_progress", "done": int(m.group(1)),
+                          "total": int(m.group(2)), "msg": line})
+            else:
+                HUB.push({"type": "log", "msg": line})
+        proc.wait()
+        ok = proc.returncode == 0
+        HUB.push({"type": "crossplay_done", "ok": ok})
+        HUB.set_status(crossplay=False, msg="Cross-play finished" if ok
+                       else f"Cross-play stopped (exit {proc.returncode})")
+
+    def stop(self):
+        if not self.running:
+            return
+        threading.Thread(target=self._stop, daemon=True).start()
+
+    def _stop(self):
+        """Interrupt the whole group (the run and its workers), then force it."""
+        proc = self._proc
+        try:
+            if os.name == "nt":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                os.killpg(proc.pid, signal.SIGINT)
+            proc.wait(timeout=15)
+            return
+        except Exception:
+            pass
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                               capture_output=True)
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            proc.kill()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -547,6 +660,7 @@ async def metrics_poll_loop():
 # ─────────────────────────────────────────────────────────────────────
 TRAINING_MGR = None
 EVAL_RUNNER  = None
+XPLAY_MGR    = None
 
 
 async def handle_client(ws):
@@ -583,6 +697,10 @@ async def _handle_cmd(msg: dict):
         EVAL_RUNNER.start(msg.get("config", {}))
     elif cmd == "stop_eval":
         EVAL_RUNNER.stop()
+    elif cmd == "start_crossplay":
+        XPLAY_MGR.start(msg.get("config", {}))
+    elif cmd == "stop_crossplay":
+        XPLAY_MGR.stop()
     elif cmd == "set_eval_speed":
         EVAL_RUNNER.set_speed(float(msg.get("speed", 5.0)))
     elif cmd == "ping":
@@ -604,7 +722,7 @@ async def run_ws(port: int):
 
 
 def main():
-    global TRAINING_MGR, EVAL_RUNNER, MODEL_DIR
+    global TRAINING_MGR, EVAL_RUNNER, XPLAY_MGR, MODEL_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--port",      type=int, default=5006)
     ap.add_argument("--ws-port",   type=int, default=5010)
@@ -614,6 +732,7 @@ def main():
     MODEL_DIR    = HERE / args.model_dir
     TRAINING_MGR = TrainingManager(args.model_dir)
     EVAL_RUNNER  = EvalRunner(args.model_dir)
+    XPLAY_MGR    = CrossplayManager(args.model_dir)
 
     # HTTP in a daemon thread
     t = threading.Thread(target=run_http, args=(args.port,), daemon=True)
@@ -627,6 +746,8 @@ def main():
         asyncio.run(run_ws(args.ws_port))
     except KeyboardInterrupt:
         EVAL_RUNNER.stop()
+        if XPLAY_MGR.running:
+            XPLAY_MGR._stop()
         # Block here: stop() hands the wait to a daemon thread, and daemon
         # threads die the moment main() returns — which would cut the trainer
         # off mid-save, the exact data loss this path exists to prevent.
