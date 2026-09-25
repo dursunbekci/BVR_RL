@@ -31,10 +31,13 @@ import argparse
 import asyncio
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import threading
 import time
+import zipfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
@@ -44,6 +47,8 @@ import numpy as np
 HERE       = Path(__file__).parent
 METRICS_F  = HERE / "bvr_metrics.json"
 GUI_HTML   = HERE / "bvr_gui.html"
+MODEL_DIR  = HERE / "models_bvr"   # overwritten from --model-dir in main()
+XPLAY_DIR  = HERE / "crossplay_results"
 
 RECORD_BUFFER_SIZE = 3000   # frames per recorded episode
 
@@ -56,7 +61,11 @@ class Hub:
         self._lock   = threading.Lock()
         self._latest_telemetry = None   # most recent eval frame
         self._latest_metrics   = None   # most recent training metrics
-        self._status  = {"state": "idle", "msg": "Ready"}
+        # Training and eval are independent: training is a subprocess, eval is
+        # a thread in this process, and running both at once is supported. A
+        # single "state" string cannot represent that, so each has its own flag.
+        self._status  = {"type": "status", "training": False,
+                         "eval": False, "crossplay": False, "msg": "Ready"}
         self._clients = set()
         self._queue   = []              # outbound message queue
         self._replay_frames = []        # last episode recording
@@ -71,8 +80,20 @@ class Hub:
             out, self._queue = self._queue, []
         return out
 
-    def set_status(self, state: str, msg: str = ""):
-        self.push({"type": "status", "state": state, "msg": msg})
+    def set_status(self, *, training: bool = None, evaluating: bool = None,
+                   crossplay: bool = None, msg: str = None):
+        """Update only the fields given, then broadcast the whole snapshot."""
+        with self._lock:
+            if training is not None:   self._status["training"] = bool(training)
+            if evaluating is not None: self._status["eval"]     = bool(evaluating)
+            if crossplay is not None:  self._status["crossplay"] = bool(crossplay)
+            if msg is not None:        self._status["msg"]      = msg
+            snapshot = dict(self._status)
+        self.push(snapshot)
+
+    def status_snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._status)
 
     def set_replay(self, frames: list, meta: dict):
         with self._lock:
@@ -119,8 +140,152 @@ class GUIHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+        elif self.path == "/crossplay":
+            data = json.dumps(_crossplay_summary()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif self.path == "/models":
+            data = json.dumps(_list_models()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         else:
             self.send_error(404)
+
+
+def _list_models() -> dict:
+    """
+    Scan MODEL_DIR (recursively — checkpoints live both at the top level,
+    e.g. "latest.zip", and under "archive/") for saved SB3 checkpoints.
+    SB3's save() only appends ".zip" when the given path has no suffix at
+    all, so a name like "best_STRAIGHT_0.720" is written WITHOUT a .zip
+    extension — filtering by extension would silently drop it. Filtering by
+    zipfile.is_zipfile() catches every real checkpoint regardless of name.
+    """
+    items = []
+    root = Path(MODEL_DIR)
+    if root.is_dir():
+        for p in sorted(root.rglob("*")):
+            if not p.is_file():
+                continue
+            try:
+                if not zipfile.is_zipfile(p):
+                    continue
+                st = p.stat()
+            except OSError:
+                continue
+            items.append({"path": p.relative_to(root).as_posix(),
+                          "mtime": st.st_mtime, "size": st.st_size})
+    items.sort(key=lambda d: d["mtime"], reverse=True)
+    return {"models": items, "model_dir": str(root)}
+
+
+def _crossplay_summary() -> dict:
+    """The last cross-play run, without the per-game list the page doesn't use."""
+    f = XPLAY_DIR / "crossplay.json"
+    if not f.exists():
+        return {}
+    try:
+        d = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return {}
+    d.pop("games", None)
+    return d
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Cross-play evaluation subprocess
+# ─────────────────────────────────────────────────────────────────────
+class CrossplayManager:
+    """
+    Runs crossplay.py as a subprocess, like training, so a long round-robin
+    never blocks the server and survives the browser closing. Progress lines
+    become progress messages; everything else goes to the log.
+    """
+    _PROGRESS = re.compile(r"\[crossplay\] (\d+)/(\d+) games")
+
+    def __init__(self, model_dir="models_bvr"):
+        self._proc = None
+        self._model_dir = model_dir
+
+    @property
+    def running(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def start(self, config: dict):
+        if self.running:
+            return
+        models = [os.path.join(self._model_dir, m) for m in config.get("models", [])]
+        if not models:
+            HUB.push({"type": "log", "msg": "[crossplay] no checkpoints selected"})
+            return
+        cmd = [sys.executable, str(HERE / "crossplay.py"), *models,
+               "--episodes", str(int(config.get("episodes", 40))),
+               "--workers",  str(int(config.get("workers", 8))),
+               "--doctrine", str(config.get("doctrine", "balanced")).lower(),
+               "--out",      str(XPLAY_DIR)]
+        scripted = [str(x).lower() for x in config.get("scripted", [])]
+        if scripted:
+            cmd += ["--scripted", *scripted]
+        if config.get("stochastic"):
+            cmd += ["--stochastic"]
+        # Own process group, so stop() can interrupt the run and its worker
+        # processes together without signalling this server.
+        kw = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+              else {"start_new_session": True})
+        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      bufsize=1, text=True, cwd=str(HERE), **kw)
+        threading.Thread(target=self._tail, daemon=True).start()
+        HUB.set_status(crossplay=True, msg=f"Cross-play: {len(models)} checkpoints")
+
+    def _tail(self):
+        proc = self._proc
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            m = self._PROGRESS.search(line)
+            if m:
+                HUB.push({"type": "crossplay_progress", "done": int(m.group(1)),
+                          "total": int(m.group(2)), "msg": line})
+            else:
+                HUB.push({"type": "log", "msg": line})
+        proc.wait()
+        ok = proc.returncode == 0
+        HUB.push({"type": "crossplay_done", "ok": ok})
+        HUB.set_status(crossplay=False, msg="Cross-play finished" if ok
+                       else f"Cross-play stopped (exit {proc.returncode})")
+
+    def stop(self):
+        if not self.running:
+            return
+        threading.Thread(target=self._stop, daemon=True).start()
+
+    def _stop(self):
+        """Interrupt the whole group (the run and its workers), then force it."""
+        proc = self._proc
+        try:
+            if os.name == "nt":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                os.killpg(proc.pid, signal.SIGINT)
+            proc.wait(timeout=15)
+            return
+        except Exception:
+            pass
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                               capture_output=True)
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            proc.kill()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -147,23 +312,90 @@ class TrainingManager:
             "--gamma",      str(config.get("gamma", 0.997)),
             "--lr",         str(config.get("lr", 2.5e-4)),
             "--batch-size", str(config.get("batch_size", 256)),
+            "--doctrine",   str(config.get("doctrine", "mixed")).lower(),
         ]
         if config.get("resume"):
-            cmd += ["--resume", config["resume"]]
+            # The GUI's dropdown sends a path relative to the model dir (as
+            # listed by /models, e.g. "latest.zip" or "archive/best_..."),
+            # not relative to this process's cwd — join it with the same
+            # model_dir this manager was constructed with.
+            cmd += ["--resume", os.path.join(self._model_dir, config["resume"])]
+        if config.get("run_name"):
+            cmd += ["--run-name", str(config["run_name"]).strip()]
         if not config.get("curriculum", True):
             cmd += ["--no-curriculum"]
+        # CREATE_NEW_PROCESS_GROUP (Windows only) is what makes it possible to
+        # send CTRL_BREAK to the trainer alone in stop() without also signalling
+        # this server. On POSIX the default group is already fine.
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         self._proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            bufsize=1, text=True)
+            bufsize=1, text=True, creationflags=flags)
         self._thread = threading.Thread(target=self._tail, daemon=True)
         self._thread.start()
-        HUB.set_status("training", f"Training: {config.get('opponent','straight')}")
+        HUB.set_status(training=True,
+                       msg=f"Training: {config.get('opponent','straight')}")
+
+    # Seconds to let the trainer write its checkpoint before escalating.
+    GRACE_TIMEOUT = 60.0
 
     def stop(self):
-        if self._proc and self._proc.poll() is None:
-            self._proc.terminate()
+        """
+        Ask the trainer to shut down CLEANLY so it saves its model.
+
+        train_bvr.py saves in a `finally:` after catching KeyboardInterrupt.
+        SIGTERM (what terminate() sends) does NOT run `finally` — Python exits
+        immediately — so terminating here silently threw away every step since
+        the last archived checkpoint. An interrupt raises KeyboardInterrupt in
+        the child instead, which reaches that `finally` and writes the model.
+        Escalation to terminate/kill still exists, but only as a last resort
+        after the trainer has been given time to save.
+        """
+        if not (self._proc and self._proc.poll() is None):
+            self._stop_evt.set()
+            HUB.set_status(training=False, msg="Training stopped")
+            return
         self._stop_evt.set()
-        HUB.set_status("idle", "Training stopped")
+        # Waiting must not block the asyncio loop that dispatches commands.
+        threading.Thread(target=self._graceful_stop, daemon=True).start()
+
+    def stop_blocking(self):
+        """stop(), but wait for the trainer to finish saving before returning."""
+        if not (self._proc and self._proc.poll() is None):
+            return
+        self._stop_evt.set()
+        self._graceful_stop()
+
+    def _graceful_stop(self):
+        proc = self._proc
+        HUB.set_status(training=True, msg="Stopping — saving checkpoint…")
+        HUB.push({"type": "log", "msg": "[bvr_gui] interrupting trainer; "
+                                        "waiting for it to save its model…"})
+        try:
+            if os.name == "nt":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                proc.send_signal(signal.SIGINT)
+        except Exception as e:
+            HUB.push({"type": "log", "msg": f"[bvr_gui] interrupt failed ({e}); terminating"})
+            proc.terminate()
+
+        try:
+            proc.wait(timeout=self.GRACE_TIMEOUT)
+            HUB.push({"type": "log", "msg": "[bvr_gui] trainer exited cleanly — model saved."})
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        HUB.push({"type": "log",
+                  "msg": f"[bvr_gui] no clean exit after {self.GRACE_TIMEOUT:.0f}s — "
+                         f"terminating (checkpoint may be lost)."})
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            HUB.push({"type": "log", "msg": "[bvr_gui] still alive — killing."})
+            proc.kill()
 
     def _tail(self):
         """Read subprocess stdout line by line, push to hub."""
@@ -172,7 +404,8 @@ class TrainingManager:
             if line:
                 HUB.push({"type": "log", "msg": line})
         self._proc.wait()
-        HUB.set_status("idle", f"Training ended (exit {self._proc.returncode})")
+        HUB.set_status(training=False,
+                       msg=f"Training ended (exit {self._proc.returncode})")
 
     @property
     def running(self) -> bool:
@@ -182,6 +415,14 @@ class TrainingManager:
 # ─────────────────────────────────────────────────────────────────────
 # Eval / visualisation runner
 # ─────────────────────────────────────────────────────────────────────
+# Every model this GUI can load was trained by train_bvr.py, which wraps the
+# vec env in VecFrameStack(n_stack=N_STACK) — the saved policy's actual input
+# is N_STACK stacked frames per key, not one. N_STACK is a module constant in
+# train_bvr.py (not a CLI flag), so it can't drift between a checkpoint and
+# this file without a code change on both sides.
+from bvr_selfplay import FrameStacker, N_STACK
+
+
 class EvalRunner:
     def __init__(self, model_dir="models_bvr"):
         self._model_dir = model_dir
@@ -204,7 +445,7 @@ class EvalRunner:
 
     def stop(self):
         self._stop_evt.set()
-        HUB.set_status("idle", "Eval stopped")
+        HUB.set_status(evaluating=False, msg="Eval stopped")
 
     def _run(self, config: dict):
         try:
@@ -212,36 +453,63 @@ class EvalRunner:
             from bvr_opponents import BvrOpponentType
             opponent_name = config.get("opponent", "STRAIGHT").upper()
             opponent = BvrOpponentType[opponent_name]
+
+            # Load the checkpoint FIRST — env construction below needs to know
+            # whether this model was trained with the privileged (Dict, "obs"
+            # + "priv") observation space or not, and building the env with
+            # the wrong one is exactly what used to blow up inside
+            # model.predict() with an opaque numpy IndexError: the policy's
+            # own observation_space is a Dict, obs[key] on a plain Box array
+            # is not valid indexing, and that's the whole error.
+            model = None
+            stacker = None
+            privileged = False
+            ckpt = config.get("checkpoint")
+            # The GUI's dropdown sends a path relative to the model dir (as
+            # listed by /models, e.g. "latest.zip" or "archive/best_..."),
+            # not relative to the process cwd — resolve it against the same
+            # model_dir this runner was constructed with.
+            ckpt_path = Path(self._model_dir) / ckpt if ckpt else None
+            if ckpt_path and ckpt_path.exists():
+                try:
+                    from gymnasium import spaces
+                    from bvr_compat import load_model
+                    # Widens checkpoints saved before the latest observation
+                    # inputs (e.g. the doctrine input) were added.
+                    model = load_model(str(ckpt_path), env=None,
+                                       log=lambda m: HUB.push({"type":"log","msg":m}))
+                    privileged = isinstance(model.observation_space, spaces.Dict)
+                    stacker = FrameStacker(N_STACK)
+                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt_path}"})
+                except Exception as e:
+                    HUB.push({"type":"log","msg":f"Could not load checkpoint: {e}; using random policy"})
+            elif ckpt:
+                HUB.push({"type":"log","msg":f"Checkpoint not found: {ckpt_path}; using random policy"})
+
             # Use the same calibrated Rmax/Rnez table training used (see
             # sweep_envelope.py) — evaluating against a different envelope
             # than the one trained on silently invalidates every launch
             # decision in this GUI's HUD.
             envelope_table = "envelope.npz" if os.path.exists("envelope.npz") else None
             env = BvrEnv(opponent_type=opponent, seed=config.get("seed", 0),
-                         privileged_critic=False, gamma_discount=0.997,
-                         envelope_table=envelope_table)
+                         privileged_critic=privileged, gamma_discount=0.997,
+                         envelope_table=envelope_table,
+                         selfplay_pool=str(Path(self._model_dir) / "selfplay_pool"),
+                         doctrine=config.get("doctrine", "BALANCED"))
 
-            model = None
-            ckpt = config.get("checkpoint")
-            if ckpt and Path(ckpt).exists():
-                try:
-                    from sb3_contrib import MaskablePPO
-                    model = MaskablePPO.load(ckpt, env=None)
-                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt}"})
-                except Exception as e:
-                    HUB.push({"type":"log","msg":f"Could not load checkpoint: {e}; using random policy"})
-
-            HUB.set_status("eval", f"Eval vs {opponent_name}")
+            HUB.set_status(evaluating=True,
+                           msg=f"Eval vs {opponent_name}, {env._doctrine_cfg} doctrine")
             episode = 0
             while not self._stop_evt.is_set():
                 obs, info = env.reset()
+                sobs = stacker.reset(obs) if stacker else None
                 frames = []
                 ep_r = 0.0
                 while not self._stop_evt.is_set():
                     # action
                     if model is not None:
                         mask = env.action_masks()
-                        action, _ = model.predict(obs, deterministic=True,
+                        action, _ = model.predict(sobs, deterministic=True,
                                                   action_masks=mask)
                     else:
                         action = env.action_space.sample()
@@ -249,6 +517,7 @@ class EvalRunner:
 
                     _t0 = time.perf_counter()
                     obs, r, done, trunc, step_info = env.step(action)
+                    sobs = stacker.update(obs) if stacker else None
                     _step_ms = time.perf_counter() - _t0
                     ep_r += r
                     s = env._state
@@ -273,7 +542,10 @@ class EvalRunner:
                 meta = {"episode": episode, "outcome": step_info.get("terminal_outcome","?"),
                         "reward": round(ep_r, 3),
                         "shots": step_info.get("shots_fired", 0),
-                        "support_losses": step_info.get("support_losses", 0)}
+                        "support_losses": step_info.get("support_losses", 0),
+                        "doctrine": step_info.get("doctrine", ""),
+                        "bank_rev_per_min": round(60.0 * step_info.get("bank_reversals", 0)
+                                                  / max(step_info.get("flight_time", 0.0), 1.0), 1)}
                 HUB.set_replay(list(frames), meta)
                 HUB.push({"type":"episode_end","meta":meta})
                 episode += 1
@@ -281,7 +553,7 @@ class EvalRunner:
         except Exception as e:
             import traceback
             HUB.push({"type":"log","msg":f"Eval error: {e}\n{traceback.format_exc()}"})
-            HUB.set_status("idle", f"Eval error: {e}")
+            HUB.set_status(evaluating=False, msg=f"Eval error: {e}")
 
 
 def _build_frame(s: dict, env, info: dict) -> dict:
@@ -388,11 +660,12 @@ async def metrics_poll_loop():
 # ─────────────────────────────────────────────────────────────────────
 TRAINING_MGR = None
 EVAL_RUNNER  = None
+XPLAY_MGR    = None
 
 
 async def handle_client(ws):
     HUB._clients.add(ws)
-    await ws.send(json.dumps(HUB._status))
+    await ws.send(json.dumps(HUB.status_snapshot()))
     try:
         while True:
             try:
@@ -424,6 +697,10 @@ async def _handle_cmd(msg: dict):
         EVAL_RUNNER.start(msg.get("config", {}))
     elif cmd == "stop_eval":
         EVAL_RUNNER.stop()
+    elif cmd == "start_crossplay":
+        XPLAY_MGR.start(msg.get("config", {}))
+    elif cmd == "stop_crossplay":
+        XPLAY_MGR.stop()
     elif cmd == "set_eval_speed":
         EVAL_RUNNER.set_speed(float(msg.get("speed", 5.0)))
     elif cmd == "ping":
@@ -445,15 +722,17 @@ async def run_ws(port: int):
 
 
 def main():
-    global TRAINING_MGR, EVAL_RUNNER
+    global TRAINING_MGR, EVAL_RUNNER, XPLAY_MGR, MODEL_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--port",      type=int, default=5006)
     ap.add_argument("--ws-port",   type=int, default=5010)
     ap.add_argument("--model-dir", type=str, default="models_bvr")
     args = ap.parse_args()
 
+    MODEL_DIR    = HERE / args.model_dir
     TRAINING_MGR = TrainingManager(args.model_dir)
     EVAL_RUNNER  = EvalRunner(args.model_dir)
+    XPLAY_MGR    = CrossplayManager(args.model_dir)
 
     # HTTP in a daemon thread
     t = threading.Thread(target=run_http, args=(args.port,), daemon=True)
@@ -466,8 +745,16 @@ def main():
     try:
         asyncio.run(run_ws(args.ws_port))
     except KeyboardInterrupt:
-        TRAINING_MGR.stop()
         EVAL_RUNNER.stop()
+        if XPLAY_MGR.running:
+            XPLAY_MGR._stop()
+        # Block here: stop() hands the wait to a daemon thread, and daemon
+        # threads die the moment main() returns — which would cut the trainer
+        # off mid-save, the exact data loss this path exists to prevent.
+        if TRAINING_MGR.running:
+            print("[bvr_gui]  stopping trainer — waiting for it to save…")
+            TRAINING_MGR.stop_blocking()
+        print("[bvr_gui]  bye")
 
 
 if __name__ == "__main__":

@@ -13,9 +13,13 @@ Two F-16 aircraft + list of AIM-120 missiles + per-frame event queue.
 so the env needs no awareness of whether it is talking to a C++ process or
 to this class.
 
-cmd1 controls AC1 (RL agent), cmd2 controls AC2 (scripted opponent).
-AC2's missile guidance defaults to truth (opponent tracks AC1 perfectly).
+cmd1 controls AC1 (RL agent), cmd2 controls AC2 (opponent).
 AC1's missile guidance comes from cmd1["msl_guidance"] (the radar estimate).
+AC2's comes from cmd2["msl_guidance"] when the opponent supplies one (a
+self-play policy guiding from its own radar track); scripted opponents send
+none and get truth guidance.
+
+telemetry(me) builds the same packet from either aircraft's point of view.
 """
 
 import math
@@ -107,14 +111,16 @@ class SimWorld:
 
         # ── guidance updates ─────────────────────────────────────────
         g1 = cmd1.get("msl_guidance")        # estimate from AC1's radar
-        # AC2 always gets truth guidance (scripted opponent tracks perfectly)
-        g2 = {
-            "valid": 1,
-            "tgt_pos": [self.ac1.x, self.ac1.y, self.ac1.z],
-            "tgt_vel": self.ac1.vel_enu.tolist(),
-            "pos_sigma": 0.0,
-            "t_est": self.t_sim,
-        }
+        if "msl_guidance" in cmd2:
+            g2 = cmd2["msl_guidance"]        # self-play: AC2's own radar estimate
+        else:
+            g2 = {                           # scripted: tracks AC1 perfectly
+                "valid": 1,
+                "tgt_pos": [self.ac1.x, self.ac1.y, self.ac1.z],
+                "tgt_vel": self.ac1.vel_enu.tolist(),
+                "pos_sigma": 0.0,
+                "t_est": self.t_sim,
+            }
         for m in self.missiles:
             m.update_guidance(g1 if m.owner == 1 else g2)
 
@@ -146,7 +152,7 @@ class SimWorld:
         self.ac2.step(self.SIM_DT, cmd2)
         self.t_sim += self.SIM_DT
 
-        return self._build_telemetry()
+        return self.telemetry(1)
 
     # ── missile launch ───────────────────────────────────────────────
     def _launch(self, owner: int, cmd: dict) -> None:
@@ -178,8 +184,16 @@ class SimWorld:
                              "owner": owner, "t_sim": round(self.t_sim, 3)})
 
     # ── telemetry builder ────────────────────────────────────────────
-    def _build_telemetry(self) -> dict:
-        a1, a2 = self.ac1, self.ac2
+    def telemetry(self, me: int = 1) -> dict:
+        """
+        Telemetry from aircraft `me`'s point of view: unsuffixed keys are `me`,
+        `_t` keys the other aircraft, and missile/event ids are relabelled so
+        that 1 always means `me`. telemetry(1) is the agent's packet;
+        telemetry(2) lets a self-play opponent observe the fight exactly the
+        way the agent does.
+        """
+        a1, a2 = (self.ac1, self.ac2) if me == 1 else (self.ac2, self.ac1)
+        other = 3 - me
         lat1, lon1, alt1 = _enu_to_latlon(a1.x, a1.y, a1.z)
         lat2, lon2, alt2 = _enu_to_latlon(a2.x, a2.y, a2.z)
 
@@ -202,7 +216,7 @@ class SimWorld:
         # ── RWR synthesis ─────────────────────────────────────────────
         pos1 = np.array([a1.x, a1.y, a1.z])
         inbound = [m for m in self.missiles
-                   if m.owner == 2 and m.target == 1
+                   if m.owner == other and m.target == me
                    and m.phase not in (MslPhase.HIT, MslPhase.MISS)]
         if inbound:
             cl = min(inbound, key=lambda m: float(np.linalg.norm(m.pos - pos1)))
@@ -224,7 +238,13 @@ class SimWorld:
             d = m.to_dict()
             la, lo, _ = _enu_to_latlon(*m.pos)
             d["lat"] = round(la, 6); d["lon"] = round(lo, 6)
+            if me == 2:
+                d["owner"], d["target"] = 3 - d["owner"], 3 - d["target"]
             msl_list.append(d)
+        events = list(self.events)
+        if me == 2:
+            events = [{k: (3 - v if k in ("owner", "target", "ac") and v in (1, 2) else v)
+                       for k, v in ev.items()} for ev in events]
 
         return {
             "type":       "telemetry",
@@ -254,8 +274,8 @@ class SimWorld:
             "ata_deg": round(aa_deg, 2),
 
             # ── weapons ───────────────────────────────────────────────
-            "wpn_remaining":   self.wpn1,
-            "wpn_remaining_t": self.wpn2,
+            "wpn_remaining":   self.wpn1 if me == 1 else self.wpn2,
+            "wpn_remaining_t": self.wpn2 if me == 1 else self.wpn1,
             "wpn_ready": 1, "wpn_ready_t": 1,
 
             # ── missiles ──────────────────────────────────────────────
@@ -265,5 +285,5 @@ class SimWorld:
             "rwr": rwr,
 
             # ── events (consumed once per frame) ──────────────────────
-            "events": list(self.events),
+            "events": events,
         }

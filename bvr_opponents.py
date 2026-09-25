@@ -8,6 +8,9 @@ dict; bvr_env adds the `_t` suffix.
 Curriculum, easiest → hardest:
     STRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE_SHOOTER → SELF_PLAY
 
+SELF_PLAY opponents are frozen policy snapshots, built by bvr_env through
+bvr_selfplay.py rather than by create(), which only builds scripted ones.
+
 SHOOTER is the important one. A rule-based BVR opponent that commits, shoots,
 cranks and drags is a genuinely strong baseline — strong enough that beating
 it consistently is a real result. Build it before self-play, and keep it in
@@ -37,7 +40,7 @@ class BvrOpponentType(Enum):
     NOTCHER = auto()           # actively beams to break lock, unarmed
     SHOOTER = auto()           # armed, fixed doctrine
     ADAPTIVE_SHOOTER = auto()  # armed, randomised doctrine parameters
-    SELF_PLAY = auto()
+    SELF_PLAY = auto()         # policy snapshots; built by bvr_selfplay
 
 
 CURRICULUM = [
@@ -75,13 +78,20 @@ class BvrOpponent:
 
     @staticmethod
     def create(opp_type: "BvrOpponentType", rng=None) -> "BvrOpponent":
-        return {
+        cls = {
             BvrOpponentType.STRAIGHT: StraightOpponent,
             BvrOpponentType.EVASIVE: EvasiveOpponent,
             BvrOpponentType.NOTCHER: NotchOpponent,
             BvrOpponentType.SHOOTER: ShooterOpponent,
             BvrOpponentType.ADAPTIVE_SHOOTER: AdaptiveShooterOpponent,
-        }.get(opp_type, StraightOpponent)(rng=rng)
+        }.get(opp_type)
+        # No silent fallback: defaulting to STRAIGHT once turned SELF_PLAY into
+        # the easiest opponent while every log still reported SELF_PLAY.
+        if cls is None:
+            raise NotImplementedError(
+                f"create() builds scripted opponents only; {opp_type.name} is "
+                "built by bvr_env via bvr_selfplay.make_selfplay_opponent()")
+        return cls(rng=rng)
 
     # ── helpers ─────────────────────────────────────────────────────
     def _cmd(self, hdg=0.0, alt=9000.0, V=290.0, fire=0) -> dict:
@@ -173,7 +183,8 @@ class ShooterOpponent(BvrOpponent):
     Fixed BVR doctrine. This is the benchmark opponent.
 
         COMMIT   fly hot, close to launch range
-        SHOOT    fire once inside commit_range
+        SHOOT    fire once inside SHOT_RMAX_FRAC of its true R-max on the
+                 target (calibrated envelope; the env sets self.rmax_t)
         CRANK    turn to crank_angle — keeps the target inside the radar
                  gimbal while cutting closure, so the missile keeps its
                  datalink but our own exposure drops
@@ -186,7 +197,11 @@ class ShooterOpponent(BvrOpponent):
     us degrades, and that is the window to close.
     """
 
-    COMMIT_RANGE = 55_000.0
+    # Fraction of true R-max at which it shoots. This was a fixed 55 km, set
+    # against the old analytic envelope; the calibrated missile's head-on reach
+    # at these conditions is 36-49 km, so every shot flew out of range and
+    # SHOOTER never killed anything.
+    SHOT_RMAX_FRAC = 0.80
     CRANK_ANGLE = 50.0 * DEG2RAD
     REATTACK_RANGE = 40_000.0
     MIN_SHOT_INTERVAL = 12.0
@@ -230,7 +245,7 @@ class ShooterOpponent(BvrOpponent):
 
         # ── SHOOT ───────────────────────────────────────────────────
         fire = 0
-        if (wpn > 0 and rng < self.COMMIT_RANGE
+        if (wpn > 0 and rng <= self.SHOT_RMAX_FRAC * self.rmax_t
                 and (t_sim - self._last_shot) > self.MIN_SHOT_INTERVAL
                 and self._phase in ("COMMIT", "REATTACK")):
             if not self._fire_edge:
@@ -274,7 +289,7 @@ class AdaptiveShooterOpponent(ShooterOpponent):
 
     def reset(self, ic):
         super().reset(ic)
-        self.COMMIT_RANGE = float(self.rng.uniform(35_000.0, 70_000.0))
+        self.SHOT_RMAX_FRAC = float(self.rng.uniform(0.60, 0.95))
         self.CRANK_ANGLE = float(self.rng.uniform(35.0, 70.0)) * DEG2RAD
         self.REATTACK_RANGE = float(self.rng.uniform(30_000.0, 55_000.0))
         self.MIN_SHOT_INTERVAL = float(self.rng.uniform(8.0, 20.0))
