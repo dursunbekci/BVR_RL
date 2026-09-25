@@ -140,27 +140,26 @@ canvas{display:block;flex:1}
 #sec-train .sec-head{color:#60b8ff;border-left-color:#60b8ff;border-bottom-color:#1a3050;background:#020d1e}
 #sec-prog  .sec-head{color:#ffcc44;border-left-color:#ffcc44;border-bottom-color:#302000;background:#110c00}
 #sec-eval  .sec-head{color:#22ffdd;border-left-color:#22ffdd;border-bottom-color:#003028;background:#001810}
-#sec-xplay .sec-head{color:#c79bff;border-left-color:#c79bff;border-bottom-color:#241638;background:#0e0818}
-#xp-models{max-height:170px;overflow-y:auto;border:1px solid var(--border);background:var(--card);padding:4px 6px}
+#xp-models{max-height:260px;overflow-y:auto;border:1px solid var(--border);background:var(--card);padding:4px 6px}
 #xp-models label,.xp-chk label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text);padding:1px 0;cursor:pointer}
 #xp-models label span.m{color:var(--muted);margin-left:auto;white-space:nowrap}
 .xp-chk{display:flex;flex-wrap:wrap;gap:4px 12px}
-#xp-table{border-collapse:collapse;font-size:11px;margin-top:6px}
+#xp-table{border-collapse:collapse;margin-top:8px}
 #xp-table th{color:var(--text);font-weight:normal;padding:2px 4px;text-align:center;max-width:78px;
              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #xp-table th.r{text-align:right;max-width:none}
 #xp-table td{padding:2px 3px;text-align:center;color:#fff;border:1px solid var(--panel);min-width:36px;line-height:1.15}
 #xp-table td span{font-size:11px}
-#xp-results.wide{position:fixed;inset:4% 6%;z-index:50;background:var(--panel);border:1px solid #c79bff;
-                 padding:14px 18px;overflow:auto;box-shadow:0 0 0 100vmax #000a}
-#xp-results.wide #xp-table{font-size:13px}
-#xp-results.wide #xp-table td{min-width:70px;padding:6px}
-#xp-results.wide #xp-table td span{font-size:11px}
-#xp-results.wide .xp-rowname{display:inline}
-#xp-results.wide .xp-elo-name{width:280px!important;font-size:12px}
-.xp-rowname{display:none}
-.xp-close{display:none}
-#xp-results.wide .xp-close{display:block}
+#xplay-view{display:none;flex:1;overflow:hidden}
+#xp-side{width:400px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
+         padding:10px 12px;background:var(--panel)}
+.xp-side-title{font-size:13px;letter-spacing:2px;color:#c79bff;font-weight:bold;margin-bottom:8px}
+#xp-main{flex:1;overflow:auto;padding:12px 18px}
+#xp-table{font-size:13px}
+#xp-table td{min-width:70px;padding:6px}
+.xp-elo-name{width:280px;font-size:12px}
+#xp-tab-prog{color:var(--amber);letter-spacing:0;margin-left:6px}
+#xp-tab-prog:empty{display:none}
 #xp-table td.diag{outline:1px dashed #ffffff80;outline-offset:-3px}
 #sec-hud   .sec-head{color:#ff6666;border-left-color:#ff6666;border-bottom-color:#300000;background:#130000}
 .sec-body{padding:10px 12px}
@@ -372,6 +371,7 @@ select option{background:#050810}
 <div id="topbar">
   <h1>BVR RL — TRAINING CONSOLE</h1>
   <button class="tab on" id="tab-console" onclick="showView('console')">CONSOLE</button>
+  <button class="tab" id="tab-xplay" onclick="showView('xplay')">CROSS-PLAY<span id="xp-tab-prog"></span></button>
   <button class="tab" id="tab-library" onclick="showView('library')">LIBRARY</button>
   <button class="tab" id="units-btn" onclick="toggleUnits()" title="Show lengths and speeds in metric (m, km, m/s) or aviation units (ft, nm, kt). Stored values stay metric.">m · m/s</button>
   <span class="pill idle" id="state-pill">IDLE</span>
@@ -394,6 +394,106 @@ select option{background:#050810}
       manoeuvres, so a wrong number shows up before training. A new or edited missile must be
       <b>calibrated</b> before training: its launch envelope is measured by flying it.
     </div>
+  </div>
+</div>
+
+<!-- CROSS-PLAY -->
+<div id="xplay-view">
+  <div id="xp-side">
+    <div class="xp-side-title">⚔ CROSS-PLAY EVALUATION</div>
+
+        <div style="font-size:12px;color:var(--text);margin-bottom:10px;line-height:1.5">
+          Round-robin between saved checkpoints: every one against every other and itself, in both seats.
+          Shows whether later checkpoints really beat earlier ones.
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span>CHECKPOINTS</span>
+            <button class="help-btn" onclick="help(this,'CHECKPOINTS',
+              'Checkpoints to include. Each plays every other and itself, in both seats (AC1 row, AC2 column), with its own radar on each side and no truth.\n\nGames grow with the square of the count: 6 checkpoints and 2 scripted opponents at 40 games is 1,920 games. Older checkpoints (before the doctrine input) are widened automatically.')">?</button>
+            <span style="margin-left:auto;font-size:11px">
+              <a href="#" style="color:var(--blue)" onclick="xpSelect('all');return false">all</a> ·
+              <a href="#" style="color:var(--blue)" onclick="xpSelect('archive');return false">archive</a> ·
+              <a href="#" style="color:var(--blue)" onclick="xpSelect('none');return false">none</a>
+            </span>
+          </div>
+          <div id="xp-models"><div style="font-size:11px;color:var(--muted)">loading…</div></div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span>SCRIPTED COLUMNS</span>
+            <button class="help-btn" onclick="help(this,'SCRIPTED COLUMNS',
+              'Scripted opponents added as extra columns. They can only fly AC2, so they get a column but no row.\n\nThey anchor the Elo scale to fixed references: a checkpoint that beats every older checkpoint but not SHOOTER has learned to beat itself, not to fight.')">?</button>
+          </div>
+          <div class="xp-chk" id="xp-scripted">
+            <label><input type="checkbox" value="straight">STRAIGHT</label>
+            <label><input type="checkbox" value="evasive">EVASIVE</label>
+            <label><input type="checkbox" value="notcher">NOTCHER</label>
+            <label><input type="checkbox" value="shooter" checked>SHOOTER</label>
+            <label><input type="checkbox" value="adaptive_shooter" checked>ADAPTIVE</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label"><span>SCRIPTED COLUMNS FLY</span>
+            <button class="help-btn" onclick="help(this,'SCRIPTED PLATFORM',
+              'Each checkpoint flies its own training platform in every game. The scripted columns fly this platform, or by default the opponent platform each row checkpoint was trained against.')">?</button></div>
+          <select id="xp-scripted-platform"><option value="">— each checkpoint's training opponent —</option></select>
+        </div>
+
+        <div class="row3">
+          <div class="field">
+            <div class="field-label"><span>GAMES / CELL</span>
+              <button class="help-btn" onclick="help(this,'GAMES PER CELL',
+                'Games per cell: how many engagements each ordered pairing plays. The ± shown in each cell is the 95% margin on its score.\n\n• 20 — quick look, about ±0.20\n• 40 — default, about ±0.12–0.15\n• 60–100 — to separate close versions\n\nEvery pairing replays the same start geometries (game i starts identically everywhere), so cells differ by policy, not luck.')">?</button></div>
+            <select id="xp-episodes" onchange="xpEstimate()">
+              <option value="20">20</option><option value="40" selected>40</option>
+              <option value="60">60</option><option value="100">100</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label"><span>WORKERS</span>
+              <button class="help-btn" onclick="help(this,'WORKERS',
+                'Parallel worker processes. Each plays whole games; use a little below your physical core count.\n\nCross-play competes with training for the same cores: running both at once slows both.')">?</button></div>
+            <select id="xp-workers" onchange="xpEstimate()">
+              <option>4</option><option>8</option><option>12</option><option>16</option>
+              <option selected>20</option><option>24</option><option>32</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label"><span>DOCTRINE</span></div>
+            <select id="xp-doctrine">
+              <option value="aggressive">AGGRESSIVE</option>
+              <option value="balanced" selected>BALANCED</option>
+              <option value="conservative">CONSERVATIVE</option>
+            </select>
+          </div>
+        </div>
+        <div id="xp-estimate" style="font-size:11px;color:var(--amber);margin:-4px 0 8px"></div>
+
+        <div class="btn-row">
+          <button class="btn go"   id="btn-xplay" style="flex:1">▶ RUN CROSS-PLAY</button>
+          <button class="btn stop" id="btn-stop-xplay" style="display:none;flex:1">■ STOP</button>
+        </div>
+        <div id="xp-progress" style="display:none;margin-top:8px">
+          <div style="height:8px;background:var(--card);border:1px solid var(--border)">
+            <div id="xp-bar" style="height:100%;width:0%;background:#c79bff"></div></div>
+          <div id="xp-progress-txt" style="font-size:11px;color:var(--text);margin-top:3px"></div>
+        </div>
+
+  </div>
+  <div id="xp-main">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;letter-spacing:2px;color:#c79bff;font-weight:bold">RESULTS</span>
+          <button class="help-btn" onclick="help(this,'CROSS-PLAY RESULTS',
+            'Each cell is the ROW checkpoint\'s score flying AC1 against the COLUMN player flying AC2: win 1, draw 0.5, loss 0.\n\nWin = kill or the enemy crashes. Loss = shot down or own crash. Draw = mutual kill, timeout or escape.\n\nHow to read it:\n• The dashed diagonal (a policy against itself) should be near 0.50.\n• Seat bias is the AC1 seat\'s advantage on mirrored matchups; near 0 means the seats are fair.\n• A later checkpoint is better only if its Elo gap is larger than the ± margins.\n• Hover a cell for wins-draws-losses and shots per game.')">?</button>
+          <span id="xp-meta" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+        </div>
+        <div id="xp-results">
+          <div style="font-size:11px;color:var(--muted)">no cross-play run yet</div>
+        </div>
   </div>
 </div>
 
@@ -807,7 +907,7 @@ select option{background:#050810}
             <button class="help-btn" onclick="help(this,'OPPONENT PLATFORM (eval)',
               'The checkpoint always flies the platform it was trained on (stored in the checkpoint). This sets what the opponent flies; by default the opponent platform the checkpoint was trained against.')">?</button>
           </div>
-          <select id="eval-opp-platform"><option value="">— checkpoint\'s training opponent —</option></select>
+          <select id="eval-opp-platform"><option value="">— checkpoint's training opponent —</option></select>
         </div>
 
         <div class="field">
@@ -828,105 +928,6 @@ select option{background:#050810}
 
         <div style="font-size:11px;color:var(--muted);margin-top:8px">
           After an episode, click 📋 Shot Trace in the log bar to review every missile launch.
-        </div>
-      </div>
-    </div>
-
-    <!-- CROSS-PLAY -->
-    <div class="section" id="sec-xplay">
-      <div class="sec-head" onclick="toggle(this)">⚔ CROSS-PLAY EVALUATION<span>▲</span></div>
-      <div class="sec-body">
-        <div style="font-size:12px;color:var(--text);margin-bottom:10px;line-height:1.5">
-          Round-robin between saved checkpoints: every one against every other and itself, in both seats.
-          Shows whether later checkpoints really beat earlier ones.
-        </div>
-
-        <div class="field">
-          <div class="field-label">
-            <span>CHECKPOINTS</span>
-            <button class="help-btn" onclick="help(this,'CHECKPOINTS',
-              'Checkpoints to include. Each plays every other and itself, in both seats (AC1 row, AC2 column), with its own radar on each side and no truth.\n\nGames grow with the square of the count: 6 checkpoints and 2 scripted opponents at 40 games is 1,920 games. Older checkpoints (before the doctrine input) are widened automatically.')">?</button>
-            <span style="margin-left:auto;font-size:11px">
-              <a href="#" style="color:var(--blue)" onclick="xpSelect('all');return false">all</a> ·
-              <a href="#" style="color:var(--blue)" onclick="xpSelect('archive');return false">archive</a> ·
-              <a href="#" style="color:var(--blue)" onclick="xpSelect('none');return false">none</a>
-            </span>
-          </div>
-          <div id="xp-models"><div style="font-size:11px;color:var(--muted)">loading…</div></div>
-        </div>
-
-        <div class="field">
-          <div class="field-label">
-            <span>SCRIPTED COLUMNS</span>
-            <button class="help-btn" onclick="help(this,'SCRIPTED COLUMNS',
-              'Scripted opponents added as extra columns. They can only fly AC2, so they get a column but no row.\n\nThey anchor the Elo scale to fixed references: a checkpoint that beats every older checkpoint but not SHOOTER has learned to beat itself, not to fight.')">?</button>
-          </div>
-          <div class="xp-chk" id="xp-scripted">
-            <label><input type="checkbox" value="straight">STRAIGHT</label>
-            <label><input type="checkbox" value="evasive">EVASIVE</label>
-            <label><input type="checkbox" value="notcher">NOTCHER</label>
-            <label><input type="checkbox" value="shooter" checked>SHOOTER</label>
-            <label><input type="checkbox" value="adaptive_shooter" checked>ADAPTIVE</label>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="field-label"><span>SCRIPTED COLUMNS FLY</span>
-            <button class="help-btn" onclick="help(this,'SCRIPTED PLATFORM',
-              'Each checkpoint flies its own training platform in every game. The scripted columns fly this platform, or by default the opponent platform each row checkpoint was trained against.')">?</button></div>
-          <select id="xp-scripted-platform"><option value="">— each checkpoint\'s training opponent —</option></select>
-        </div>
-
-        <div class="row3">
-          <div class="field">
-            <div class="field-label"><span>GAMES / CELL</span>
-              <button class="help-btn" onclick="help(this,'GAMES PER CELL',
-                'Games per cell: how many engagements each ordered pairing plays. The ± shown in each cell is the 95% margin on its score.\n\n• 20 — quick look, about ±0.20\n• 40 — default, about ±0.12–0.15\n• 60–100 — to separate close versions\n\nEvery pairing replays the same start geometries (game i starts identically everywhere), so cells differ by policy, not luck.')">?</button></div>
-            <select id="xp-episodes" onchange="xpEstimate()">
-              <option value="20">20</option><option value="40" selected>40</option>
-              <option value="60">60</option><option value="100">100</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label"><span>WORKERS</span>
-              <button class="help-btn" onclick="help(this,'WORKERS',
-                'Parallel worker processes. Each plays whole games; use a little below your physical core count.\n\nCross-play competes with training for the same cores: running both at once slows both.')">?</button></div>
-            <select id="xp-workers" onchange="xpEstimate()">
-              <option>4</option><option>8</option><option>12</option><option>16</option>
-              <option selected>20</option><option>24</option><option>32</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label"><span>DOCTRINE</span></div>
-            <select id="xp-doctrine">
-              <option value="aggressive">AGGRESSIVE</option>
-              <option value="balanced" selected>BALANCED</option>
-              <option value="conservative">CONSERVATIVE</option>
-            </select>
-          </div>
-        </div>
-        <div id="xp-estimate" style="font-size:11px;color:var(--amber);margin:-4px 0 8px"></div>
-
-        <div class="btn-row">
-          <button class="btn go"   id="btn-xplay" style="flex:1">▶ RUN CROSS-PLAY</button>
-          <button class="btn stop" id="btn-stop-xplay" style="display:none;flex:1">■ STOP</button>
-        </div>
-        <div id="xp-progress" style="display:none;margin-top:8px">
-          <div style="height:8px;background:var(--card);border:1px solid var(--border)">
-            <div id="xp-bar" style="height:100%;width:0%;background:#c79bff"></div></div>
-          <div id="xp-progress-txt" style="font-size:11px;color:var(--text);margin-top:3px"></div>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:6px;margin-top:12px">
-          <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">RESULTS</span>
-          <button class="help-btn" onclick="help(this,'CROSS-PLAY RESULTS',
-            'Each cell is the ROW checkpoint\'s score flying AC1 against the COLUMN player flying AC2: win 1, draw 0.5, loss 0.\n\nWin = kill or the enemy crashes. Loss = shot down or own crash. Draw = mutual kill, timeout or escape.\n\nHow to read it:\n• The dashed diagonal (a policy against itself) should be near 0.50.\n• Seat bias is the AC1 seat\'s advantage on mirrored matchups; near 0 means the seats are fair.\n• A later checkpoint is better only if its Elo gap is larger than the ± margins.\n• Hover a cell for wins-draws-losses and shots per game.')">?</button>
-          <span id="xp-meta" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
-          <button class="btn" style="padding:1px 7px;font-size:11px" title="Open the results full-screen (Esc closes)"
-                  onclick="document.getElementById('xp-results').classList.toggle('wide')">⤢</button>
-        </div>
-        <div id="xp-results" style="overflow-x:auto">
-          <div style="font-size:11px;color:var(--muted)">no cross-play run yet</div>
         </div>
       </div>
     </div>
@@ -1094,6 +1095,7 @@ function setState(st) {
   document.getElementById('btn-xplay').style.display      = isXplay   ? 'none' : '';
   document.getElementById('btn-stop-xplay').style.display = isXplay   ? ''     : 'none';
   document.getElementById('xp-progress').style.display    = isXplay   ? ''     : 'none';
+  if (!isXplay) document.getElementById('xp-tab-prog').textContent = '';
   // A training run only writes its final model on exit, and eval-loaded
   // checkpoints don't change the dir at all — refresh right when either one
   // stops so a just-finished run's model shows up without a page reload.
@@ -1143,6 +1145,8 @@ function xpEstimate() {
 }
 document.getElementById('xp-scripted').addEventListener('change', xpEstimate);
 function xpProgress(m) {
+  // the tab carries the progress too, so a run can be followed from the console
+  document.getElementById('xp-tab-prog').textContent = `${(100 * m.done / Math.max(m.total, 1)).toFixed(0)}%`;
   document.getElementById('xp-progress').style.display = '';
   document.getElementById('xp-bar').style.width = (100 * m.done / Math.max(m.total, 1)).toFixed(1) + '%';
   document.getElementById('xp-progress-txt').textContent = m.msg.replace('[crossplay] ', '');
@@ -1159,14 +1163,14 @@ async function xpLoadResults() {
   const cfg = d.config || {};
   document.getElementById('xp-meta').textContent =
     `${d.finished || ''} · ${cfg.episodes || '?'} games/cell · ${(cfg.doctrine || '').toUpperCase()}`;
-  // Checkpoints are numbered so columns stay narrow in the side panel; the
-  // names are on the rows, and every header and cell has a full tooltip.
+  // Checkpoints are numbered so columns stay narrow; the names are on the
+  // rows, and every header and cell has a full tooltip.
   const num = {}; d.rows.forEach((r, k) => num[r] = k + 1);
   const short = c => num[c] ? '#' + num[c] : c.replace('ADAPTIVE_SHOOTER', 'ADAPT').slice(0, 5);
   const head = '<tr><th class="r" style="color:var(--muted)">AC1 ↓ · AC2 →</th>'
     + d.cols.map(c => `<th title="${esc(c)}">${esc(short(c))}</th>`).join('') + '</tr>';
   const body = d.rows.map(r => '<tr><th class="r" title="' + esc(r) + '">'
-    + `<span style="color:#c79bff">#${num[r]}</span><span class="xp-rowname"> ${esc(r)}</span>` + '</th>'
+    + `<span style="color:#c79bff">#${num[r]}</span><span> ${esc(r)}</span>` + '</th>'
     + d.cols.map(c => {
         const x = d.cells[`${r} | ${c}`];
         if (!x) return '<td>—</td>';
@@ -1177,14 +1181,12 @@ async function xpLoadResults() {
       }).join('') + '</tr>').join('');
   const elo = Object.entries(d.elo || {}).sort((a, b) => b[1] - a[1]);
   const lo = Math.min(...elo.map(e => e[1])), hi = Math.max(...elo.map(e => e[1]));
-  const eloHtml = elo.map(([p, v]) => `<div style="display:flex;align-items:center;gap:6px;font-size:11px">
-      <span class="xp-elo-name" style="width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p)}">${num[p] ? `<span style="color:#c79bff">#${num[p]}</span> ` : ''}${esc(p)}</span>
+  const eloHtml = elo.map(([p, v]) => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;max-width:760px;padding:2px 0">
+      <span class="xp-elo-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p)}">${num[p] ? `<span style="color:#c79bff">#${num[p]}</span> ` : ''}${esc(p)}</span>
       <div style="flex:1;height:8px;background:var(--card)"><div style="height:100%;width:${(12 + 88 * (v - lo) / Math.max(hi - lo, 1)).toFixed(0)}%;background:#c79bff"></div></div>
       <span style="width:38px;text-align:right;color:var(--bright)">${v.toFixed(0)}</span></div>`).join('');
   const sb = d.seat_bias || 0;
-  el.innerHTML = `<div class="xp-close" style="text-align:right"><a href="#" style="color:var(--blue);font-size:12px"
-      onclick="document.getElementById('xp-results').classList.remove('wide');return false">close ✕</a></div>
-    <table id="xp-table">${head}${body}</table>
+  el.innerHTML = `<table id="xp-table">${head}${body}</table>
     <div style="font-size:11px;margin:8px 0 4px;color:${Math.abs(sb) > 0.05 ? 'var(--amber)' : 'var(--text)'}">
       Seat bias ${sb >= 0 ? '+' : ''}${sb.toFixed(3)}${Math.abs(sb) > 0.05 ? ' — larger than expected; add games or check the seats' : ' (fair)'}</div>
     <div style="font-size:12px;color:var(--bright);font-weight:bold;margin:8px 0 4px">ELO <span style="font-weight:normal;font-size:11px;color:var(--muted)">(mean 1000)</span></div>
@@ -1211,7 +1213,7 @@ document.getElementById('btn-stop-xplay').onclick = () => {
 };
 xpLoadResults();
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { document.getElementById('xp-results').classList.remove('wide'); closeHelp(); }
+  if (e.key === 'Escape') closeHelp();
 });
 
 // ─── Display units ───────────────────────────────────────────────
@@ -1244,13 +1246,17 @@ function applyUnits() {
 setTimeout(applyUnits, 0);
 
 // ─── Library ─────────────────────────────────────────────────────
+let VIEW = 'console';
 function showView(v) {
   if (v !== 'library' && !libConfirmLeave()) return;
+  VIEW = v;
   document.getElementById('main').style.display = v === 'console' ? '' : 'none';
+  document.getElementById('xplay-view').style.display = v === 'xplay' ? 'flex' : 'none';
   document.getElementById('library-view').style.display = v === 'library' ? 'flex' : 'none';
-  document.getElementById('tab-console').classList.toggle('on', v === 'console');
-  document.getElementById('tab-library').classList.toggle('on', v === 'library');
+  for (const t of ['console', 'xplay', 'library'])
+    document.getElementById('tab-' + t).classList.toggle('on', v === t);
   if (v === 'library') loadLibrary();
+  if (v === 'xplay') xpLoadResults();
 }
 const KIND_TITLE = {platform: 'PLATFORMS', airframe: 'AIRFRAMES', radar: 'RADARS', missile: 'MISSILES'};
 let LIB = null, libSel = null, libCur = null, libPerf = null, libDirty = false;
