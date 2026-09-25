@@ -138,28 +138,40 @@ def autopilot_check(cfg, alt, V, t_total=90.0):
             "altitude_step_peak_g": nz_peak}
 
 
-def speed_check(cfg, alt, cmds, seg=120.0):
+def speed_check(cfg, alt, cmds, seg=120.0, seg_max=360.0):
     """
-    Speed-hold step responses: hold each commanded speed for `seg` seconds.
+    Speed-hold step responses. Each command is held for at least `seg`
+    seconds and, while the speed is still changing (more than 0.02 m/s² over
+    the last 10 s), up to `seg_max`: a clean jet slows down at idle only as
+    fast as its drag allows, and an error measured before it gets there is a
+    physical limit, not a controller fault.
     Per step: steady error (mean of the last 10 s), overshoot beyond the
-    command, and time to stay within 3 m/s.
+    command, time to stay within 3 m/s, and whether the speed had stopped
+    changing ('settled_flat'); a step that never did is not counted as a
+    steady error.
     """
     ac = _new(cfg, alt, cmds[0])
     ac.throttle = 0.55
     out = []
+    n10 = int(10.0 / DT)
     for i, v_cmd in enumerate(cmds):
         v_prev = cmds[i - 1] if i else cmds[0]
         sign = 1.0 if v_cmd >= v_prev else -1.0
         vs = []
-        for _ in range(int(seg / DT)):
+        while True:
             ac.step(DT, {"hdgCmd": 0.0, "altTarget": alt, "V": v_cmd, "altFPA": 25 * D2R})
             vs.append(ac.V)
+            t = len(vs) * DT
+            if t >= seg and len(vs) > n10:
+                rate = abs(vs[-1] - vs[-n10]) / 10.0
+                if rate < 0.02 or t >= seg_max:
+                    break
         vs = np.array(vs)
         err = vs - v_cmd
-        steady = float(np.mean(err[-int(10 / DT):]))
-        overshoot = float(max(0.0, np.max(sign * err))) if i else 0.0
-        out.append({"from": v_prev, "to": v_cmd, "steady_error": steady, "overshoot": overshoot,
-                    "settle_s": _settle_time(err, 3.0, seg)})
+        flat = abs(vs[-1] - vs[-n10]) / 10.0 < 0.02
+        out.append({"from": v_prev, "to": v_cmd, "steady_error": float(np.mean(err[-n10:])),
+                    "overshoot": float(max(0.0, np.max(sign * err))) if i else 0.0,
+                    "settle_s": _settle_time(err, 3.0, len(vs) * DT), "settled_flat": bool(flat)})
     return out
 
 
@@ -191,7 +203,9 @@ def card(airframe_cfg, platform=None) -> dict:
     cl = climb(cfg, 5000.0, v_ref, platform.climb_fpa if platform else None)
     if not cl["reached"]:
         warn.append("cannot climb 3 km from 5 km within 10 minutes")
-    elif cl["speed_start"] - cl["speed_end"] > 50:
+    elif platform is not None and cl["speed_start"] - cl["speed_end"] > 50:
+        # Only a platform has a climb schedule; an airframe alone is flown at
+        # the flat 25° limit, and its speed loss there is not a setting to fix.
         warn.append(f"the climb schedule bleeds {cl['speed_start']-cl['speed_end']:.0f} m/s; "
                     f"lower the climb angles")
     ceil, capped = ceiling(cfg)
@@ -203,7 +217,13 @@ def card(airframe_cfg, platform=None) -> dict:
     for alt, steps in speed.items():
         top = speeds.get(alt, {}).get("speed", 1e9)
         # A command above the top speed cannot be held; that is reported separately.
-        bad = [x for x in steps if x["to"] <= top - 2.0 and abs(x["steady_error"]) > 5.0]
+        bad = [x for x in steps if x["to"] <= top - 2.0 and x["settled_flat"]
+               and abs(x["steady_error"]) > 5.0]
+        slow = [x for x in steps if not x["settled_flat"]]
+        if slow:
+            w = slow[0]
+            warn.append(f"at {alt/1000:.0f} km the step {w['from']:.0f} → {w['to']:.0f} m/s was still "
+                        f"changing speed after 6 minutes")
         if bad:
             w = max(bad, key=lambda x: abs(x["steady_error"]))
             warn.append(f"speed hold at {alt/1000:.0f} km settles {w['steady_error']:+.0f} m/s away "
@@ -232,6 +252,7 @@ def card(airframe_cfg, platform=None) -> dict:
     return {"top_speed": speeds, "turn_speed_ref": v_ref,
             "max_bank_turn_40s": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in turns.items()},
             "climb_3km_from_5km": {k: (round(v, 1) if isinstance(v, float) else v) for k, v in cl.items()},
+            "climb_schedule": "platform" if platform is not None else "flat 25° limit (no platform)",
             "ceiling_m": round(ceil, 0), "ceiling_at_model_cap": capped,
             "autopilot": {k: (round(v, 1) if isinstance(v, float) else v) for k, v in ap.items()},
             "speed_hold": {k: [{kk: (round(vv, 1) if isinstance(vv, float) else vv) for kk, vv in x.items()}

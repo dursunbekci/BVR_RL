@@ -1396,7 +1396,9 @@ function renderPerf(c) {
       <div><b style="font-size:11px">TOP SPEED, full throttle, level</b><table class="perf-tbl">${ts}</table></div>
       <div><b style="font-size:11px">MAX-BANK TURN, 40 s at ${c.turn_speed_ref.toFixed(0)} m/s</b>
         <table class="perf-tbl"><tr><th>alt</th><th>rate</th><th>load</th><th>speed</th><th>alt err</th></tr>${tr}</table></div>
-      <div><b style="font-size:11px">CLIMB 5 → 8 km</b><table class="perf-tbl">
+      <div><b style="font-size:11px">CLIMB 5 → 8 km</b>
+        <div style="font-size:10px;color:var(--dim)">${c.climb_schedule === 'platform' ? 'with the platform\'s climb schedule' : 'at the flat 25° limit: open a platform to test its climb schedule'}</div>
+        <table class="perf-tbl">
         <tr><td>time</td><td>${cl.time_s.toFixed(0)} s</td></tr><tr><td>rate</td><td>${cl.rate_m_s.toFixed(0)} m/s</td></tr>
         <tr><td>speed</td><td>${cl.speed_start.toFixed(0)} → ${cl.speed_end.toFixed(0)} m/s</td></tr></table></div>
       <div><b style="font-size:11px">CEILING</b><table class="perf-tbl"><tr><td>${c.ceiling_m.toFixed(0)} m${c.ceiling_at_model_cap ? ' (the service-ceiling limit)' : ''}</td></tr></table>
