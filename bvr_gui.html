@@ -1382,7 +1382,7 @@ async function libPerfCard() {
   libPerf = c; renderPerf(c);
 }
 function renderPerf(c) {
-  const ts = Object.entries(c.top_speed).map(([a, v]) => `<tr><td>${(a/1000).toFixed(0)} km</td><td>${v.speed.toFixed(0)} m/s</td><td>Mach ${v.mach.toFixed(2)}</td></tr>`).join('');
+  const ts = Object.entries(c.top_speed).map(([a, v]) => `<tr><td>${a < 1000 ? a + ' m' : (a/1000).toFixed(0) + ' km'}</td><td>${v.speed.toFixed(0)} m/s</td><td>Mach ${v.mach.toFixed(2)}</td></tr>`).join('');
   const tr = Object.entries(c.max_bank_turn_40s).map(([a, v]) => `<tr><td>${(a/1000).toFixed(0)} km</td><td>${v.turn_rate_deg_s.toFixed(1)} °/s</td>
       <td>${v.load_factor.toFixed(1)} g</td><td>−${v.speed_loss.toFixed(0)} m/s</td><td>${v.alt_error.toFixed(0)} m</td></tr>`).join('');
   const cl = c.climb_3km_from_5km, ap = c.autopilot;

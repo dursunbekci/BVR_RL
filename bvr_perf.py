@@ -124,14 +124,16 @@ def autopilot_check(cfg, alt, V, t_total=90.0):
         ac.step(DT, {"hdgCmd": 90 * D2R, "altTarget": alt, "V": V, "altFPA": 25 * D2R})
         hdg_err.append(((ac.chi - 90 * D2R + math.pi) % (2 * math.pi) - math.pi) / D2R)
     ac = _new(cfg, alt, V)
-    alt_err = []
+    alt_err, nz_peak = [], 0.0
     for _ in range(int(t_total / DT)):
         ac.step(DT, {"hdgCmd": 0.0, "altTarget": alt + 1000.0, "V": V, "altFPA": 25 * D2R})
         alt_err.append(ac.z - (alt + 1000.0))
+        nz_peak = max(nz_peak, ac.nz)
     return {"heading_overshoot_deg": max(0.0, max(hdg_err)),
             "heading_settle_s": _settle_time(hdg_err, 2.0, t_total),
             "altitude_overshoot_m": max(0.0, max(alt_err)),
-            "altitude_settle_s": _settle_time(alt_err, 50.0, t_total)}
+            "altitude_settle_s": _settle_time(alt_err, 50.0, t_total),
+            "altitude_step_peak_g": nz_peak}
 
 
 def card(airframe_cfg, platform=None) -> dict:
@@ -139,7 +141,9 @@ def card(airframe_cfg, platform=None) -> dict:
     cfg = airframe_cfg
     warn = []
     speeds = {}
-    for alt in (0.0, 3000.0, 6000.0, 9000.0, 12000.0):
+    # 500 m rather than 0: the flight model clamps altitude at 10 m, and a
+    # level-flight test commanded at 0 m ends up sitting on that clamp.
+    for alt in (500.0, 3000.0, 6000.0, 9000.0, 12000.0):
         if alt >= cfg.ALT_CEIL:
             continue
         v, m, dz = top_speed(cfg, alt)
@@ -149,10 +153,10 @@ def card(airframe_cfg, platform=None) -> dict:
     v_ref = platform.speed_cmds[len(platform.speed_cmds) // 2] if platform else 0.8 * _a(9000.0)
     turns = {int(alt): max_bank_turn(cfg, alt, v_ref) for alt in (3000.0, 9000.0)
              if alt < cfg.ALT_CEIL}
-    if 0 in speeds and speeds[0]["mach"] > 1.3:
-        warn.append(f"top speed at sea level is Mach {speeds[0]['mach']:.2f}: the transonic drag "
-                    f"rise ends at Mach {cfg.DRAG_RISE_M2:g} and there is no supersonic wave drag "
-                    f"beyond it (real fighters are limited to about Mach 1.2 at sea level)")
+    if 500 in speeds and speeds[500]["mach"] > 1.3:
+        warn.append(f"top speed near sea level is Mach {speeds[500]['mach']:.2f}; real fighters are "
+                    f"limited to about Mach 1.2 there. Raise 'Peak extra CD' or lower 'Decay rate "
+                    f"after peak' so more wave drag remains")
     for alt, t in turns.items():
         if abs(t["alt_error"]) > 150:
             warn.append(f"a hard turn at {alt/1000:.0f} km loses {abs(t['alt_error']):.0f} m of "

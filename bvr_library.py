@@ -78,8 +78,9 @@ SCHEMA = {
         P("DRAG_RISE_M0", "Drag rise starts", "Mach", "Transonic drag rise", 0.4, 1.3),
         P("DRAG_RISE_M1", "Drag rise peaks", "Mach", "Transonic drag rise", 0.5, 1.6,
           help="Extra drag rises as a half sine from 'starts' to 'peaks'."),
-        P("DRAG_RISE_M2", "Drag rise ends", "Mach", "Transonic drag rise", 0.6, 3.0,
-          help="After the peak the extra drag decays exponentially until this Mach."),
+        P("DRAG_RISE_M2", "Wave drag settles", "Mach", "Transonic drag rise", 0.6, 3.0,
+          help="After the peak the extra drag decays exponentially until this Mach, then "
+               "stays at that value: supersonic wave drag does not go away."),
         P("DRAG_RISE_PEAK", "Peak extra CD", "-", "Transonic drag rise", 0, 0.3),
         P("DRAG_RISE_DECAY", "Decay rate after peak", "1/Mach", "Transonic drag rise", 0, 30),
         P("T_MIL_SL", "Military thrust, sea level", "N", "Engine", 500, 500_000),
@@ -104,7 +105,9 @@ SCHEMA = {
         P("K_HDG_PHI", "Bank per heading error", "-", "Autopilot", 0.2, 10, advanced=True),
         P("K_PHI_ROLL", "Roll rate per bank error", "1/s", "Autopilot", 0.2, 20, advanced=True),
         P("K_ALT_GAM", "Flight-path angle per altitude error", "rad/m", "Autopilot",
-          0.001, 1, advanced=True),
+          0.00005, 0.5, advanced=True,
+          help="Small values ease the climb angle off early and avoid overshoot; "
+               "check the performance card's altitude step response."),
         P("K_GAM_NZ", "Load factor per flight-path error", "1/rad", "Autopilot", 0.2, 20,
           advanced=True),
         P("BANK_NZ_MARGIN", "Load-factor share usable for turning", "-", "Autopilot",
@@ -387,7 +390,7 @@ def airframe_config(item_id: str) -> _Cfg:
         if mach < m0: return 0.0
         if mach < m1: return peak * math.sin(math.pi * (mach - m0) / (m1 - m0))
         if mach < m2: return peak * math.exp(-decay * (mach - m1))
-        return 0.0
+        return peak * math.exp(-decay * (m2 - m1))          # supersonic wave drag
     c.cd_rise = cd_rise
     return c
 

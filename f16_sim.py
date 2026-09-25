@@ -104,11 +104,14 @@ class F16Cfg:
     ROLL_MAX   = 4.0         # rad/s (~230 °/s physical limit)
 
     # Altitude → FPA
-    K_ALT_GAM  = 0.12        # rad of FPA per m of altitude error
+    # Was 0.12 with K_GAM_NZ 3.0: the FPA command sat at its limit until ~4 m
+    # from the target and the slow FPA loop then overshot a 1 km step by
+    # 254 m, taking 48 s to settle. Now 20 m / 23 s at 340 m/s, 3.1 g peak.
+    K_ALT_GAM  = 0.0003      # rad of FPA per m of altitude error
     GAMMA_MAX  = 40.0 * DEG2RAD
 
     # FPA → load factor
-    K_GAM_NZ   = 3.0         # nz correction per rad of FPA error
+    K_GAM_NZ   = 7.0         # nz correction per rad of FPA error
 
     # Fraction of available load factor a turn may spend on holding the
     # aircraft level; the rest stays in reserve for the altitude loop.
@@ -136,11 +139,15 @@ def _thrust_mach_factor(mach: float) -> float:
 
 
 def _cd_rise(mach: float) -> float:
-    """Additional drag in the transonic region."""
+    """Additional drag in the transonic region, and the wave drag that remains above it."""
     if mach < 0.85: return 0.0
-    if mach < 1.10: return 0.040 * math.sin(math.pi * (mach - 0.85) / 0.25)
-    if mach < 1.40: return 0.040 * math.exp(-2.0 * (mach - 1.10))
-    return 0.0
+    if mach < 1.10: return 0.034 * math.sin(math.pi * (mach - 0.85) / 0.25)
+    if mach < 1.40: return 0.034 * math.exp(-1.0 * (mach - 1.10))
+    # Supersonic wave drag stays. This used to return 0 (peak 0.040, decay
+    # 2.0): a 40% drop in total drag at Mach 1.4 that let the aircraft reach
+    # its Mach 1.8 cap even at sea level. Now Mach 1.17 at 500 m, 1.37 at
+    # 3 km, 1.66 at 9 km (published: about 1.2 low down, about 2 up high).
+    return 0.034 * math.exp(-1.0 * (1.40 - 1.10))
 
 
 # ─────────────────────────────────────────────────────────────────────
