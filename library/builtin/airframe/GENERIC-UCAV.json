@@ -56,7 +56,8 @@
     "K_ALT_GAM": 0.004,
     "K_GAM_NZ": 10.0,
     "BANK_NZ_MARGIN": 0.85,
-    "K_V_THROT": 0.012
+    "K_V_THROT": 0.06,
+    "K_V_INT": 0.005
   },
   "sources": {
     "MASS_EMPTY": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
@@ -94,6 +95,7 @@
     "K_ALT_GAM": "tuned with bvr_perf.py: a 1 km altitude step overshoots 55 m and settles in 16 s",
     "K_GAM_NZ": "tuned with bvr_perf.py: a 1 km altitude step overshoots 55 m and settles in 16 s",
     "BANK_NZ_MARGIN": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
-    "K_V_THROT": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft"
+    "K_V_THROT": "tuned with bvr_perf.py speed_check: no steady error, overshoot ≤ 3 m/s for steps between 170 and 250 m/s",
+    "K_V_INT": "tuned with bvr_perf.py speed_check: no steady error, overshoot ≤ 3 m/s for steps between 170 and 250 m/s"
   }
 }

@@ -68,7 +68,8 @@
     "K_ALT_GAM": 0.0003,
     "K_GAM_NZ": 7.0,
     "BANK_NZ_MARGIN": 0.85,
-    "K_V_THROT": 0.012
+    "K_V_THROT": 0.05,
+    "K_V_INT": 0.004
   },
   "sources": {
     "MASS_EMPTY": "open-source F-16C Block 50 estimate (as calibrated in f16_sim.py)",
@@ -106,6 +107,7 @@
     "K_ALT_GAM": "tuned with bvr_perf.py: a 1 km altitude step overshoots 20 m and settles in 23 s at 340 m/s (0 m at 250 m/s), with a 3.1 g pull-up; was K_ALT_GAM 0.12, K_GAM_NZ 3.0: 254 m overshoot, 48 s",
     "K_GAM_NZ": "tuned with bvr_perf.py: a 1 km altitude step overshoots 20 m and settles in 23 s at 340 m/s (0 m at 250 m/s), with a 3.1 g pull-up; was K_ALT_GAM 0.12, K_GAM_NZ 3.0: 254 m overshoot, 48 s",
     "BANK_NZ_MARGIN": "autopilot tuning (turns hold altitude)",
-    "K_V_THROT": "autopilot tuning"
+    "K_V_THROT": "tuned with bvr_perf.py speed_check: PI speed hold, steady error ≤ 0.4 m/s and overshoot ≤ 1.1 m/s for steps between 220 and 400 m/s at 3 and 9 km. Was proportional only (0.012): steady errors up to 34 m/s",
+    "K_V_INT": "tuned with bvr_perf.py speed_check: PI speed hold, steady error ≤ 0.4 m/s and overshoot ≤ 1.1 m/s for steps between 220 and 400 m/s at 3 and 9 km. Was proportional only (0.012): steady errors up to 34 m/s"
   }
 }

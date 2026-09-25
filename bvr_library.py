@@ -59,6 +59,7 @@ class P:
     advanced: bool = False
     help: str = ""
     ref: str = None                # for kind="ref": which item kind it points to
+    default: float = None          # used when an item predates this parameter
 
 
 SCHEMA = {
@@ -113,6 +114,10 @@ SCHEMA = {
         P("BANK_NZ_MARGIN", "Load-factor share usable for turning", "-", "Autopilot",
           0.3, 1.0, advanced=True,
           help="The rest is kept for the altitude loop, so turns hold altitude."),
+        P("K_V_INT", "Throttle per integrated speed error", "1/(m·s⁻¹·s)", "Autopilot",
+          0.0, 0.05, advanced=True, default=0.0,
+          help="Removes the steady speed error a proportional-only hold leaves. 0 turns "
+               "it off, as in items saved before this parameter existed."),
         P("K_V_THROT", "Throttle per speed error", "1/(m/s)", "Autopilot", 0.001, 0.2,
           advanced=True),
     ],
@@ -238,7 +243,7 @@ def validate(item: dict) -> list:
         errs.append("id: letters, digits, '-', '_' or '.', up to 48 characters")
     params = item.get("params", {})
     for p in SCHEMA[kind]:
-        v = params.get(p.key)
+        v = params.get(p.key, p.default)
         if v is None:
             errs.append(f"{p.label}: missing")
             continue
@@ -363,7 +368,7 @@ class _Cfg:
         self.item = item
         self.fingerprint = fingerprint(item)
         for p in SCHEMA[kind]:
-            v = item["params"][p.key]
+            v = item["params"].get(p.key, p.default)
             if p.kind in ("float", "int"):
                 v = float(v) if p.kind == "float" else int(v)
                 if (kind, p.key) in _TO_SI_DIV:

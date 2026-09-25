@@ -13,6 +13,8 @@ through a few standard manoeuvres and reports what the numbers produce:
     ceiling            highest altitude still climbing at 0.5 m/s
     autopilot          overshoot and settling time of a 90° heading change
                        and of a 1 km altitude change
+    speed hold         steady error and overshoot for steps between the
+                       platform's speed choices, at 3 and 9 km
 
 A number that is off by a factor of two shows up here in seconds, not as a
 strange training run a week later. Nothing here is learned; it is a flight
@@ -136,6 +138,31 @@ def autopilot_check(cfg, alt, V, t_total=90.0):
             "altitude_step_peak_g": nz_peak}
 
 
+def speed_check(cfg, alt, cmds, seg=120.0):
+    """
+    Speed-hold step responses: hold each commanded speed for `seg` seconds.
+    Per step: steady error (mean of the last 10 s), overshoot beyond the
+    command, and time to stay within 3 m/s.
+    """
+    ac = _new(cfg, alt, cmds[0])
+    ac.throttle = 0.55
+    out = []
+    for i, v_cmd in enumerate(cmds):
+        v_prev = cmds[i - 1] if i else cmds[0]
+        sign = 1.0 if v_cmd >= v_prev else -1.0
+        vs = []
+        for _ in range(int(seg / DT)):
+            ac.step(DT, {"hdgCmd": 0.0, "altTarget": alt, "V": v_cmd, "altFPA": 25 * D2R})
+            vs.append(ac.V)
+        vs = np.array(vs)
+        err = vs - v_cmd
+        steady = float(np.mean(err[-int(10 / DT):]))
+        overshoot = float(max(0.0, np.max(sign * err))) if i else 0.0
+        out.append({"from": v_prev, "to": v_cmd, "steady_error": steady, "overshoot": overshoot,
+                    "settle_s": _settle_time(err, 3.0, seg)})
+    return out
+
+
 def card(airframe_cfg, platform=None) -> dict:
     """The full card, with plain-language warnings."""
     cfg = airframe_cfg
@@ -169,6 +196,18 @@ def card(airframe_cfg, platform=None) -> dict:
                     f"lower the climb angles")
     ceil, capped = ceiling(cfg)
     ap = autopilot_check(cfg, 6000.0, v_ref)
+    sc = platform.speed_cmds if platform else [0.6 * _a(9000.0), 0.75 * _a(9000.0),
+                                               0.9 * _a(9000.0), 1.05 * _a(9000.0)]
+    seq = [sc[1], sc[2], sc[3], sc[0], sc[2]]
+    speed = {int(alt): speed_check(cfg, alt, seq) for alt in (3000.0, 9000.0) if alt < cfg.ALT_CEIL}
+    for alt, steps in speed.items():
+        top = speeds.get(alt, {}).get("speed", 1e9)
+        # A command above the top speed cannot be held; that is reported separately.
+        bad = [x for x in steps if x["to"] <= top - 2.0 and abs(x["steady_error"]) > 5.0]
+        if bad:
+            w = max(bad, key=lambda x: abs(x["steady_error"]))
+            warn.append(f"speed hold at {alt/1000:.0f} km settles {w['steady_error']:+.0f} m/s away "
+                        f"from a {w['to']:.0f} m/s command: raise 'Throttle per integrated speed error'")
     if ap["heading_settle_s"] is None or ap["heading_overshoot_deg"] > 10:
         warn.append(f"heading hold overshoots a 90° turn by {ap['heading_overshoot_deg']:.0f}° "
                     f"or does not settle: lower 'Bank per heading error' or raise 'Roll rate "
@@ -195,6 +234,8 @@ def card(airframe_cfg, platform=None) -> dict:
             "climb_3km_from_5km": {k: (round(v, 1) if isinstance(v, float) else v) for k, v in cl.items()},
             "ceiling_m": round(ceil, 0), "ceiling_at_model_cap": capped,
             "autopilot": {k: (round(v, 1) if isinstance(v, float) else v) for k, v in ap.items()},
+            "speed_hold": {k: [{kk: (round(vv, 1) if isinstance(vv, float) else vv) for kk, vv in x.items()}
+                               for x in v] for k, v in speed.items()},
             "warnings": warn}
 
 

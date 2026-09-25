@@ -118,7 +118,10 @@ class F16Cfg:
     BANK_NZ_MARGIN = 0.85
 
     # Speed → throttle
-    K_V_THROT  = 0.012       # throttle change per m/s of speed error
+    # Was proportional only (0.012, no integral): steady errors up to 34 m/s,
+    # e.g. 400 -> 366, 340 -> 310, 220 -> 247. Now PI: within 0.4 m/s.
+    K_V_THROT  = 0.05        # throttle change per m/s of speed error
+    K_V_INT    = 0.004       # throttle change per (m/s · s) of integrated error
     THROT_TC   = 2.5         # s engine lag time constant
 
     # Mach-dependent curves (defined below the class)
@@ -167,6 +170,7 @@ class F16Aircraft:
         self.x = self.y = self.z = 0.0
         self.V = 280.0; self.gamma = 0.0; self.chi = 0.0; self.phi = 0.0
         self.throttle = 0.5; self.fuel_kg = self.cfg.FUEL_FULL * 0.5
+        self._v_int = 0.0            # speed-hold integrator
         # derived
         self.alpha = 0.0; self.beta = 0.0; self.nz = 1.0; self.mach = 0.9
         self.theta = 0.0; self.p = 0.0; self.q = 0.0; self.r = 0.0
@@ -183,6 +187,7 @@ class F16Aircraft:
         self.chi            = float(chi) % (2.0 * math.pi)
         self.phi            = 0.0
         self.throttle       = 0.55
+        self._v_int         = 0.0
         self.fuel_kg        = float(fuel_frac) * self.cfg.FUEL_FULL
         self._refresh_atmos()
         self.mach           = self.V / max(self._a_sound, 1.0)
@@ -214,8 +219,18 @@ class F16Aircraft:
         W = self.mass * G
 
         # ── 1. speed autopilot → throttle ────────────────────────────
+        # Proportional plus integral. Proportional alone settled away from the
+        # command (340 -> 310 m/s at 3 km, 400 -> 366, 220 -> 247). The
+        # integral only runs while the throttle is not pinned at a limit, or
+        # when the error would pull it off that limit, so it does not wind up
+        # while the aircraft is energy-limited (a hard turn at full power).
         V_err = V_cmd - self.V
-        throt_cmd = float(np.clip(0.55 + self.cfg.K_V_THROT * V_err, 0.0, 1.0))
+        k_i = getattr(self.cfg, "K_V_INT", 0.0)
+        raw = 0.55 + self.cfg.K_V_THROT * V_err + k_i * self._v_int
+        throt_cmd = float(np.clip(raw, 0.0, 1.0))
+        if k_i > 0.0 and ((0.0 < raw < 1.0) or (raw >= 1.0 and V_err < 0.0)
+                          or (raw <= 0.0 and V_err > 0.0)):
+            self._v_int += V_err * dt
         lag = float(np.clip(dt / self.cfg.THROT_TC, 0.0, 1.0))
         self.throttle += lag * (throt_cmd - self.throttle)
         self.throttle = float(np.clip(self.throttle, 0.0, 1.0))

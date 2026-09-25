@@ -1403,6 +1403,11 @@ function renderPerf(c) {
         <b style="font-size:11px">AUTOPILOT STEP RESPONSE</b><table class="perf-tbl">
         <tr><td>90° heading</td><td>overshoot ${ap.heading_overshoot_deg.toFixed(0)}°</td><td>settles ${st(ap.heading_settle_s)}</td></tr>
         <tr><td>+1 km altitude</td><td>overshoot ${ap.altitude_overshoot_m.toFixed(0)} m</td><td>settles ${st(ap.altitude_settle_s)}</td></tr></table></div>
+      <div><b style="font-size:11px">SPEED HOLD</b><table class="perf-tbl"><tr><th>alt</th><th>step</th><th>steady error</th><th>overshoot</th><th>settles</th></tr>
+        ${Object.entries(c.speed_hold || {}).map(([a, steps]) => steps.slice(1).map((x, i) =>
+          `<tr><td>${i ? '' : (a/1000).toFixed(0) + ' km'}</td><td>${x.from.toFixed(0)} → ${x.to.toFixed(0)}</td>
+           <td>${x.steady_error >= 0 ? '+' : ''}${x.steady_error.toFixed(1)} m/s</td><td>${x.overshoot.toFixed(1)}</td>
+           <td>${st(x.settle_s)}</td></tr>`).join('')).join('')}</table></div>
     </div>`;
 }
 function libCalibrate() {
