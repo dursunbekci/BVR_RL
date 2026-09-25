@@ -144,13 +144,17 @@ def _thrust_mach_factor(mach: float) -> float:
 def _cd_rise(mach: float) -> float:
     """Additional drag in the transonic region, and the wave drag that remains above it."""
     if mach < 0.85: return 0.0
-    if mach < 1.10: return 0.034 * math.sin(math.pi * (mach - 0.85) / 0.25)
-    if mach < 1.40: return 0.034 * math.exp(-1.0 * (mach - 1.10))
+    # Rises to the peak at Mach 0.975 and decays from there. It used to be a
+    # half sine over 0.85-1.10 that peaked at 0.975, fell back to zero just
+    # below 1.10 (total drag = CD0) and then jumped to the peak: a low-drag
+    # gap across 1.0-1.1. Unchanged below 0.975; within 0.3% above 1.4.
+    if mach < 0.975: return 0.034 * math.sin(0.5 * math.pi * (mach - 0.85) / 0.125)
+    if mach < 1.40: return 0.034 * math.exp(-0.7 * (mach - 0.975))
     # Supersonic wave drag stays. This used to return 0 (peak 0.040, decay
     # 2.0): a 40% drop in total drag at Mach 1.4 that let the aircraft reach
-    # its Mach 1.8 cap even at sea level. Now Mach 1.17 at 500 m, 1.37 at
+    # its Mach 1.8 cap even at sea level. Now Mach 1.24 at 500 m, 1.37 at
     # 3 km, 1.66 at 9 km (published: about 1.2 low down, about 2 up high).
-    return 0.034 * math.exp(-1.0 * (1.40 - 1.10))
+    return 0.034 * math.exp(-0.7 * (1.40 - 0.975))
 
 
 # ─────────────────────────────────────────────────────────────────────

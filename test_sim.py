@@ -443,6 +443,15 @@ def test_library_f16_matches_model():
             assert abs(p.airframe.thrust_mach_factor(m) - f16_sim._thrust_mach_factor(m)) < 1e-9
         assert abs(p.airframe.cd_rise(m) - f16_sim._cd_rise(m)) < 1e-12
         assert abs(p.missile.drag_cd(m) - missile_sim._drag_cd(m)) < 1e-12
+    # The transonic rise is continuous (it once fell to zero just below Mach
+    # 1.1 and jumped to the peak) and never below its supersonic value past the peak.
+    from bvr_library import airframe_config
+    for iid in ("F-16C", "GENERIC-UCAV"):
+        c = airframe_config(iid)
+        cd = np.array([c.cd_rise(m) for m in np.arange(0.0, 2.5, 0.001)])
+        assert np.abs(np.diff(cd)).max() < 1e-3, f"{iid}: drag rise jumps"
+        post = [c.cd_rise(m) for m in np.arange(c.DRAG_RISE_M1, 2.5, 0.001)]
+        assert min(post) >= c.cd_rise(c.DRAG_RISE_M2) - 1e-12, f"{iid}: drag dips after its peak"
     print("  library F-16C = model ....... OK")
 
 

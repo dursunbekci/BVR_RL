@@ -1562,7 +1562,7 @@ function dragRiseCurve(get) {
   const cd0 = get('CD0'), m0 = get('DRAG_RISE_M0'), m1 = get('DRAG_RISE_M1'), m2 = get('DRAG_RISE_M2');
   const pk = get('DRAG_RISE_PEAK'), dc = get('DRAG_RISE_DECAY');
   if (![cd0, m0, m1, m2, pk, dc].every(isFinite) || !(m1 > m0)) return [];
-  const rise = m => m < m0 ? 0 : m < m1 ? pk * Math.sin(Math.PI * (m - m0) / (m1 - m0))
+  const rise = m => m < m0 ? 0 : m < m1 ? pk * Math.sin(0.5 * Math.PI * (m - m0) / (m1 - m0))
                   : m < m2 ? pk * Math.exp(-dc * (m - m1)) : pk * Math.exp(-dc * (m2 - m1));
   const pts = [], top = Math.max(2.2, m2 + 0.4);
   for (let m = 0; m <= top + 1e-9; m += 0.01) pts.push([+m.toFixed(2), cd0 + rise(m)]);

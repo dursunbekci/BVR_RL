@@ -78,7 +78,7 @@ SCHEMA = {
         P("CL_MIN", "Minimum lift coefficient", "-", "Aerodynamics", -3, 0),
         P("DRAG_RISE_M0", "Drag rise starts", "Mach", "Transonic drag rise", 0.4, 1.3),
         P("DRAG_RISE_M1", "Drag rise peaks", "Mach", "Transonic drag rise", 0.5, 1.6,
-          help="Extra drag rises as a half sine from 'starts' to 'peaks'."),
+          help="Extra drag rises along a quarter sine from 'starts' to its peak here."),
         P("DRAG_RISE_M2", "Wave drag settles", "Mach", "Transonic drag rise", 0.6, 3.0,
           help="After the peak the extra drag decays exponentially until this Mach, then "
                "stays at that value: supersonic wave drag does not go away."),
@@ -354,9 +354,20 @@ def delete_item(kind: str, item_id: str) -> None:
     f.unlink()
 
 
+# Bumped when a kind's model equations change, so that unchanged parameters
+# under changed equations do not keep their old fingerprint. Airframe 2: the
+# transonic drag rise became a quarter sine peaking at DRAG_RISE_M1 (it was a
+# half sine that fell back to zero there before jumping to the peak).
+_MODEL_REV = {"airframe": 2}
+
+
 def fingerprint(item: dict) -> str:
     """Short hash of an item's parameter values: equal hashes, equal physics."""
-    blob = json.dumps(item.get("params", {}), sort_keys=True, separators=(",", ":"))
+    params = item.get("params", {})
+    rev = _MODEL_REV.get(item.get("kind"))
+    if rev is not None:
+        params = dict(params, __model_rev__=rev)
+    blob = json.dumps(params, sort_keys=True, separators=(",", ":"))
     return hashlib.sha1(blob.encode()).hexdigest()[:10]
 
 
@@ -393,7 +404,7 @@ def airframe_config(item_id: str) -> _Cfg:
 
     def cd_rise(mach):
         if mach < m0: return 0.0
-        if mach < m1: return peak * math.sin(math.pi * (mach - m0) / (m1 - m0))
+        if mach < m1: return peak * math.sin(0.5 * math.pi * (mach - m0) / (m1 - m0))
         if mach < m2: return peak * math.exp(-decay * (mach - m1))
         return peak * math.exp(-decay * (m2 - m1))          # supersonic wave drag
     c.cd_rise = cd_rise
