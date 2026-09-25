@@ -731,7 +731,7 @@ select option{background:#050810}
           <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">WIN RATE</span>
           <button class="help-btn" onclick="help(this,'WIN RATE',
             'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick at 65% is the threshold for advancing to the next opponent stage.\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
-          <span style="font-size:11px;color:var(--amber)">advance at 65% →</span>
+          <span id="curr-note" style="font-size:11px;color:var(--amber)">advance at 65% →</span>
         </div>
         <div style="position:relative">
           <div class="prog-bar" style="height:14px">
@@ -1833,6 +1833,15 @@ function handleMetrics(d) {
   }
 
   updateCurriculum(d.opponent);
+  // Why the curriculum will or will not move on (older trainers do not report it).
+  const cn=document.getElementById('curr-note'), c=d.curriculum;
+  if(cn && !c){ cn.textContent='advance at 65% →'; cn.style.color='var(--amber)'; }
+  if(cn && c){
+    if(c.blocked){ cn.textContent=`stays on this stage: ${c.blocked}`; cn.style.color='var(--red)'; }
+    else { cn.textContent=`advance at ${Math.round(c.win_rate*100)}% → ${c.next}`
+             +(c.stage_episodes<c.min_episodes?` (after ${c.min_episodes} episodes; ${c.stage_episodes} so far)`:'');
+           cn.style.color='var(--amber)'; }
+  }
   updateTermBars(d.term_share, d.term_abs);
 
   if(d.history) {

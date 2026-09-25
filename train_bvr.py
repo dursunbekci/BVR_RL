@@ -161,6 +161,29 @@ class BvrCallback(BaseCallback):
         self.blue_losses = deque(maxlen=50)
         os.makedirs(save_dir, exist_ok=True)
 
+    def curriculum_state(self) -> dict:
+        """What the auto-curriculum will do next, for the log and the GUI."""
+        nxt = advance_curriculum(self.opponent_type)
+        blocked = None
+        if not self.auto_curriculum:
+            blocked = "auto-curriculum is OFF"
+        elif nxt == self.opponent_type:
+            blocked = "this is the last stage"
+        elif nxt == BvrOpponentType.SELF_PLAY and not self.allow_selfplay:
+            blocked = self.no_selfplay_reason
+        return {"auto": bool(self.auto_curriculum), "stage": self.opponent_type.name,
+                "next": None if nxt == self.opponent_type else nxt.name,
+                "blocked": blocked, "stage_episodes": self.stage_episodes,
+                "min_episodes": ADVANCE_MIN_EPISODES, "win_rate": ADVANCE_WIN_RATE}
+
+    def describe_curriculum(self) -> str:
+        c = self.curriculum_state()
+        if c["blocked"]:
+            return f"curriculum: stays on {c['stage']} ({c['blocked']})"
+        return (f"curriculum: ON, {c['stage']} -> {c['next']} once the win rate over the last 50 "
+                f"episodes reaches {ADVANCE_WIN_RATE:.0%} after at least {ADVANCE_MIN_EPISODES} "
+                f"episodes at the stage")
+
     def _on_step(self) -> bool:
         if (self.opponent_type == BvrOpponentType.SELF_PLAY
                 and self.num_timesteps - self.last_snapshot_step >= SELFPLAY_SNAPSHOT_STEPS):
@@ -312,6 +335,7 @@ class BvrCallback(BaseCallback):
                 "bank_rev_per_min": round(bank_rpm, 2),
                 "blue_losses_per_ep": round(losses_ep, 3) if losses_ep is not None else None,
                 "doctrine":      doctrine,
+                "curriculum":    self.curriculum_state(),
                 "history":       hist,
                 "steps_done":    int(self.model.num_timesteps),
             }
@@ -331,18 +355,26 @@ class BvrCallback(BaseCallback):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.model.save(path)
 
-        if (self.auto_curriculum and self.stage_episodes >= ADVANCE_MIN_EPISODES
-                and win_rate >= ADVANCE_WIN_RATE):
-            self._advance()
+        if self.stage_episodes >= ADVANCE_MIN_EPISODES and win_rate >= ADVANCE_WIN_RATE:
+            if self.auto_curriculum:
+                self._advance()
+            elif self.ep_count - getattr(self, "_last_hold_note", -10**9) >= 200:
+                # Said again every 200 episodes: a one-off line scrolls out of
+                # the GUI's log long before anyone wonders why nothing moved.
+                self._last_hold_note = self.ep_count
+                print(f"[bvr] win rate {win_rate:.0%} is past the {ADVANCE_WIN_RATE:.0%} "
+                      f"advance mark, but the auto-curriculum is OFF: staying on "
+                      f"{self.opponent_type.name}")
 
     def _advance(self):
         nxt = advance_curriculum(self.opponent_type)
         if nxt == self.opponent_type:
             return
         if nxt == BvrOpponentType.SELF_PLAY and not self.allow_selfplay:
-            if not getattr(self, "_told_no_selfplay", False):
+            # Repeated every 200 episodes, as for the OFF case above.
+            if self.ep_count - getattr(self, "_last_hold_note", -10**9) >= 200:
+                self._last_hold_note = self.ep_count
                 print(f"[bvr] curriculum ends at ADAPTIVE_SHOOTER: {self.no_selfplay_reason}")
-                self._told_no_selfplay = True
             return
         self.model.save(os.path.join(self.save_dir, "archive",
                                      f"pre_{nxt.name}"))
@@ -527,6 +559,7 @@ def main():
                      allow_selfplay=not (heterogeneous or team),
                      **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
+    print(f"[bvr] {cb.describe_curriculum()}")
     failure = None
     try:
         model.learn(total_timesteps=args.steps, callback=cb,
