@@ -118,6 +118,13 @@ class F16Cfg:
     K_V_THROT  = 0.012       # throttle change per m/s of speed error
     THROT_TC   = 2.5         # s engine lag time constant
 
+    # Mach-dependent curves (defined below the class)
+    @staticmethod
+    def thrust_mach_factor(mach): return _thrust_mach_factor(mach)
+
+    @staticmethod
+    def cd_rise(mach): return _cd_rise(mach)
+
 
 def _thrust_mach_factor(mach: float) -> float:
     """Dimensionless thrust scale vs Mach relative to M=0."""
@@ -143,12 +150,16 @@ class F16Aircraft:
     All state is public so sim_world can read it directly without method calls.
     """
 
-    def __init__(self, rng: np.random.Generator = None):
+    def __init__(self, rng: np.random.Generator = None, cfg=None):
         self._rng = rng or np.random.default_rng()
+        # Airframe parameters: F16Cfg by default, or an airframe from the
+        # parameter library (bvr_library.airframe_config), which has the same
+        # attribute names plus the two Mach-dependent curves as callables.
+        self.cfg = cfg if cfg is not None else F16Cfg
         # placeholders — overwritten by reset_state
         self.x = self.y = self.z = 0.0
         self.V = 280.0; self.gamma = 0.0; self.chi = 0.0; self.phi = 0.0
-        self.throttle = 0.5; self.fuel_kg = F16Cfg.FUEL_FULL * 0.5
+        self.throttle = 0.5; self.fuel_kg = self.cfg.FUEL_FULL * 0.5
         # derived
         self.alpha = 0.0; self.beta = 0.0; self.nz = 1.0; self.mach = 0.9
         self.theta = 0.0; self.p = 0.0; self.q = 0.0; self.r = 0.0
@@ -159,13 +170,13 @@ class F16Aircraft:
     def reset_state(self, x: float, y: float, z: float,
                     chi: float, V: float, fuel_frac: float = 0.60) -> None:
         self.x, self.y      = float(x), float(y)
-        self.z              = float(np.clip(z, 100.0, F16Cfg.ALT_CEIL))
-        self.V              = float(np.clip(V, F16Cfg.V_STALL + 20, 550.0))
+        self.z              = float(np.clip(z, 100.0, self.cfg.ALT_CEIL))
+        self.V              = float(np.clip(V, self.cfg.V_STALL + 20, 550.0))
         self.gamma          = 0.0
         self.chi            = float(chi) % (2.0 * math.pi)
         self.phi            = 0.0
         self.throttle       = 0.55
-        self.fuel_kg        = float(fuel_frac) * F16Cfg.FUEL_FULL
+        self.fuel_kg        = float(fuel_frac) * self.cfg.FUEL_FULL
         self._refresh_atmos()
         self.mach           = self.V / max(self._a_sound, 1.0)
         self.alpha          = 0.0; self.beta = 0.0; self.nz = 1.0
@@ -186,80 +197,80 @@ class F16Aircraft:
         hdg_cmd = float(cmd.get("hdgCmd", self.chi))
         alt_cmd = float(cmd.get("altTarget", self.z))
         V_cmd   = float(cmd.get("V", self.V))
-        fpa_lim = abs(float(cmd.get("altFPA", F16Cfg.GAMMA_MAX)))
-        fpa_lim = float(np.clip(fpa_lim, 0.05, F16Cfg.GAMMA_MAX))
+        fpa_lim = abs(float(cmd.get("altFPA", self.cfg.GAMMA_MAX)))
+        fpa_lim = float(np.clip(fpa_lim, 0.05, self.cfg.GAMMA_MAX))
         climb_lim = min(fpa_lim, abs(float(cmd.get("climbFPA", fpa_lim))))
 
         mach = self.V / max(self._a_sound, 1.0)
-        mach = float(np.clip(mach, 0.15, F16Cfg.MACH_MAX))
+        mach = float(np.clip(mach, 0.15, self.cfg.MACH_MAX))
         q_dyn = 0.5 * self._rho * self.V ** 2
         W = self.mass * G
 
         # ── 1. speed autopilot → throttle ────────────────────────────
         V_err = V_cmd - self.V
-        throt_cmd = float(np.clip(0.55 + F16Cfg.K_V_THROT * V_err, 0.0, 1.0))
-        lag = float(np.clip(dt / F16Cfg.THROT_TC, 0.0, 1.0))
+        throt_cmd = float(np.clip(0.55 + self.cfg.K_V_THROT * V_err, 0.0, 1.0))
+        lag = float(np.clip(dt / self.cfg.THROT_TC, 0.0, 1.0))
         self.throttle += lag * (throt_cmd - self.throttle)
         self.throttle = float(np.clip(self.throttle, 0.0, 1.0))
 
         # ── 2. thrust ────────────────────────────────────────────────
         sigma = self._rho / 1.225
-        tf    = _thrust_mach_factor(mach)
+        tf    = self.cfg.thrust_mach_factor(mach)
         if self.throttle <= 0.90:
-            T = (self.throttle / 0.90) * F16Cfg.T_MIL_SL * (sigma ** F16Cfg.ALT_LAPSE) * tf
+            T = (self.throttle / 0.90) * self.cfg.T_MIL_SL * (sigma ** self.cfg.ALT_LAPSE) * tf
         else:
             fab   = (self.throttle - 0.90) / 0.10
-            T_mil = F16Cfg.T_MIL_SL * (sigma ** F16Cfg.ALT_LAPSE) * tf
-            T_ab  = F16Cfg.T_AB_SL  * (sigma ** F16Cfg.ALT_LAPSE) * tf
+            T_mil = self.cfg.T_MIL_SL * (sigma ** self.cfg.ALT_LAPSE) * tf
+            T_ab  = self.cfg.T_AB_SL  * (sigma ** self.cfg.ALT_LAPSE) * tf
             T     = T_mil + fab * (T_ab - T_mil)
         T = max(0.0, T)
 
         # fuel flow
         if self.throttle <= 0.90:
-            ff = F16Cfg.FF_IDLE + (self.throttle / 0.90) * (F16Cfg.FF_MIL - F16Cfg.FF_IDLE)
+            ff = self.cfg.FF_IDLE + (self.throttle / 0.90) * (self.cfg.FF_MIL - self.cfg.FF_IDLE)
         else:
             fab = (self.throttle - 0.90) / 0.10
-            ff  = F16Cfg.FF_MIL + fab * (F16Cfg.FF_AB - F16Cfg.FF_MIL)
+            ff  = self.cfg.FF_MIL + fab * (self.cfg.FF_AB - self.cfg.FF_MIL)
         self.fuel_kg = max(0.0, self.fuel_kg - ff * dt)
 
         # ── 3. available load factor (aero limit and structural limit) ──
         if q_dyn > 100.0:
-            nz_aero = q_dyn * F16Cfg.S_REF * F16Cfg.CL_MAX / max(W, 1.0)
+            nz_aero = q_dyn * self.cfg.S_REF * self.cfg.CL_MAX / max(W, 1.0)
         else:
-            nz_aero = F16Cfg.NZ_POS_MAX
-        nz_avail = min(F16Cfg.NZ_POS_MAX, nz_aero)
+            nz_aero = self.cfg.NZ_POS_MAX
+        nz_avail = min(self.cfg.NZ_POS_MAX, nz_aero)
 
         # ── 4. heading autopilot → bank → roll rate ──────────────────
         # Holding level at bank φ takes nz = cos(γ)/cos φ. Banking past what
         # nz_avail can support means losing altitude no matter how hard the
         # aircraft pulls, so bank is capped at that point, less a margin.
-        phi_lim  = min(F16Cfg.PHI_MAX,
+        phi_lim  = min(self.cfg.PHI_MAX,
                        math.acos(min(1.0, math.cos(self.gamma)
-                                     / (F16Cfg.BANK_NZ_MARGIN * nz_avail))))
+                                     / (self.cfg.BANK_NZ_MARGIN * nz_avail))))
         hdg_err  = _wrap_pi(hdg_cmd - self.chi)
-        phi_cmd  = float(np.clip(F16Cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
+        phi_cmd  = float(np.clip(self.cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
         phi_err  = phi_cmd - self.phi
-        phi_dot  = float(np.clip(F16Cfg.K_PHI_ROLL * phi_err,
-                                  -F16Cfg.ROLL_MAX, F16Cfg.ROLL_MAX))
+        phi_dot  = float(np.clip(self.cfg.K_PHI_ROLL * phi_err,
+                                  -self.cfg.ROLL_MAX, self.cfg.ROLL_MAX))
         self.phi = float(np.clip(self.phi + phi_dot * dt,
-                                  -F16Cfg.PHI_MAX, F16Cfg.PHI_MAX))
+                                  -self.cfg.PHI_MAX, self.cfg.PHI_MAX))
 
         # ── 5. altitude autopilot → nz command ──────────────────────
         alt_err   = alt_cmd - self.z
-        gamma_cmd = float(np.clip(F16Cfg.K_ALT_GAM * alt_err, -fpa_lim, climb_lim))
+        gamma_cmd = float(np.clip(self.cfg.K_ALT_GAM * alt_err, -fpa_lim, climb_lim))
         gamma_err = gamma_cmd - self.gamma
         # Only nz·cos φ acts vertically. Without the division a steep turn
         # spirals into the ground while altitude hold is commanded.
-        nz_cmd    = ((math.cos(self.gamma) + F16Cfg.K_GAM_NZ * gamma_err)
+        nz_cmd    = ((math.cos(self.gamma) + self.cfg.K_GAM_NZ * gamma_err)
                      / max(math.cos(self.phi), 0.1))
-        nz_cmd    = float(np.clip(nz_cmd, F16Cfg.NZ_NEG_MAX, nz_avail))
+        nz_cmd    = float(np.clip(nz_cmd, self.cfg.NZ_NEG_MAX, nz_avail))
 
         # ── 6. aerodynamics ──────────────────────────────────────────
-        CL   = float(np.clip(nz_cmd * W / max(q_dyn * F16Cfg.S_REF, 1.0),
-                              F16Cfg.CL_MIN, F16Cfg.CL_MAX))
-        CD   = F16Cfg.CD0 + F16Cfg.K_IND * CL ** 2 + _cd_rise(mach)
-        D    = q_dyn * F16Cfg.S_REF * CD
-        alpha = float(np.clip(CL / F16Cfg.CL_ALPHA, -0.25, 0.45))
+        CL   = float(np.clip(nz_cmd * W / max(q_dyn * self.cfg.S_REF, 1.0),
+                              self.cfg.CL_MIN, self.cfg.CL_MAX))
+        CD   = self.cfg.CD0 + self.cfg.K_IND * CL ** 2 + self.cfg.cd_rise(mach)
+        D    = q_dyn * self.cfg.S_REF * CD
+        alpha = float(np.clip(CL / self.cfg.CL_ALPHA, -0.25, 0.45))
 
         # ── 7. equations of motion ───────────────────────────────────
         # Axial: speed change from net thrust minus drag minus gravity-along-path
@@ -275,7 +286,7 @@ class F16Aircraft:
 
         # ── 8. integrate ─────────────────────────────────────────────
         self.V     = float(np.clip(self.V + V_dot * dt,
-                                    F16Cfg.V_STALL, F16Cfg.MACH_MAX * self._a_sound))
+                                    self.cfg.V_STALL, self.cfg.MACH_MAX * self._a_sound))
         self.gamma = float(np.clip(self.gamma + gamma_dot * dt, -1.20, 1.20))
         self.chi   = (self.chi + chi_dot * dt) % (2.0 * math.pi)
 
@@ -283,7 +294,7 @@ class F16Aircraft:
         sc = math.sin(self.chi);   cc = math.cos(self.chi)
         self.x += self.V * cg * sc * dt
         self.y += self.V * cg * cc * dt
-        self.z  = float(np.clip(self.z + self.V * sg * dt, 10.0, F16Cfg.ALT_CEIL))
+        self.z  = float(np.clip(self.z + self.V * sg * dt, 10.0, self.cfg.ALT_CEIL))
 
         # ── 9. derived observation quantities ────────────────────────
         self.mach  = mach
@@ -317,11 +328,11 @@ class F16Aircraft:
 
     @property
     def mass(self) -> float:
-        return F16Cfg.MASS_EMPTY + max(self.fuel_kg, 0.0) + F16Cfg.MASS_WPNS
+        return self.cfg.MASS_EMPTY + max(self.fuel_kg, 0.0) + self.cfg.MASS_WPNS
 
     @property
     def fuel_frac(self) -> float:
-        return float(np.clip(self.fuel_kg / max(F16Cfg.FUEL_FULL, 1.0), 0.0, 1.0))
+        return float(np.clip(self.fuel_kg / max(self.cfg.FUEL_FULL, 1.0), 0.0, 1.0))
 
     @property
     def vel_enu(self) -> np.ndarray:

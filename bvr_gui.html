@@ -23,6 +23,45 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 .pill.training{background:#1a1000;color:var(--amber);border:1px solid var(--amber)}
 .pill.eval    {background:#001a0d;color:var(--green);border:1px solid var(--green)}
 
+/* VIEW TABS */
+.tab{background:none;border:1px solid var(--border);color:var(--text);padding:3px 12px;
+     font-size:12px;letter-spacing:2px;cursor:pointer;font-weight:bold}
+.tab.on{background:#0d2238;color:var(--bright);border-color:var(--blue)}
+
+/* LIBRARY VIEW */
+#library-view{display:none;flex:1;overflow:hidden}
+#lib-list{width:290px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
+          padding:8px;background:var(--panel)}
+#lib-list h4{font-size:11px;letter-spacing:2px;color:#c79bff;margin:10px 0 4px}
+.lib-item{padding:4px 6px;cursor:pointer;font-size:12px;border-left:3px solid transparent;
+          display:flex;gap:6px;align-items:center}
+.lib-item:hover{background:#0d1a2a}
+.lib-item.sel{background:#10233a;border-left-color:var(--blue);color:var(--bright)}
+.lib-item .b{font-size:10px;color:var(--dim)}
+#lib-detail{flex:1;overflow-y:auto;padding:12px 18px}
+#lib-detail h2{font-size:16px;color:var(--bright);margin-bottom:2px}
+.badge{font-size:10px;padding:1px 6px;border:1px solid;letter-spacing:1px;margin-left:6px}
+.badge.bi{color:var(--amber);border-color:var(--amber)}
+.badge.us{color:var(--green);border-color:var(--green)}
+.lib-grp{margin-top:12px}
+.lib-grp>summary{font-size:12px;letter-spacing:2px;color:#c79bff;cursor:pointer;font-weight:bold;margin-bottom:4px}
+.lib-tbl{border-collapse:collapse;width:100%;font-size:12px}
+.lib-tbl td{padding:3px 6px;border-bottom:1px solid #16263a;vertical-align:top}
+.lib-tbl td.l{width:26%;color:var(--text)}
+.lib-tbl td.v{width:18%}
+.lib-tbl td.u{width:9%;color:var(--dim)}
+.lib-tbl td.r{width:12%;color:var(--dim);font-size:10px}
+.lib-tbl td.s{color:var(--dim);font-size:11px}
+.lib-tbl input,.lib-tbl select,.lib-tbl textarea{width:100%;background:var(--card);color:var(--bright);
+          border:1px solid var(--border);font-size:12px;padding:2px 4px}
+.lib-tbl input[readonly],.lib-tbl textarea[readonly]{border-color:transparent;background:none;color:var(--bright)}
+.lib-tbl .bad{border-color:var(--red)!important}
+#lib-errors{color:var(--red);font-size:12px;margin-top:6px}
+#lib-perf{margin-top:14px}
+.perf-tbl{border-collapse:collapse;font-size:12px;margin:4px 0 8px}
+.perf-tbl td,.perf-tbl th{padding:2px 10px 2px 0;text-align:left}
+.perf-tbl th{color:var(--dim);font-weight:normal}
+
 /* MAIN LAYOUT */
 #main{display:flex;flex:1;overflow:hidden}
 #left-col{display:flex;flex-direction:column;min-width:0;gap:0;padding:4px 2px 4px 4px}
@@ -304,8 +343,29 @@ select option{background:#050810}
 <!-- TOP BAR -->
 <div id="topbar">
   <h1>BVR RL — TRAINING CONSOLE</h1>
+  <button class="tab on" id="tab-console" onclick="showView('console')">CONSOLE</button>
+  <button class="tab" id="tab-library" onclick="showView('library')">LIBRARY</button>
   <span class="pill idle" id="state-pill">IDLE</span>
   <span id="ws-dot" style="color:var(--red);font-size:16px" title="WebSocket">●</span>
+</div>
+
+<!-- LIBRARY -->
+<div id="library-view">
+  <div id="lib-list"><div style="font-size:11px;color:var(--dim)">loading…</div></div>
+  <div id="lib-detail">
+    <div style="font-size:13px;line-height:1.7;max-width:720px">
+      <h2>Parameter library</h2>
+      Every number the simulation uses for an aircraft, its radar and its missile lives here.
+      <b>Built-in</b> items (🔒) come from open-source data and cannot be edited:
+      select one and press <b>Copy</b> to make an editable version.<br>
+      A <b>platform</b> combines an airframe, a radar and a missile with a weapon count, a radar
+      cross-section and the four speeds the agent can command. Choose platforms for a run in
+      Training Configuration → ENGAGEMENT.<br>
+      Airframes and platforms have a <b>Performance card</b>: the flight model flown through test
+      manoeuvres, so a wrong number shows up before training. A new or edited missile must be
+      <b>calibrated</b> before training: its launch envelope is measured by flying it.
+    </div>
+  </div>
 </div>
 
 <!-- MAIN -->
@@ -362,11 +422,30 @@ select option{background:#050810}
 
         <div class="field">
           <div class="field-label">
+            <span>ENGAGEMENT</span>
+            <button class="help-btn" onclick="help(this,'ENGAGEMENT',
+              'Who flies what.\n\n• FORMAT: 1 v 1 for now. 2 v 1 and larger come in phase 2.\n• AGENT FLIES: the platform the learning agent flies.\n• OPPONENT FLIES: the platform the scripted opponent flies.\n\nPlatforms are defined in the LIBRARY tab (top bar), where you can copy a built-in and change its parameters.\n\nWhen the two differ, self-play does not apply (a snapshot of the agent cannot fly the other aircraft), so the curriculum stops at ADAPTIVE SHOOTER. Each saved checkpoint records both platforms and every parameter.')">?</button>
+          </div>
+          <div class="row3">
+            <select id="cfg-format" title="Format">
+              <option value="1v1" selected>1 v 1</option>
+              <option value="2v1" disabled>2 v 1 (phase 2)</option>
+            </select>
+            <select id="cfg-platform" title="Agent flies" onchange="engageCheck()"></select>
+            <select id="cfg-opp-platform" title="Opponent flies" onchange="engageCheck()"></select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:10px;color:var(--dim);margin-top:2px">
+            <span>FORMAT</span><span>AGENT FLIES</span><span>OPPONENT FLIES</span></div>
+          <div id="cfg-engage-warn" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
             <span>OPPONENT STAGE</span>
             <button class="help-btn" onclick="help(this,'OPPONENT STAGE',
               'The AI enemy your agent will fight.\n\n• STRAIGHT — flies straight, does not shoot. Learn search, track, and kill.\n• EVASIVE — manoeuvres and turns. Learn to hold radar track.\n• NOTCHER — beams to break your radar lock. Unarmed.\n• SHOOTER — armed. Commits, fires, cranks, then drags to safety. The benchmark.\n• ADAPTIVE SHOOTER — same as SHOOTER but with randomised tactics. Harder to exploit.\n\nAlways start with STRAIGHT. Advance when win rate holds above 65%.')">?</button>
           </div>
-          <select id="cfg-opponent">
+          <select id="cfg-opponent" onchange="engageCheck()">
             <option value="straight" selected>STRAIGHT</option>
             <option value="evasive">EVASIVE</option>
             <option value="notcher">NOTCHER</option>
@@ -689,11 +768,17 @@ select option{background:#050810}
             <button class="help-btn" onclick="help(this,'MISSILE DOCTRINE (eval)',
               'The missile doctrine sets a reward cost for every missile fired, charged at launch. A shot is only worth taking when it raises the chance of a kill by more than about cost ÷ 1.5.\n\n• AGGRESSIVE — cost 0. Fires whenever in range, usually emptying the rack.\n• BALANCED — cost 0.10. Fires when a shot adds more than ~7% kill chance.\n• CONSERVATIVE — cost 0.30. Fires when a shot adds more than ~20%: closer, higher-Pk shots, and waits to see if the first missile hits.\n\nThe policy sees the doctrine as an input, so one model can fly all three\n\nOnly models trained with the doctrine input (MIXED or a fixed doctrine, after this feature was added) respond to it. An older checkpoint loads fine but flies the same under every doctrine.')">?</button>
           </div>
-          <select id="eval-doctrine">
+          <select id="eval-doctrine" style="margin-bottom:6px">
             <option value="AGGRESSIVE">AGGRESSIVE — cost 0</option>
             <option value="BALANCED" selected>BALANCED — cost 0.10</option>
             <option value="CONSERVATIVE">CONSERVATIVE — cost 0.30</option>
           </select>
+          <div class="field-label" style="margin-top:4px">
+            <span>OPPONENT FLIES</span>
+            <button class="help-btn" onclick="help(this,'OPPONENT PLATFORM (eval)',
+              'The checkpoint always flies the platform it was trained on (stored in the checkpoint). This sets what the opponent flies; by default the opponent platform the checkpoint was trained against.')">?</button>
+          </div>
+          <select id="eval-opp-platform"><option value="">— checkpoint\'s training opponent —</option></select>
         </div>
 
         <div class="field">
@@ -754,6 +839,13 @@ select option{background:#050810}
             <label><input type="checkbox" value="shooter" checked>SHOOTER</label>
             <label><input type="checkbox" value="adaptive_shooter" checked>ADAPTIVE</label>
           </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label"><span>SCRIPTED COLUMNS FLY</span>
+            <button class="help-btn" onclick="help(this,'SCRIPTED PLATFORM',
+              'Each checkpoint flies its own training platform in every game. The scripted columns fly this platform, or by default the opponent platform each row checkpoint was trained against.')">?</button></div>
+          <select id="xp-scripted-platform"><option value="">— each checkpoint\'s training opponent —</option></select>
         </div>
 
         <div class="row3">
@@ -943,6 +1035,7 @@ function handle(m) {
   if(m.type==='episode_end') onEpEnd(m.meta);
   if(m.type==='crossplay_progress') xpProgress(m);
   if(m.type==='crossplay_done') { xpLoadResults(); refreshModelList(); }
+  if(m.type==='calibrate_progress' || m.type==='calibrate_done') onCalibrate(m);
 }
 
 // Training (a subprocess) and eval (a thread in the server) are independent
@@ -1074,7 +1167,8 @@ document.getElementById('btn-xplay').onclick = () => {
   const config = {models, scripted: xpScripted(),
     episodes: parseInt(document.getElementById('xp-episodes').value) || 40,
     workers:  parseInt(document.getElementById('xp-workers').value) || 8,
-    doctrine: document.getElementById('xp-doctrine').value};
+    doctrine: document.getElementById('xp-doctrine').value,
+    scripted_platform: document.getElementById('xp-scripted-platform').value || undefined};
   if (isTraining && !confirm('Training is running. Cross-play uses the same CPU cores, so both will slow down. Start anyway?')) return;
   document.getElementById('xp-bar').style.width = '0%';
   document.getElementById('xp-progress-txt').textContent = 'starting workers…';
@@ -1090,6 +1184,244 @@ xpLoadResults();
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.getElementById('xp-results').classList.remove('wide');
 });
+
+// ─── Library ─────────────────────────────────────────────────────
+function showView(v) {
+  document.getElementById('main').style.display = v === 'console' ? '' : 'none';
+  document.getElementById('library-view').style.display = v === 'library' ? 'flex' : 'none';
+  document.getElementById('tab-console').classList.toggle('on', v === 'console');
+  document.getElementById('tab-library').classList.toggle('on', v === 'library');
+  if (v === 'library') loadLibrary();
+}
+const KIND_TITLE = {platform: 'PLATFORMS', airframe: 'AIRFRAMES', radar: 'RADARS', missile: 'MISSILES'};
+let LIB = null, libSel = null, libCur = null, libPerf = null;
+
+async function loadLibrary() {
+  try { LIB = await (await fetch('/library')).json(); } catch (e) { return; }
+  const box = document.getElementById('lib-list');
+  box.innerHTML = Object.keys(KIND_TITLE).map(k => {
+    const items = LIB.items.filter(i => i.kind === k);
+    return `<h4>${KIND_TITLE[k]}</h4>` + items.map(i => {
+      const cal = k === 'missile' ? (LIB.calibrated[i.id] ? ' <span class="b" title="launch envelope calibrated">✓ cal</span>'
+                                                         : ' <span class="b" style="color:var(--amber)" title="not calibrated">✗ cal</span>') : '';
+      const sel = libSel && libSel.kind === k && libSel.id === i.id ? ' sel' : '';
+      return `<div class="lib-item${sel}" onclick="openItem('${k}','${esc(i.id)}')">${i.builtin ? '🔒' : '✎'}
+        <span>${esc(i.name)}</span>${cal}</div>`;
+    }).join('');
+  }).join('');
+  refreshPlatformSelects();
+}
+
+function refreshPlatformSelects() {
+  if (!LIB) return;
+  const plats = LIB.items.filter(i => i.kind === 'platform');
+  const fill = (id, keepBlank, dflt) => {
+    const el = document.getElementById(id); if (!el) return;
+    const prev = el.value;
+    const blank = keepBlank ? el.options[0].outerHTML : '';
+    el.innerHTML = blank + plats.map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('');
+    el.value = plats.some(p => p.id === prev) || (keepBlank && prev === '') ? prev : (dflt || '');
+  };
+  fill('cfg-platform', false, 'F-16C');
+  fill('cfg-opp-platform', false, 'F-16C');
+  fill('eval-opp-platform', true, '');
+  fill('xp-scripted-platform', true, '');
+  engageCheck();
+}
+
+function engageCheck() {
+  const a = document.getElementById('cfg-platform').value, b = document.getElementById('cfg-opp-platform').value;
+  const opp = document.getElementById('cfg-opponent').value;
+  const w = document.getElementById('cfg-engage-warn');
+  if (a && b && a !== b) {
+    w.textContent = opp === 'self_play'
+      ? '⚠ self-play needs both sides on the same platform; pick another stage.'
+      : 'Different platforms: self-play does not apply, so the curriculum ends at ADAPTIVE SHOOTER.';
+  } else w.textContent = '';
+}
+
+async function openItem(kind, id) {
+  libSel = {kind, id}; libPerf = null;
+  let d;
+  try { d = await (await fetch(`/library/item?kind=${kind}&id=${encodeURIComponent(id)}`)).json(); }
+  catch (e) { return; }
+  libCur = d;
+  document.querySelectorAll('.lib-item').forEach(el => el.classList.remove('sel'));
+  document.querySelectorAll('.lib-item').forEach(el => {
+    if (el.getAttribute('onclick') === `openItem('${kind}','${id}')`) el.classList.add('sel');
+  });
+  renderItem();
+}
+
+function fmtVal(p, v) {
+  if (p.kind === 'table') return v.map(r => `${r[0]}, ${r[1]}`).join('\n');
+  if (p.kind === 'list') return v.join(', ');
+  return v;
+}
+
+function renderItem() {
+  const d = libCur, it = d.item, ro = it.builtin;
+  const schema = LIB.schema[it.kind];
+  const groups = [];
+  for (const p of schema) {
+    let g = groups.find(x => x.name === p.group);
+    if (!g) groups.push(g = {name: p.group, adv: true, ps: []});
+    g.ps.push(p); if (!p.advanced) g.adv = false;
+  }
+  const refOpts = (kind, cur) => LIB.items.filter(i => i.kind === kind)
+      .map(i => `<option value="${esc(i.id)}" ${i.id === cur ? 'selected' : ''}>${esc(i.id)}</option>`).join('');
+  const row = p => {
+    const v = it.params[p.key], src = (it.sources || {})[p.key] || '';
+    let inp;
+    if (p.kind === 'ref') inp = ro ? `<input readonly value="${esc(v)}">`
+        : `<select data-k="${p.key}">${refOpts(p.ref, v)}</select>`;
+    else if (p.kind === 'table') inp = `<textarea data-k="${p.key}" rows="${Math.min(v.length, 8)}" ${ro ? 'readonly' : ''}>${esc(fmtVal(p, v))}</textarea>`;
+    else inp = `<input data-k="${p.key}" value="${esc(String(fmtVal(p, v)))}" ${ro ? 'readonly' : ''}
+                oninput="libCheck(this)">`;
+    const range = p.lo != null ? `${p.lo} – ${p.hi}` : '';
+    const help = p.help ? ` <span title="${esc(p.help)}" style="color:var(--blue);cursor:help">ⓘ</span>` : '';
+    const srcCell = ro ? esc(src) : `<input data-src="${p.key}" value="${esc(src)}" placeholder="where this value comes from">`;
+    return `<tr><td class="l">${esc(p.label)}${help}</td><td class="v">${inp}</td><td class="u">${esc(p.unit)}</td>
+            <td class="r">${range}</td><td class="s">${srcCell}</td></tr>`;
+  };
+  const body = groups.map(g => `<details class="lib-grp" ${g.adv ? '' : 'open'}><summary>${esc(g.name.toUpperCase())}${g.adv ? ' (advanced)' : ''}</summary>
+      <table class="lib-tbl">${g.ps.map(row).join('')}</table></details>`).join('');
+  const perfBtn = (it.kind === 'airframe' || it.kind === 'platform')
+      ? `<button class="btn" onclick="libPerfCard()">▶ Performance card</button>` : '';
+  const calBtn = it.kind === 'missile'
+      ? `<button class="btn" onclick="libCalibrate()">⟳ Calibrate envelope</button>
+         <span id="lib-cal" style="font-size:11px;color:${d.calibrated ? 'var(--green)' : 'var(--amber)'}">
+           ${d.calibrated ? 'calibrated for these parameters' : 'NOT calibrated: training with this missile is refused until it is'}</span>` : '';
+  const usedBy = d.used_by && d.used_by.length ? `<div style="font-size:11px;color:var(--dim)">used by platform(s): ${d.used_by.map(esc).join(', ')}</div>` : '';
+  document.getElementById('lib-detail').innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+      <h2>${ro ? esc(it.name) : `<input id="lib-name" value="${esc(it.name)}" style="font-size:15px;width:420px;background:var(--card);color:var(--bright);border:1px solid var(--border)">`}</h2>
+      <span class="badge ${ro ? 'bi' : 'us'}">${ro ? 'BUILT-IN · READ-ONLY' : 'USER COPY'}</span></div>
+    <div style="font-size:11px;color:var(--dim);margin:2px 0 6px">${esc(it.kind)} · id <b>${esc(it.id)}</b>
+      ${it.based_on ? ` · copied from ${esc(it.based_on)}` : ''} · parameter fingerprint ${d.fingerprint}</div>
+    ${ro ? `<div style="font-size:12px;max-width:800px;line-height:1.5">${esc(it.description || '')}</div>`
+         : `<textarea id="lib-desc" rows="2" style="width:100%;max-width:800px;background:var(--card);color:var(--text);border:1px solid var(--border);font-size:12px">${esc(it.description || '')}</textarea>`}
+    ${usedBy}
+    <div class="btn-row" style="margin:8px 0;flex-wrap:wrap;align-items:center">
+      <button class="btn" onclick="libCopy()">⧉ Copy…</button>
+      ${ro ? '' : '<button class="btn go" style="padding:4px 12px;font-size:12px" onclick="libSave()">✔ Save</button><button class="btn stop" style="padding:4px 12px;font-size:12px" onclick="libDelete()">✕ Delete</button>'}
+      ${perfBtn} ${calBtn}
+    </div>
+    <div id="lib-errors">${(d.errors || []).map(esc).join('<br>')}</div>
+    ${body}
+    <div id="lib-perf"></div>`;
+  if (libPerf) renderPerf(libPerf);
+}
+
+function libCheck(el) {
+  const p = LIB.schema[libCur.item.kind].find(x => x.key === el.dataset.k);
+  if (!p || p.kind === 'list') return;
+  const x = parseFloat(el.value);
+  el.classList.toggle('bad', !(isFinite(x) && (p.lo == null || (x >= p.lo && x <= p.hi))));
+}
+
+function libCollect() {
+  const it = JSON.parse(JSON.stringify(libCur.item));
+  delete it.builtin;
+  it.name = document.getElementById('lib-name').value.trim() || it.id;
+  it.description = document.getElementById('lib-desc').value;
+  it.sources = it.sources || {};
+  for (const p of LIB.schema[it.kind]) {
+    const el = document.querySelector(`#lib-detail [data-k="${p.key}"]`);
+    if (el) {
+      const raw = el.value;
+      if (p.kind === 'ref') it.params[p.key] = raw;
+      else if (p.kind === 'table') it.params[p.key] = raw.split('\n').map(l => l.trim()).filter(Boolean)
+          .map(l => l.split(/[,;\s]+/).map(Number));
+      else if (p.kind === 'list') it.params[p.key] = raw.split(/[,;\s]+/).filter(Boolean).map(Number);
+      else it.params[p.key] = Number(raw);
+    }
+    const se = document.querySelector(`#lib-detail [data-src="${p.key}"]`);
+    if (se) it.sources[p.key] = se.value;
+  }
+  return it;
+}
+
+async function libPost(path, body) {
+  const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify(body)});
+  return r.json();
+}
+async function libSave() {
+  const r = await libPost('/library/save', {item: libCollect()});
+  if (!r.ok) { document.getElementById('lib-errors').innerHTML = esc(r.error).split('; ').join('<br>'); return; }
+  addLog(`Library: saved ${libCur.item.kind} ${libCur.item.id}`, 'log-ok');
+  await loadLibrary(); openItem(libSel.kind, libSel.id);
+}
+async function libCopy() {
+  const it = libCur.item;
+  const nid = prompt(`New id for the copy of ${it.id} (letters, digits, - _ .):`, `${it.id}-copy`);
+  if (!nid) return;
+  const name = prompt('Name for the copy:', `${it.name} (copy)`) || undefined;
+  const r = await libPost('/library/copy', {kind: it.kind, id: it.id, new_id: nid.trim(), new_name: name});
+  if (!r.ok) { alert(r.error); return; }
+  addLog(`Library: copied ${it.kind} ${it.id} → ${nid}`, 'log-ok');
+  await loadLibrary(); openItem(it.kind, nid.trim());
+}
+async function libDelete() {
+  const it = libCur.item;
+  if (!confirm(`Delete ${it.kind} "${it.id}"? This cannot be undone.`)) return;
+  const r = await libPost('/library/delete', {kind: it.kind, id: it.id});
+  if (!r.ok) { alert(r.error); return; }
+  libSel = null; libCur = null;
+  await loadLibrary();
+  document.getElementById('lib-detail').innerHTML = '<div style="color:var(--dim)">deleted</div>';
+}
+async function libPerfCard() {
+  const it = libCur.item;
+  document.getElementById('lib-perf').innerHTML = '<div style="color:var(--amber)">flying test manoeuvres… (about 5 s)</div>';
+  let c;
+  try { c = await (await fetch(`/library/perf?kind=${it.kind}&id=${encodeURIComponent(it.id)}`)).json(); }
+  catch (e) { return; }
+  if (c.error) { document.getElementById('lib-perf').innerHTML = `<div style="color:var(--red)">${esc(c.error)}</div>`; return; }
+  libPerf = c; renderPerf(c);
+}
+function renderPerf(c) {
+  const ts = Object.entries(c.top_speed).map(([a, v]) => `<tr><td>${(a/1000).toFixed(0)} km</td><td>${v.speed.toFixed(0)} m/s</td><td>Mach ${v.mach.toFixed(2)}</td></tr>`).join('');
+  const tr = Object.entries(c.max_bank_turn_40s).map(([a, v]) => `<tr><td>${(a/1000).toFixed(0)} km</td><td>${v.turn_rate_deg_s.toFixed(1)} °/s</td>
+      <td>${v.load_factor.toFixed(1)} g</td><td>−${v.speed_loss.toFixed(0)} m/s</td><td>${v.alt_error.toFixed(0)} m</td></tr>`).join('');
+  const cl = c.climb_3km_from_5km, ap = c.autopilot;
+  const st = x => x == null ? 'never' : `${x.toFixed(0)} s`;
+  document.getElementById('lib-perf').innerHTML = `
+    <div style="font-size:12px;letter-spacing:2px;color:#c79bff;font-weight:bold;margin-bottom:4px">PERFORMANCE CARD
+      <span style="font-weight:normal;letter-spacing:0;color:var(--dim)">(the flight model flown with these parameters)</span></div>
+    ${c.warnings.length ? `<div style="color:var(--amber);font-size:12px;margin-bottom:6px">${c.warnings.map(w => '⚠ ' + esc(w)).join('<br>')}</div>`
+                        : '<div style="color:var(--green);font-size:12px;margin-bottom:6px">✔ no problems found</div>'}
+    <div style="display:flex;gap:28px;flex-wrap:wrap">
+      <div><b style="font-size:11px">TOP SPEED, full throttle, level</b><table class="perf-tbl">${ts}</table></div>
+      <div><b style="font-size:11px">MAX-BANK TURN, 40 s at ${c.turn_speed_ref.toFixed(0)} m/s</b>
+        <table class="perf-tbl"><tr><th>alt</th><th>rate</th><th>load</th><th>speed</th><th>alt err</th></tr>${tr}</table></div>
+      <div><b style="font-size:11px">CLIMB 5 → 8 km</b><table class="perf-tbl">
+        <tr><td>time</td><td>${cl.time_s.toFixed(0)} s</td></tr><tr><td>rate</td><td>${cl.rate_m_s.toFixed(0)} m/s</td></tr>
+        <tr><td>speed</td><td>${cl.speed_start.toFixed(0)} → ${cl.speed_end.toFixed(0)} m/s</td></tr></table></div>
+      <div><b style="font-size:11px">CEILING</b><table class="perf-tbl"><tr><td>${c.ceiling_m.toFixed(0)} m${c.ceiling_at_model_cap ? ' (the service-ceiling limit)' : ''}</td></tr></table>
+        <b style="font-size:11px">AUTOPILOT STEP RESPONSE</b><table class="perf-tbl">
+        <tr><td>90° heading</td><td>overshoot ${ap.heading_overshoot_deg.toFixed(0)}°</td><td>settles ${st(ap.heading_settle_s)}</td></tr>
+        <tr><td>+1 km altitude</td><td>overshoot ${ap.altitude_overshoot_m.toFixed(0)} m</td><td>settles ${st(ap.altitude_settle_s)}</td></tr></table></div>
+    </div>`;
+}
+function libCalibrate() {
+  const it = libCur.item;
+  if (!confirm(`Calibrate ${it.id}? The missile is flown over the whole launch grid; this takes a few minutes and uses one CPU core.`)) return;
+  send({cmd: 'calibrate_missile', id: it.id});
+  const el = document.getElementById('lib-cal');
+  if (el) { el.style.color = 'var(--amber)'; el.textContent = 'calibrating… starting'; }
+}
+function onCalibrate(m) {
+  const el = document.getElementById('lib-cal');
+  const here = libCur && libCur.item.kind === 'missile' && libCur.item.id === m.id;
+  if (m.type === 'calibrate_progress' && here && el) el.textContent = `calibrating… ${m.done}/${m.total} launch conditions`;
+  if (m.type === 'calibrate_done') {
+    addLog(`Calibration of ${m.id} ${m.ok ? 'finished' : 'FAILED'}`, m.ok ? 'log-ok' : 'log-warn');
+    loadLibrary().then(() => { if (here) openItem('missile', m.id); });
+  }
+}
+loadLibrary();
 
 // ─── Log ─────────────────────────────────────────────────────────
 const MAX_LOG=150; let logArr=[];
@@ -1440,10 +1772,12 @@ document.getElementById('btn-train').onclick=()=>{
   STAGE_IDS.forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
-  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
+  addLog(`▶ Training: ${document.getElementById('cfg-platform').value} v ${document.getElementById('cfg-opp-platform').value}  opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
-    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine}});
+    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine,
+    platform:document.getElementById('cfg-platform').value||'F-16C',
+    opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C'}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
@@ -1463,7 +1797,8 @@ document.getElementById('btn-eval').onclick=()=>{
   for(const k in tacMsls)delete tacMsls[k]; lastFrame=null;
   t3ClearTrails();
   addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok');
-  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine}});
+  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,
+    opponent_platform:document.getElementById('eval-opp-platform').value||undefined}});
   send({cmd:'set_eval_speed',speed});
 };
 document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn');send({cmd:'stop_eval'})};

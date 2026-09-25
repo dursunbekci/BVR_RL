@@ -1,0 +1,111 @@
+{
+  "id": "F-16C",
+  "kind": "airframe",
+  "name": "F-16C Block 50 (open-source data)",
+  "description": "Single-engine multirole fighter with the F110-GE-129. Values are public approximations; the model reproduces SEP ≈ 52 m/s and ≈ 5.7 g at 9 km, Mach 0.9, military power.",
+  "params": {
+    "MASS_EMPTY": 8570.0,
+    "FUEL_FULL": 3175.0,
+    "MASS_WPNS": 500.0,
+    "S_REF": 27.87,
+    "CD0": 0.013,
+    "K_IND": 0.133,
+    "CL_ALPHA": 3.5,
+    "CL_MAX": 1.45,
+    "CL_MIN": -0.5,
+    "DRAG_RISE_M0": 0.85,
+    "DRAG_RISE_M1": 1.1,
+    "DRAG_RISE_M2": 1.4,
+    "DRAG_RISE_PEAK": 0.04,
+    "DRAG_RISE_DECAY": 2.0,
+    "T_MIL_SL": 65000.0,
+    "T_AB_SL": 129000.0,
+    "ALT_LAPSE": 0.7,
+    "THRUST_MACH_TABLE": [
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.5,
+        1.025
+      ],
+      [
+        0.9,
+        0.875
+      ],
+      [
+        0.900000001,
+        0.965
+      ],
+      [
+        1.2,
+        0.915
+      ],
+      [
+        1.200000001,
+        0.95
+      ],
+      [
+        2.0,
+        1.014
+      ]
+    ],
+    "FF_IDLE": 0.06,
+    "FF_MIL": 0.42,
+    "FF_AB": 1.65,
+    "THROT_TC": 2.5,
+    "NZ_POS_MAX": 9.0,
+    "NZ_NEG_MAX": -3.0,
+    "V_STALL": 70.0,
+    "MACH_MAX": 1.8,
+    "ALT_CEIL": 15240.0,
+    "PHI_MAX": 80.0,
+    "ROLL_MAX": 229.1831180523293,
+    "GAMMA_MAX": 40.0,
+    "K_HDG_PHI": 2.0,
+    "K_PHI_ROLL": 2.5,
+    "K_ALT_GAM": 0.12,
+    "K_GAM_NZ": 3.0,
+    "BANK_NZ_MARGIN": 0.85,
+    "K_V_THROT": 0.012
+  },
+  "sources": {
+    "MASS_EMPTY": "open-source F-16C Block 50 estimate (as calibrated in f16_sim.py)",
+    "FUEL_FULL": "open-source F-16C Block 50 estimate (as calibrated in f16_sim.py)",
+    "MASS_WPNS": "≈ 4 × AIM-120 plus launchers",
+    "S_REF": "published wing area, 300 ft²",
+    "CD0": "open-source clean subsonic estimate",
+    "K_IND": "1/(π·e·AR), e = 0.80, AR = 3.0",
+    "CL_ALPHA": "open-source F-16C Block 50 estimate (as calibrated in f16_sim.py)",
+    "CL_MAX": "open-source F-16C Block 50 estimate (as calibrated in f16_sim.py)",
+    "CL_MIN": "open-source F-16C Block 50 estimate (as calibrated in f16_sim.py)",
+    "DRAG_RISE_M0": "model shape, not measured data",
+    "DRAG_RISE_M1": "model shape, not measured data",
+    "DRAG_RISE_M2": "model shape, not measured data",
+    "DRAG_RISE_PEAK": "model shape, not measured data",
+    "DRAG_RISE_DECAY": "model shape, not measured data",
+    "T_MIL_SL": "F110-GE-129, published ≈ 76 kN military installed ≈ 65 kN",
+    "T_AB_SL": "F110-GE-129, published ≈ 129 kN with afterburner",
+    "ALT_LAPSE": "typical turbofan lapse",
+    "THRUST_MACH_TABLE": "model shape from f16_sim.py; note the steps at Mach 0.9 and 1.2",
+    "FF_IDLE": "open-source estimate",
+    "FF_MIL": "open-source estimate",
+    "FF_AB": "open-source estimate",
+    "THROT_TC": "model choice",
+    "NZ_POS_MAX": "published +9 g",
+    "NZ_NEG_MAX": "published −3 g",
+    "V_STALL": "model validity limit",
+    "MACH_MAX": "published ≈ Mach 2 at altitude; model cap 1.8",
+    "ALT_CEIL": "published 50,000 ft",
+    "PHI_MAX": "autopilot bank limit",
+    "ROLL_MAX": "≈ 230°/s physical",
+    "GAMMA_MAX": "autopilot limit",
+    "K_HDG_PHI": "autopilot tuning",
+    "K_PHI_ROLL": "autopilot tuning",
+    "K_ALT_GAM": "autopilot tuning",
+    "K_GAM_NZ": "autopilot tuning",
+    "BANK_NZ_MARGIN": "autopilot tuning (turns hold altitude)",
+    "K_V_THROT": "autopilot tuning"
+  }
+}

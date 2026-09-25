@@ -27,6 +27,7 @@ import numpy as np
 
 from f16_sim   import F16Aircraft, _wrap_pi
 from missile_sim import AIM120, MslPhase
+from bvr_library import rcs_scale
 
 G        = 9.80665
 REF_LAT  = 39.0
@@ -55,10 +56,14 @@ class SimWorld:
     SIM_DT    = 0.02      # s — 50 Hz
     WPN_COUNT = 4
 
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, platform1=None, platform2=None):
         self._rng    = np.random.default_rng(seed)
-        self.ac1     = F16Aircraft(rng=self._rng)
-        self.ac2     = F16Aircraft(rng=self._rng)
+        # Library platforms (bvr_library.load_platform) for AC1 and AC2. None
+        # means the built-in F-16C / AIM-120 classes, as before the library.
+        self.platforms = (platform1, platform2)
+        self.ac1     = F16Aircraft(rng=self._rng, cfg=platform1.airframe if platform1 else None)
+        self.ac2     = F16Aircraft(rng=self._rng, cfg=platform2.airframe if platform2 else None)
+        self.wpn_count = tuple(p.wpn_count if p else self.WPN_COUNT for p in self.platforms)
         self.missiles: list = []
         self._despawn_next: list = []
         self.events:   list = []
@@ -86,8 +91,8 @@ class SimWorld:
         self._prev_fire1 = 0
         self._prev_fire2 = 0
         self._rwr_t_warn = {}
-        self.wpn1 = int(ic.get("wpn",   self.WPN_COUNT))
-        self.wpn2 = int(ic.get("wpn_t", self.WPN_COUNT))
+        self.wpn1 = int(ic.get("wpn",   self.wpn_count[0]))
+        self.wpn2 = int(ic.get("wpn_t", self.wpn_count[1]))
         AIM120._counter = 0
 
         fuel = float(ic.get("fuel_frac", 0.60))
@@ -170,8 +175,19 @@ class SimWorld:
         if rng > 150_000.0 or rng < 500.0:
             return
 
-        handoff = float(self._rng.uniform(8_000.0, 16_000.0))
-        m = AIM120(owner, tgt_id, pos_src, ac_src.vel_enu.copy(), handoff)
+        # The shooter's missile type; its seeker, and so its hand-off range,
+        # reach less far against a target with a smaller radar cross-section.
+        p_src, p_tgt = self.platforms[owner - 1], self.platforms[2 - owner]
+        if p_src is None:
+            mcfg, scale, lo, hi = None, 1.0, 8_000.0, 16_000.0
+        else:
+            mcfg = p_src.missile
+            tgt_rcs = p_tgt.rcs if p_tgt is not None else mcfg.SEEKER_REF_RCS_M2
+            scale = rcs_scale(tgt_rcs, mcfg.SEEKER_REF_RCS_M2)
+            lo, hi = mcfg.HANDOFF_MIN * scale, mcfg.HANDOFF_MAX * scale
+        handoff = float(self._rng.uniform(lo, hi))
+        m = AIM120(owner, tgt_id, pos_src, ac_src.vel_enu.copy(), handoff,
+                   cfg=mcfg, seeker_range_scale=scale)
         m.last_tgt_pos = pos_tgt.copy()
         m.last_tgt_vel = ac_tgt.vel_enu.copy()
         m.t_launch     = self.t_sim

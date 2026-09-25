@@ -426,6 +426,89 @@ def test_env_throughput():
     print("  throughput .................. OK")
 
 
+
+# ── parameter library ────────────────────────────────────────────────
+def test_library_f16_matches_model():
+    """The built-in F-16C, AIM-120 and APG-68 reproduce the model classes exactly."""
+    import f16_sim, missile_sim, bvr_radar_sim
+    from bvr_library import load_platform
+    p = load_platform("F-16C")
+    for cls, cfg in ((f16_sim.F16Cfg, p.airframe), (missile_sim.MslCfg, p.missile),
+                     (bvr_radar_sim.RadarSim, p.radar)):
+        for k in dir(cls):
+            if k.isupper() and hasattr(cfg, k) and isinstance(getattr(cls, k), float):
+                assert getattr(cfg, k) == getattr(cls, k), f"{k}: {getattr(cfg, k)} != {getattr(cls, k)}"
+    for m in np.linspace(0, 2.2, 441):
+        if abs(m - 0.9) > 1e-6 and abs(m - 1.2) > 1e-6:
+            assert abs(p.airframe.thrust_mach_factor(m) - f16_sim._thrust_mach_factor(m)) < 1e-9
+        assert abs(p.airframe.cd_rise(m) - f16_sim._cd_rise(m)) < 1e-12
+        assert abs(p.missile.drag_cd(m) - missile_sim._drag_cd(m)) < 1e-12
+    print("  library F-16C = model ....... OK")
+
+
+def test_library_protection_and_validation():
+    import bvr_library as L
+    for kind, iid in (("airframe", "F-16C"), ("platform", "GENERIC-UCAV")):
+        errs = L.validate(L.get_item(kind, iid))
+        assert not errs, f"built-in {kind} {iid} invalid: {errs}"
+        try:
+            L.save_item(L.get_item(kind, iid))
+            raise AssertionError("a built-in was overwritten")
+        except L.LibraryError:
+            pass
+    bad = L.get_item("airframe", "F-16C")
+    bad["id"] = "X"; bad["params"]["CD0"] = 5.0; bad["params"]["T_AB_SL"] = 1000.0
+    errs = L.validate(bad)
+    assert any("Zero-lift drag" in e for e in errs) and any("Afterburner" in e for e in errs), errs
+    print("  library protection .......... OK")
+
+
+def test_library_rcs_and_loadout():
+    """RCS scales detection and seeker range as RCS^(1/4); platforms set the loadout."""
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType
+    e = BvrEnv(opponent_type=BvrOpponentType.STRAIGHT, platform="GENERIC-UCAV",
+               opponent_platform="F-16C")
+    e.reset()
+    obs_f16 = e.selfplay_observer(True)
+    expect = 90_000.0 * (0.1 / 1.2) ** 0.25
+    assert abs(obs_f16._radar.MAX_RANGE - expect) < 1.0, obs_f16._radar.MAX_RANGE
+    assert e._radar.MAX_RANGE == 70_000.0
+    assert (e._world.wpn1, e._world.wpn2) == (2, 4)
+    e2 = BvrEnv(opponent_type=BvrOpponentType.STRAIGHT)
+    assert e2._radar.MAX_RANGE == 90_000.0 and (e2._world.wpn_count == (4, 4))
+    print("  library RCS & loadout ....... OK")
+
+
+def test_library_uncalibrated_missile_refused():
+    import bvr_library as L
+    from bvr_env import BvrEnv
+    try:
+        L.copy_item("missile", "AIM-120", "TEST-MSL-TMP")
+        m = L.get_item("missile", "TEST-MSL-TMP"); m["params"]["MAX_G"] = 26.0; L.save_item(m)
+        pl = L.copy_item("platform", "F-16C", "TEST-PLAT-TMP"); pl["params"]["missile"] = "TEST-MSL-TMP"
+        L.save_item(pl)
+        try:
+            BvrEnv(platform="TEST-PLAT-TMP")
+            raise AssertionError("an uncalibrated missile was accepted")
+        except L.LibraryError as ex:
+            assert "calibrate" in str(ex).lower()
+    finally:
+        for kind, iid in (("platform", "TEST-PLAT-TMP"), ("missile", "TEST-MSL-TMP")):
+            try: L.delete_item(kind, iid)
+            except L.LibraryError: pass
+    print("  uncalibrated refused ........ OK")
+
+
+def test_perf_card_builtins():
+    from bvr_perf import card_for
+    c = card_for("platform", "GENERIC-UCAV")
+    assert not c["warnings"], c["warnings"]
+    assert 0.8 < c["top_speed"][9000]["mach"] < 0.9
+    f = card_for("platform", "F-16C")
+    assert f["max_bank_turn_40s"][3000]["alt_error"] == 0.0     # turns hold altitude
+    print("  performance cards ........... OK")
+
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
 
@@ -447,6 +530,11 @@ if __name__ == "__main__":
         ("env reset & step",        test_env_reset_and_step),
         ("env full episode",        test_env_full_episode),
         ("throughput",              test_env_throughput),
+        ("library F-16C = model",   test_library_f16_matches_model),
+        ("library protection",      test_library_protection_and_validation),
+        ("library RCS & loadout",   test_library_rcs_and_loadout),
+        ("uncalibrated refused",    test_library_uncalibrated_missile_refused),
+        ("performance cards",       test_perf_card_builtins),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

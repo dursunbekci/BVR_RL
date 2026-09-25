@@ -103,9 +103,25 @@ class RadarSim:
     enable_notch = False
     NOTCH_CLOSURE = 25.0
 
-    def __init__(self, rng=None, randomize=True):
+    # Parameters a library radar item (bvr_library.radar_config) may set.
+    CFG_KEYS = ("MAX_RANGE", "FOV_AZ", "FOV_EL", "REF_RANGE", "SIG_AZ_REF", "SIG_EL_REF",
+                "SIG_RNG_REF", "SIG_RDOT_REF", "SIG_ADOT_REF", "TAU",
+                "LOWDOP_CLOSURE", "LOWDOP_MAX_INFLATE")
+
+    def __init__(self, rng=None, randomize=True, cfg=None, target_rcs=None):
         self.rng = rng or np.random.default_rng()
         self._randomize = randomize
+        if cfg is not None:
+            for k in self.CFG_KEYS:
+                setattr(self, k, getattr(cfg, k))
+            # Radar range equation: detection range goes as RCS^(1/4). Scaling
+            # the accuracy reference range by the same factor keeps the error
+            # at a given signal-to-noise ratio unchanged.
+            if target_rcs is not None:
+                from bvr_library import rcs_scale
+                s = rcs_scale(target_rcs, cfg.REF_RCS_M2)
+                self.MAX_RANGE = self.MAX_RANGE * s
+                self.REF_RANGE = self.REF_RANGE * s
         self.reset()
 
     def reset(self):

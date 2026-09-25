@@ -19,6 +19,8 @@ from bvr_track_adapter import RadarTrackAdapter, TrackState, body_to_enu_matrix
 from bvr_envelope     import Aim120Envelope, aspect_deg_from_vectors
 from bvr_radar_sim    import RadarSim
 from bvr_opponents    import BvrOpponent, BvrOpponentType
+from bvr_library      import (load_platform, envelope_path, LibraryError,
+                              DEFAULT_PLATFORM)
 
 G       = 9.80665
 DEG2RAD = math.pi / 180.0
@@ -28,23 +30,24 @@ REF_LON = 35.0
 R_EARTH = 6_371_000.0
 A_SOUND = 300.0
 RANGE_MAX  = 160_000.0
+# Observation scaling bounds for altitude. The altitudes the agent may
+# command come from its platform (ALT_MIN_OP / ALT_MAX_OP in the library).
 ALT_MIN_OP = 1_000.0
 ALT_MAX_OP = 14_000.0
 
 # ── action space ─────────────────────────────────────────────────────
 HDG_OFFSETS_DEG = [0.0,30.0,-30.0,50.0,-50.0,90.0,-90.0,135.0,-135.0,180.0]
 ALT_DELTAS_M    = [-3000.0,-1200.0,0.0,+1200.0,+3000.0]
+# The four commanded speeds are per platform (SPEED_CMDS in the library);
+# these are the F-16C's, kept for reference and for the action-space size.
 SPEED_CMDS      = [220.0,280.0,340.0,400.0]
 FIRE_OPTIONS    = [0,1]
 ACTION_NVEC     = [len(HDG_OFFSETS_DEG),len(ALT_DELTAS_M),len(SPEED_CMDS),len(FIRE_OPTIONS)]
 
-# Climb angle limit, by altitude. A flat 25° let every +1200/+3000 choice
-# zoom-climb: 8 -> 14 km in a minute while bleeding ~50 m/s. Up high the
-# aircraft has little excess thrust, so a real climb there is shallow. This
-# schedule holds speed within a few m/s on a 3 km climb from any altitude.
-# Dives keep the full 25°.
-CLIMB_FPA_LO_DEG, CLIMB_FPA_HI_DEG = 20.0, 10.0
-CLIMB_FPA_ALT_LO, CLIMB_FPA_ALT_HI = 5_000.0, 11_000.0
+# Climb-angle limit by altitude: per platform (CLIMB_FPA_* in the library).
+# A flat 25° let every climb zoom and bleed ~50 m/s; the F-16C schedule
+# (20° up to 5 km, easing to 10° above 11 km) holds speed within a few m/s
+# on a 3 km climb from any altitude. Dives keep the full 25°.
 
 # ── missile doctrine ─────────────────────────────────────────────────
 # Reward cost charged per missile fired, at launch. The policy sees the value
@@ -162,10 +165,15 @@ class BvrEnv(gym.Env):
 
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT,
                  gamma_discount=0.997, seed=42, instance_id=0,
-                 privileged_critic=True, envelope_table=None,
+                 privileged_critic=True, envelope_table="library",
                  radar_model="sim", enable_viz=False, selfplay_pool=None,
-                 doctrine=DOCTRINE_MIXED):
+                 doctrine=DOCTRINE_MIXED, platform=DEFAULT_PLATFORM,
+                 opponent_platform=DEFAULT_PLATFORM):
         super().__init__()
+        # What each side flies, from the parameter library (bvr_library).
+        self._platform_id, self._opp_platform_id = platform, opponent_platform
+        self._plat = load_platform(platform)
+        self._opp_plat = load_platform(opponent_platform)
         doctrine=str(doctrine).upper()
         if doctrine!=DOCTRINE_MIXED and doctrine not in DOCTRINES:
             raise ValueError(f"doctrine {doctrine!r}: choose {DOCTRINE_MIXED} or "
@@ -194,11 +202,18 @@ class BvrEnv(gym.Env):
         self._obs_lo, self._obs_hi   = OBS_PHYS_LOW.copy(),  OBS_PHYS_HIGH.copy()
         self._priv_lo,self._priv_hi  = PRIV_PHYS_LOW.copy(), PRIV_PHYS_HIGH.copy()
 
-        self._world   = SimWorld(seed=seed+instance_id*1000)
+        self._world   = SimWorld(seed=seed+instance_id*1000,
+                                 platform1=self._plat, platform2=self._opp_plat)
         self._track   = RadarTrackAdapter()
-        self._env_mdl = Aim120Envelope(envelope_table)
+        # Launch envelopes: ours for our missile, the threat's for his.
+        self._env_own = self._load_envelope(self._plat.missile, envelope_table)
+        self._env_thr = (self._env_own if self._opp_plat.missile.fingerprint
+                         == self._plat.missile.fingerprint
+                         else self._load_envelope(self._opp_plat.missile, envelope_table))
         self._radar_model = radar_model
-        self._radar   = RadarSim(rng=self._rng) if radar_model=="sim" else None
+        self._radar   = (RadarSim(rng=self._rng, cfg=self._plat.radar,
+                                  target_rcs=self._opp_plat.rcs)
+                         if radar_model=="sim" else None)
 
         self._state={}; self._step_num=0; self._t_sim=0.0
         self._ready=False; self._episode_id=0; self._opponent=None
@@ -318,7 +333,7 @@ class BvrEnv(gym.Env):
     def action_masks(self) -> np.ndarray:
         m_hdg=np.ones(len(HDG_OFFSETS_DEG),dtype=bool)
         m_alt=np.ones(len(ALT_DELTAS_M),dtype=bool)
-        m_spd=np.ones(len(SPEED_CMDS),dtype=bool)
+        m_spd=np.ones(len(self._plat.speed_cmds),dtype=bool)
         m_fire=np.array([True,self._can_fire()],dtype=bool)
         return np.concatenate([m_hdg,m_alt,m_spd,m_fire])
 
@@ -450,9 +465,12 @@ class BvrEnv(gym.Env):
         """
         o=self._sp_observers.get(privileged)
         if o is None:
+            # Seen from AC2: its platform is our opponent's and vice versa.
             o=BvrEnv(seed=self._instance*7919+17, instance_id=self._instance,
-                     privileged_critic=privileged, radar_model=self._radar_model)
-            o._env_mdl=self._env_mdl          # same calibrated envelope
+                     privileged_critic=privileged, radar_model=self._radar_model,
+                     envelope_table=None, platform=self._opp_platform_id,
+                     opponent_platform=self._platform_id)
+            o._env_own, o._env_thr = self._env_thr, self._env_own
             self._sp_observers[privileged]=o
         return o
 
@@ -464,12 +482,31 @@ class BvrEnv(gym.Env):
             d=names[int(self._rng.integers(len(names)))]
         self._doctrine=d; self._shot_cost=float(DOCTRINES[d])
 
+    @staticmethod
+    def _load_envelope(missile_cfg, envelope_table) -> Aim120Envelope:
+        """
+        "library": the table calibrated for this exact missile (by parameter
+        fingerprint); a path: that table, for every missile (legacy); None:
+        the uncalibrated analytic model (tests only).
+        """
+        if envelope_table is None:
+            return Aim120Envelope(None)
+        if envelope_table != "library":
+            return Aim120Envelope(envelope_table)
+        path = envelope_path(missile_cfg)
+        if not path.exists():
+            raise LibraryError(
+                f"no calibrated launch envelope for missile {missile_cfg.id!r} with its current "
+                f"parameters (expected {path.name}). Calibrate it first: GUI Library → Calibrate, "
+                f"or `python sweep_envelope.py --missile {missile_cfg.id}`.")
+        return Aim120Envelope(str(path))
+
     def _bandit_rmax(self) -> float:
         """The bandit's true R-max against us, from ground truth."""
         s=self._state
         tp=self._to_enu(s.get("lat_t",REF_LAT),s.get("lon_t",REF_LON),s.get("alt_t",9000))
         ua=aspect_deg_from_vectors(tp,self._own_pos_enu(),self._own_vel_enu())
-        rmt,_=self._env_mdl.compute(s.get("speed_t",280)/A_SOUND,s.get("alt_t",9000),ua,
+        rmt,_=self._env_thr.compute(s.get("speed_t",280)/A_SOUND,s.get("alt_t",9000),ua,
                                     s.get("speed",280)/A_SOUND)
         return float(rmt)
 
@@ -529,7 +566,7 @@ class BvrEnv(gym.Env):
     def _own_envelope(self,est) -> tuple:
         s=self._state; mach=s.get("mach",s.get("speed",280)/A_SOUND)
         tgt_mach=est["speed"]/A_SOUND if est["valid"] else 0.9
-        return self._env_mdl.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach)
+        return self._env_own.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach)
 
     def _threat_envelope(self,est) -> tuple:
         if not est["valid"]: return 60_000.0,25_000.0
@@ -537,7 +574,7 @@ class BvrEnv(gym.Env):
         own_vel=self._own_vel_enu()
         our_asp=aspect_deg_from_vectors(est["pos"],self._own_pos_enu(),own_vel)
         own_mach=s.get("mach",s.get("speed",280)/A_SOUND)
-        return self._env_mdl.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach)
+        return self._env_thr.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach)
 
     def _guidance_packet(self) -> dict:
         est=self._track.estimate()
@@ -676,11 +713,12 @@ class BvrEnv(gym.Env):
             d=est["pos"]-self._own_pos_enu(); base=math.atan2(d[0],d[1])
         else: base=s.get("psi",0)
         self._cmd_hdg=_wrap_2pi(base+HDG_OFFSETS_DEG[ih]*DEG2RAD)
-        self._cmd_alt=float(np.clip(s.get("alt",9000)+ALT_DELTAS_M[ia],ALT_MIN_OP,ALT_MAX_OP))
-        self._cmd_spd=float(SPEED_CMDS[isp])
+        p=self._plat
+        self._cmd_alt=float(np.clip(s.get("alt",9000)+ALT_DELTAS_M[ia],p.alt_min,p.alt_max))
+        self._cmd_spd=float(p.speed_cmds[isp])
         return {"mode":0,"chiDot":0,"gamma":0,
                 "V":self._cmd_spd,"hdgCmd":self._cmd_hdg,"altTarget":self._cmd_alt,
-                "altFPA":25*DEG2RAD,"climbFPA":_climb_fpa(s.get("alt",9000)),"hdgTurnRate":12*DEG2RAD,
+                "altFPA":25*DEG2RAD,"climbFPA":p.climb_fpa(s.get("alt",9000)),"hdgTurnRate":12*DEG2RAD,
                 "maneuver":"NONE","task":"NONE","radar_cmd":1,"fire":0}
 
     # ── IC generator ───────────────────────────────────────────────────
@@ -692,7 +730,11 @@ class BvrEnv(gym.Env):
         br=float(self._rng.uniform(0,2*math.pi))
         a1a=float(self._rng.uniform(6000,11000))
         a2a=float(np.clip(a1a+self._rng.uniform(-2500,2500),4000,12500))
-        a1s=float(self._rng.uniform(250,320)); a2s=float(self._rng.uniform(250,320))
+        # Start speeds are drawn for an F-16 (250-320 m/s) and scaled by each
+        # platform's fastest speed choice relative to the F-16's 400 m/s, so a
+        # slower aircraft starts at a speed it can actually fly.
+        a1s=float(self._rng.uniform(250,320))*(self._plat.speed_cmds[-1]/400.0)
+        a2s=float(self._rng.uniform(250,320))*(self._opp_plat.speed_cmds[-1]/400.0)
         a1p=br
         if   sc=="head_on":      a2p=br+math.pi+float(self._rng.uniform(-0.15,0.15))
         elif sc=="offset_left":  a2p=br+math.pi+float(self._rng.uniform(0.25,0.70))
@@ -704,7 +746,7 @@ class BvrEnv(gym.Env):
                     ac1_lat=REF_LAT,ac1_lon=REF_LON,ac1_alt=a1a,ac1_psi=_wrap_2pi(a1p),ac1_spd=a1s,
                     ac2_lat=REF_LAT+math.degrees(dl),ac2_lon=REF_LON+math.degrees(dlo),
                     ac2_alt=a2a,ac2_psi=_wrap_2pi(a2p),ac2_spd=a2s,
-                    wpn=4,wpn_t=4,start_range=rm)
+                    wpn=self._plat.wpn_count,wpn_t=self._opp_plat.wpn_count,start_range=rm)
 
     def close(self): pass
 
@@ -712,9 +754,6 @@ class BvrEnv(gym.Env):
 def _wrap_pi(a):  return (a+math.pi)%(2*math.pi)-math.pi
 def _wrap_2pi(a): return a%(2*math.pi)
 def _wrap_deg(a): return (a+180.0)%360.0-180.0
-def _climb_fpa(alt):
-    f=min(max((alt-CLIMB_FPA_ALT_LO)/(CLIMB_FPA_ALT_HI-CLIMB_FPA_ALT_LO),0.0),1.0)
-    return (CLIMB_FPA_LO_DEG+f*(CLIMB_FPA_HI_DEG-CLIMB_FPA_LO_DEG))*DEG2RAD
 def _band(r,rn,rm):
     if r<=rn: return 1.0
     if r>=rm: return 0.0

@@ -1,0 +1,39 @@
+{
+  "id": "GENERIC-UCAV",
+  "kind": "platform",
+  "name": "Generic jet UCAV with 2 × AIM-120 (illustrative)",
+  "description": "Illustrative unmanned platform for heterogeneous engagements. Small radar cross-section, two missiles in an internal bay.",
+  "params": {
+    "airframe": "GENERIC-UCAV",
+    "radar": "GENERIC-UCAV-RADAR",
+    "missile": "AIM-120",
+    "WPN_COUNT": 2,
+    "RCS_M2": 0.1,
+    "SPEED_CMDS": [
+      170.0,
+      200.0,
+      225.0,
+      250.0
+    ],
+    "ALT_MIN_OP": 1000.0,
+    "ALT_MAX_OP": 12500.0,
+    "CLIMB_FPA_LO": 12.0,
+    "CLIMB_FPA_HI": 6.0,
+    "CLIMB_FPA_ALT_LO": 3000.0,
+    "CLIMB_FPA_ALT_HI": 10000.0
+  },
+  "sources": {
+    "airframe": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "radar": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "missile": "the same AIM-120 model as the F-16C",
+    "WPN_COUNT": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "RCS_M2": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SPEED_CMDS": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "ALT_MIN_OP": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "ALT_MAX_OP": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_LO": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_HI": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_ALT_LO": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_ALT_HI": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft"
+  }
+}

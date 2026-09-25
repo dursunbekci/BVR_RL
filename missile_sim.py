@@ -47,6 +47,9 @@ class MslCfg:
     MAX_FLIGHT       = 120.0      # s hard lifetime
     MIN_MANOEUVRE_V  = 200.0      # m/s below which manoeuvrability degrades
 
+    @staticmethod
+    def drag_cd(mach): return _drag_cd(mach)
+
 
 def _isa_rho(alt_m: float) -> float:
     h = float(np.clip(alt_m, 0.0, 20_000.0))
@@ -94,7 +97,13 @@ class AIM120:
 
     def __init__(self, owner: int, target: int,
                  pos: np.ndarray, vel: np.ndarray,
-                 handoff_range: float):
+                 handoff_range: float, cfg=None, seeker_range_scale: float = 1.0):
+        # Missile parameters: MslCfg by default, or a missile from the
+        # parameter library (bvr_library.missile_config).
+        self.cfg = cfg if cfg is not None else MslCfg
+        # A smaller target is acquired later: the world scales the seeker's
+        # acquisition range by (target RCS / seeker reference RCS)^(1/4).
+        self.seeker_range = self.cfg.SEEKER_RANGE * float(seeker_range_scale)
         AIM120._counter += 1
         self.id     = AIM120._counter
         self.owner  = int(owner)
@@ -102,7 +111,7 @@ class AIM120:
 
         self.pos  = np.asarray(pos, dtype=np.float64).copy()
         self.vel  = np.asarray(vel, dtype=np.float64).copy()
-        self.mass = float(MslCfg.MASS0)
+        self.mass = float(self.cfg.MASS0)
 
         self.handoff_range   = float(handoff_range)
         self.phase           = MslPhase.BOOST
@@ -158,14 +167,14 @@ class AIM120:
         rng_to_tgt = float(np.linalg.norm(tgt_pos_true - self.pos))
 
         # ── phase machine ────────────────────────────────────────────
-        if self.phase == MslPhase.BOOST and self.t_flight >= MslCfg.BOOST_TIME:
+        if self.phase == MslPhase.BOOST and self.t_flight >= self.cfg.BOOST_TIME:
             self.phase = MslPhase.MIDCOURSE
 
         # Seeker handoff
         if (self.phase == MslPhase.MIDCOURSE and not self.seeker_active
                 and rng_to_tgt <= self.handoff_range):
             look = _angle_between(tgt_pos_true - self.pos, self.vel)
-            if look < MslCfg.SEEKER_FOV and rng_to_tgt < MslCfg.SEEKER_RANGE:
+            if look < self.cfg.SEEKER_FOV and rng_to_tgt < self.seeker_range:
                 self.seeker_active = True
                 self.phase = MslPhase.TERMINAL
 
@@ -174,7 +183,7 @@ class AIM120:
                 and not self.seeker_active):
             if not self.guidance_valid:
                 self.t_since_update += dt
-                if self.t_since_update > MslCfg.SUPPORT_TIMEOUT:
+                if self.t_since_update > self.cfg.SUPPORT_TIMEOUT:
                     self.phase = MslPhase.MISS
                     events.append(_ev("MISSILE_MISS", id=self.id, owner=self.owner,
                                       miss_dist=round(rng_to_tgt, 1),
@@ -196,26 +205,26 @@ class AIM120:
         a_nav = self._pro_nav(aim_pos, aim_vel)
 
         # ── thrust ───────────────────────────────────────────────────
-        if self.t_flight < MslCfg.BOOST_TIME:
+        if self.t_flight < self.cfg.BOOST_TIME:
             spd_dir  = self.vel / max(speed, 1.0)
-            a_thrust = (MslCfg.THRUST / self.mass) * spd_dir
-            burn_rate = MslCfg.MASS_PROP / MslCfg.BOOST_TIME
-            self.mass = max(MslCfg.MASS0 - MslCfg.MASS_PROP, self.mass - burn_rate * dt)
+            a_thrust = (self.cfg.THRUST / self.mass) * spd_dir
+            burn_rate = self.cfg.MASS_PROP / self.cfg.BOOST_TIME
+            self.mass = max(self.cfg.MASS0 - self.cfg.MASS_PROP, self.mass - burn_rate * dt)
         else:
             a_thrust = np.zeros(3)
 
         # ── drag ─────────────────────────────────────────────────────
-        cd    = _drag_cd(mach)
-        a_drag = -(q_dyn * cd * MslCfg.S_REF / self.mass) * (self.vel / max(speed, 1.0))
+        cd    = self.cfg.drag_cd(mach)
+        a_drag = -(q_dyn * cd * self.cfg.S_REF / self.mass) * (self.vel / max(speed, 1.0))
 
         # ── clamp PN acceleration ────────────────────────────────────
         # Available g falls with dynamic pressure (a real missile bleeds
         # manoeuvrability at altitude — this is what makes NEZ narrow on
         # late, high-altitude shots).
         g_scale = min(1.0, q_dyn / 35_000.0)
-        if speed < MslCfg.MIN_MANOEUVRE_V:
+        if speed < self.cfg.MIN_MANOEUVRE_V:
             g_scale *= 0.15
-        g_avail = MslCfg.MAX_G * G * g_scale
+        g_avail = self.cfg.MAX_G * G * g_scale
         an = float(np.linalg.norm(a_nav))
         if an > g_avail:
             a_nav = a_nav * (g_avail / an)
@@ -234,7 +243,7 @@ class AIM120:
         # turning onto its intercept course at launch.
         if rng_now > self.prev_range and self.prev_range < 500.0:
             md = self.prev_range
-            if md < MslCfg.FUZE_RADIUS:
+            if md < self.cfg.FUZE_RADIUS:
                 self.phase = MslPhase.HIT
                 events.append(_ev("MISSILE_HIT", id=self.id, owner=self.owner,
                                    target=self.target,
@@ -249,7 +258,7 @@ class AIM120:
 
         # ── lifetime / terrain ───────────────────────────────────────
         if self.phase not in (MslPhase.HIT, MslPhase.MISS):
-            if self.t_flight > MslCfg.MAX_FLIGHT or self.pos[2] < 0.0:
+            if self.t_flight > self.cfg.MAX_FLIGHT or self.pos[2] < 0.0:
                 self.phase = MslPhase.MISS
                 events.append(_ev("MISSILE_MISS", id=self.id, owner=self.owner,
                                    miss_dist=round(rng_now, 1), cause="KINEMATIC"))
@@ -267,7 +276,7 @@ class AIM120:
         closing = float(-np.dot(v_rel, los_hat))
 
         omega = np.cross(los, v_rel) / (rng ** 2)
-        a_cmd = np.cross(omega * MslCfg.N_PRO_NAV, self.vel)
+        a_cmd = np.cross(omega * self.cfg.N_PRO_NAV, self.vel)
         if closing < 0.0:         # target opening: reduce effort
             a_cmd *= 0.25
         return a_cmd

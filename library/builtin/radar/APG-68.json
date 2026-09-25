@@ -1,0 +1,36 @@
+{
+  "id": "APG-68",
+  "kind": "radar",
+  "name": "APG-68-class fire-control radar (illustrative)",
+  "description": "Fighter pulse-Doppler radar. Values are the filtered-track model of bvr_radar_sim.py, not published performance; range and gimbal are randomised ±15% per episode.",
+  "params": {
+    "MAX_RANGE": 90000.0,
+    "REF_RCS_M2": 1.2,
+    "FOV_AZ": 59.99999999999999,
+    "FOV_EL": 59.99999999999999,
+    "REF_RANGE": 50000.0,
+    "SIG_AZ_REF": 1.5,
+    "SIG_EL_REF": 1.5,
+    "SIG_RNG_REF": 35.0,
+    "SIG_RDOT_REF": 4.0,
+    "SIG_ADOT_REF": 0.12000000000000001,
+    "TAU": 2.0,
+    "LOWDOP_CLOSURE": 40.0,
+    "LOWDOP_MAX_INFLATE": 4.0
+  },
+  "sources": {
+    "MAX_RANGE": "bvr_radar_sim.py model value",
+    "FOV_AZ": "bvr_radar_sim.py model value",
+    "FOV_EL": "bvr_radar_sim.py model value",
+    "REF_RANGE": "bvr_radar_sim.py model value",
+    "SIG_AZ_REF": "bvr_radar_sim.py model value",
+    "SIG_EL_REF": "bvr_radar_sim.py model value",
+    "SIG_RNG_REF": "bvr_radar_sim.py model value",
+    "SIG_RDOT_REF": "bvr_radar_sim.py model value",
+    "SIG_ADOT_REF": "bvr_radar_sim.py model value",
+    "TAU": "bvr_radar_sim.py model value",
+    "LOWDOP_CLOSURE": "bvr_radar_sim.py model value",
+    "LOWDOP_MAX_INFLATE": "bvr_radar_sim.py model value",
+    "REF_RCS_M2": "set equal to the F-16's RCS, so F-16 targets are detected at MAX_RANGE"
+  }
+}

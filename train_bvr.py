@@ -7,7 +7,9 @@ train_bvr.py  —  MaskablePPO training for 1v1 BVR
     python train_bvr.py                            # curriculum from STRAIGHT
     python train_bvr.py --opponent shooter         # fixed opponent
     python train_bvr.py --resume models_bvr/latest
-    python train_bvr.py --n-envs 8                 # once C++ supports --instance
+    python train_bvr.py --n-envs 8                 # parallel environments
+    python train_bvr.py --platform GENERIC-UCAV --opponent-platform F-16C
+                                                   # library platforms (library/)
 
 TensorBoard:
     bvr/win_rate            KILL fraction over last 50 TERMINAL episodes
@@ -47,6 +49,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFram
 
 from bvr_env import BvrEnv, REWARD_TERMS, DOCTRINES, DOCTRINE_MIXED
 from bvr_compat import load_model
+from bvr_library import (DEFAULT_PLATFORM, LibraryError, load_platform, scenario_record,
+                         scenario_of, scenario_drift)
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
 from bvr_selfplay import snapshot as selfplay_snapshot
@@ -99,8 +103,11 @@ SELFPLAY_SNAPSHOT_STEPS = 250_000
 class BvrCallback(BaseCallback):
 
     def __init__(self, vec_env, opponent_type, save_dir="models_bvr",
-                 auto_curriculum=True, selfplay_pool=None, verbose=1):
+                 auto_curriculum=True, selfplay_pool=None, allow_selfplay=True, verbose=1):
         super().__init__(verbose)
+        # False when the two sides fly different platforms: a snapshot of the
+        # agent was trained on the agent's platform and cannot fly the other.
+        self.allow_selfplay = allow_selfplay
         # The VecEnv itself, not a list of raw envs: with n_envs > 1 the envs
         # live in other processes, where a Python reference cannot reach them.
         # set_attr() is the only channel that works for both vec env types.
@@ -306,6 +313,12 @@ class BvrCallback(BaseCallback):
         nxt = advance_curriculum(self.opponent_type)
         if nxt == self.opponent_type:
             return
+        if nxt == BvrOpponentType.SELF_PLAY and not self.allow_selfplay:
+            if not getattr(self, "_told_no_selfplay", False):
+                print("[bvr] curriculum ends at ADAPTIVE_SHOOTER: the two sides fly different "
+                      "platforms, so self-play does not apply")
+                self._told_no_selfplay = True
+            return
         self.model.save(os.path.join(self.save_dir, "archive",
                                      f"pre_{nxt.name}"))
         print(f"[bvr] === CURRICULUM: {self.opponent_type.name} -> {nxt.name} ===")
@@ -333,14 +346,15 @@ class BvrCallback(BaseCallback):
 
 # ═════════════════════════════════════════════════════════════════════
 def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool,
-             doctrine):
+             doctrine, platform, opponent_platform):
     def _init():
         return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
                       privileged_critic=privileged,
                       enable_viz=(viz and idx == 0),
                       envelope_table=envelope_table,
-                      selfplay_pool=selfplay_pool, doctrine=doctrine)
+                      selfplay_pool=selfplay_pool, doctrine=doctrine,
+                      platform=platform, opponent_platform=opponent_platform)
     return _init
 
 
@@ -365,10 +379,13 @@ def main():
                     choices=[DOCTRINE_MIXED.lower()] + [d.lower() for d in DOCTRINES],
                     help="missile doctrine; 'mixed' draws one per episode, which the "
                          "policy sees, so one model learns all three")
-    ap.add_argument("--envelope-table", type=str, default="envelope.npz",
-                     help="calibrated Rmax/Rnez table from sweep_envelope.py. "
-                          "Falls back to the (uncalibrated, ~1.5-3x optimistic) "
-                          "analytic model if the file is missing.")
+    ap.add_argument("--platform", default=DEFAULT_PLATFORM,
+                    help="library platform the agent flies (see library/)")
+    ap.add_argument("--opponent-platform", default=DEFAULT_PLATFORM,
+                    help="library platform the opponent flies")
+    ap.add_argument("--envelope-table", type=str, default="library",
+                    help="'library' (default): each missile's calibrated table from "
+                         "library/envelopes; or a path to one table used for every missile")
     args = ap.parse_args()
 
     opponent = BvrOpponentType[args.opponent.upper()]
@@ -377,11 +394,22 @@ def main():
                  f"{', '.join(o.name.lower() for o in CURRICULUM)}")
     privileged = not args.no_privileged
 
-    envelope_table = args.envelope_table if os.path.exists(args.envelope_table) else None
-    if envelope_table is None:
-        print(f"[bvr] WARNING: {args.envelope_table} not found — training against the "
-              f"UNCALIBRATED analytic envelope model. Run sweep_envelope.py first; "
-              f"see bvr_envelope.py's module docstring for why this matters.")
+    # Resolve both platforms now, so a missing item, an invalid value or an
+    # uncalibrated missile stops the run here with a clear message.
+    try:
+        for pid in (args.platform, args.opponent_platform):
+            load_platform(pid)
+        from bvr_env import BvrEnv as _probe
+        _probe(opponent_type=BvrOpponentType.STRAIGHT, platform=args.platform,
+               opponent_platform=args.opponent_platform, envelope_table=args.envelope_table)
+    except LibraryError as e:
+        ap.error(str(e))
+    heterogeneous = args.platform != args.opponent_platform
+    if heterogeneous and opponent == BvrOpponentType.SELF_PLAY:
+        ap.error(f"self-play needs both sides on the same platform (here {args.platform} v "
+                 f"{args.opponent_platform}): a snapshot of the agent cannot fly the other side")
+    envelope_table = args.envelope_table
+    print(f"[bvr] platforms: agent {args.platform} v opponent {args.opponent_platform}")
 
     # gamma MUST match the value PPO trains with (passed below via kwargs) —
     # potential-based shaping (bvr_env._potential / step()'s `gamma*phi -
@@ -391,7 +419,7 @@ def main():
     # the CLI silently desynced the two and broke that guarantee.
     selfplay_pool = os.path.join(args.save_dir, "selfplay_pool")
     fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
-                    selfplay_pool, args.doctrine.upper())
+                    selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform)
            for i in range(args.n_envs)]
     vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
@@ -416,8 +444,17 @@ def main():
         model = load_model(args.resume, env=vec, **{
             k: v for k, v in kwargs.items() if k not in ("policy_kwargs",)})
         print(f"[bvr] resumed from {args.resume}")
+        prev = scenario_of(model)
+        if prev["platform"] != args.platform or prev["opponent_platform"] != args.opponent_platform:
+            print(f"[bvr] NOTE: this checkpoint was trained as {prev['platform']} v "
+                  f"{prev['opponent_platform']}; continuing as {args.platform} v "
+                  f"{args.opponent_platform} (a warm start, not a continuation)")
+        for msg in scenario_drift(prev):
+            print(f"[bvr] NOTE: {msg}")
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
+    # Saved inside every checkpoint this run writes, self-play snapshots included.
+    model.bvr_scenario = scenario_record(args.platform, args.opponent_platform)
 
     if opponent == BvrOpponentType.SELF_PLAY:
         # learn() resets every env before any callback runs, and a SELF_PLAY
@@ -425,7 +462,7 @@ def main():
         print(f"[bvr] self-play snapshot -> {selfplay_snapshot(model, selfplay_pool)}")
 
     cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
-                     auto_curriculum=not args.no_curriculum)
+                     auto_curriculum=not args.no_curriculum, allow_selfplay=not heterogeneous)
 
     failure = None
     try:

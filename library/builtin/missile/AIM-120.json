@@ -1,0 +1,69 @@
+{
+  "id": "AIM-120",
+  "kind": "missile",
+  "name": "AIM-120 AMRAAM (open-source estimate)",
+  "description": "Active-radar medium-range missile with datalink midcourse guidance. Rough public numbers; the launch envelope is calibrated by flying this model, not taken from published ranges.",
+  "params": {
+    "MASS0": 152.0,
+    "MASS_PROP": 48.0,
+    "BOOST_TIME": 6.0,
+    "THRUST": 17000.0,
+    "S_REF": 0.0324,
+    "DRAG_TABLE": [
+      [
+        0.0,
+        0.28
+      ],
+      [
+        0.8,
+        0.28
+      ],
+      [
+        1.0,
+        0.98
+      ],
+      [
+        1.5,
+        0.76
+      ],
+      [
+        3.2333333333333334,
+        0.5
+      ],
+      [
+        5.0,
+        0.5
+      ]
+    ],
+    "N_PRO_NAV": 4.0,
+    "MAX_G": 30.0,
+    "MIN_MANOEUVRE_V": 200.0,
+    "FUZE_RADIUS": 10.0,
+    "SEEKER_FOV": 20.05352282957881,
+    "SEEKER_RANGE": 18000.0,
+    "SEEKER_REF_RCS_M2": 1.2,
+    "HANDOFF_MIN": 8000.0,
+    "HANDOFF_MAX": 16000.0,
+    "SUPPORT_TIMEOUT": 3.0,
+    "MAX_FLIGHT": 120.0
+  },
+  "sources": {
+    "MASS0": "published ≈ 152 kg",
+    "MASS_PROP": "open-source AIM-120 estimate (missile_sim.py)",
+    "BOOST_TIME": "open-source AIM-120 estimate (missile_sim.py)",
+    "THRUST": "open-source AIM-120 estimate (missile_sim.py)",
+    "S_REF": "0.0324 m², a 203 mm body as modelled in missile_sim.py (the real AIM-120 is 178 mm, 0.0249 m²)",
+    "DRAG_TABLE": "slender-body shape from missile_sim.py",
+    "N_PRO_NAV": "typical proportional-navigation gain",
+    "MAX_G": "open-source AIM-120 estimate (missile_sim.py)",
+    "MIN_MANOEUVRE_V": "model choice",
+    "FUZE_RADIUS": "model choice",
+    "SEEKER_FOV": "open-source AIM-120 estimate (missile_sim.py)",
+    "SEEKER_RANGE": "open-source AIM-120 estimate (missile_sim.py)",
+    "SEEKER_REF_RCS_M2": "set equal to the F-16's RCS, so F-16 targets are acquired at SEEKER_RANGE",
+    "HANDOFF_MIN": "randomised so the policy reads the support flag instead of memorising a range",
+    "HANDOFF_MAX": "as HANDOFF_MIN",
+    "SUPPORT_TIMEOUT": "the 3-second support rule",
+    "MAX_FLIGHT": "open-source AIM-120 estimate (missile_sim.py)"
+  }
+}

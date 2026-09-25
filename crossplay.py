@@ -29,6 +29,10 @@ How games are played and scored
   the AC1 seat's advantage, also reported as "seat bias".
 * Both sides fly the same doctrine (--doctrine). Actions are the policy's
   most likely choice unless --stochastic.
+* Each checkpoint flies the platform it was trained on (the scenario stored
+  in the checkpoint; F-16C for checkpoints from before the library). A
+  scripted column flies the row checkpoint's training opponent platform,
+  unless --scripted-platform names one.
 * Elo: Bradley-Terry fit over all games (draws count half), one virtual draw
   per pairing as a prior so a 100% score stays finite; mean rating 1000.
 """
@@ -70,21 +74,28 @@ def _play(task):
     from bvr_opponents import BvrOpponentType
     from bvr_selfplay import FrameStacker, N_STACK, PolicyOpponent, load_policy
 
-    row, col, first, count, seed, doctrine, deterministic, envelope = task
+    row, col, first, count, seed, doctrine, deterministic, envelope, scripted_platform = task
+    from bvr_library import scenario_of
     model_a, priv_a = load_policy(row)
+    plat_a = scenario_of(model_a)["platform"]
+    if col.startswith(SCRIPTED_PREFIX):
+        plat_b = scripted_platform or scenario_of(model_a)["opponent_platform"]
+    else:
+        model_b, priv_b = load_policy(col)
+        plat_b = scenario_of(model_b)["platform"]
 
-    key = (priv_a, doctrine)
+    key = (priv_a, doctrine, plat_a, plat_b)
     env = _ENVS.get(key)
     if env is None:
         env = BvrEnv(opponent_type=BvrOpponentType.SELF_PLAY, privileged_critic=priv_a,
-                     envelope_table=envelope, doctrine=doctrine, seed=seed)
+                     envelope_table=envelope, doctrine=doctrine, seed=seed,
+                     platform=plat_a, opponent_platform=plat_b)
         _ENVS[key] = env
 
     if col.startswith(SCRIPTED_PREFIX):
         env._opponent_factory = None
         env._opponent_type = BvrOpponentType[col[len(SCRIPTED_PREFIX):]]
     else:
-        model_b, priv_b = load_policy(col)
         env._opponent_type = BvrOpponentType.SELF_PLAY
         env._opponent_factory = lambda e: PolicyOpponent(
             e, model_b, priv_b, label="policy", deterministic=deterministic, doctrine=doctrine)
@@ -237,7 +248,10 @@ def main():
     ap.add_argument("--stochastic", action="store_true", help="sample actions instead of the most likely")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument("--seed", type=int, default=1000)
-    ap.add_argument("--envelope-table", default="envelope.npz")
+    ap.add_argument("--envelope-table", default="library")
+    ap.add_argument("--scripted-platform", default=None,
+                    help="platform the scripted columns fly (default: each row checkpoint's "
+                         "training opponent)")
     ap.add_argument("--out", default="crossplay_results")
     args = ap.parse_args()
 
@@ -251,21 +265,24 @@ def main():
         if t not in CURRICULUM or t == BvrOpponentType.SELF_PLAY:
             raise SystemExit(f"{s}: not a scripted opponent")
         scripted.append(SCRIPTED_PREFIX + t.name)
-    envelope = args.envelope_table if os.path.exists(args.envelope_table) else None
-    if envelope is None:
-        print(f"[crossplay] WARNING: {args.envelope_table} not found; using the analytic envelope")
+    envelope = args.envelope_table
 
     assign_labels(models)
     rows, cols = models, models + scripted
     pairs = [(r, c) for r in rows for c in cols]
     tasks = [(r, c, k, min(CHUNK, args.episodes - k), args.seed, args.doctrine.upper(),
-              not args.stochastic, envelope)
+              not args.stochastic, envelope, args.scripted_platform)
              for r, c in pairs for k in range(0, args.episodes, CHUNK)]
     total = len(pairs) * args.episodes
     print(f"[crossplay] {len(models)} checkpoints, {len(scripted)} scripted | {len(pairs)} pairings "
           f"× {args.episodes} = {total} games | {args.workers} workers | doctrine {args.doctrine.upper()}")
+    from bvr_selfplay import load_policy
+    from bvr_library import scenario_of
+    platforms = {}
     for m in models:
-        print(f"             {label(m)}  ({m})")
+        sc = scenario_of(load_policy(m)[0])
+        platforms[label(m)] = sc["platform"]
+        print(f"             {label(m)}  [{sc['platform']}, trained v {sc['opponent_platform']}]  ({m})")
 
     games = defaultdict(list)
     t0 = time.time()
@@ -306,6 +323,7 @@ def main():
     with open(os.path.join(args.out, "crossplay.json"), "w") as f:
         json.dump({"config": vars(args), "players": models + scripted,
                    "rows": [label(r) for r in rows], "cols": [label(c) for c in cols],
+                   "platforms": platforms,
                    "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "cells": {f"{label(r)} | {label(c)}": {**cells[(r, c)], "row": r, "col": c}
                              for r, c in pairs},
