@@ -61,6 +61,22 @@ DOCTRINE_MIXED = "MIXED"          # training: a random doctrine each episode
 SHOT_COST_MAX = max(DOCTRINES.values())
 
 # ── observation layout ────────────────────────────────────────────────
+WM_OBS_LABELS = [
+    "wm_present","wm_range","wm_brg_cos","wm_brg_sin","wm_alt_rel",
+    "wm_hdg_cos","wm_hdg_sin","wm_speed",
+    "wm_has_track","dl_track_used","wm_wpn",
+    "wm_msl_count","wm_msl_support","wm_msl_tgo",
+    "wm_rwr_warn","wm_inbound_tgo","wm_r_over_rmax_thr",
+]
+WM_OBS_LOW  = [0,2,-1,-1,-8000,-1,-1,0, 0,0,0, 0,0,0, 0,0,0]
+WM_OBS_HIGH = [1,5.3,1,1,8000,1,1,700, 1,1,6, 6,1,90, 1,90,3]
+WM_PRIV_LABELS = [
+    "true_wm_present","true_wm_range_to_bandit","true_wm_aa_t_cos","true_wm_aa_t_sin",
+    "true_wm_r_over_rmax_thr","true_wm_threat_tgo","true_wm_own_tgo","true_bandit_targets_me",
+]
+WM_PRIV_LOW  = [0,0,-1,-1,0,0,0,0]
+WM_PRIV_HIGH = [1,RANGE_MAX,1,1,3,120,120,1]
+
 OBS_LABELS = [
     "own_mach","own_alt","own_gamma_fpa","own_phi_cos","own_phi_sin","own_nz",
     "own_energy","own_alpha","wpn_remaining","fuel_frac",
@@ -77,8 +93,13 @@ OBS_LABELS = [
     # Appended last: bvr_compat widens older checkpoints by adding inputs at
     # the end of each frame, so new inputs must always go at the end.
     "doctrine_shot_cost",
+    # The wingman (2v1 and larger), shared over the datalink. All zero with no
+    # wingman, so 1v1 fills them with "absent" and a 1v1 checkpoint, widened
+    # with zero weights for them, flies exactly as before.
+    *WM_OBS_LABELS,
 ]
 OBS_DIM = len(OBS_LABELS)
+OBS_DIM_1V1 = OBS_DIM - len(WM_OBS_LABELS)
 
 OBS_PHYS_LOW = np.array([
     0.4,ALT_MIN_OP,-0.6,-1,-1,-4,0,-0.3,0,0,
@@ -86,6 +107,7 @@ OBS_PHYS_LOW = np.array([
     0,-8000,-12000,-10,0,0,0,0,
     0,0,0,0,0,0,0,0,-1,-1,0,0,0,0,
     0,
+    *WM_OBS_LOW,
 ],dtype=np.float32)
 OBS_PHYS_HIGH = np.array([
     2,ALT_MAX_OP,0.6,1,1,9,30000,0.5,6,1,
@@ -93,6 +115,7 @@ OBS_PHYS_HIGH = np.array([
     700,8000,12000,10,3,3,3,3,
     6,90,90,1,1,5,1,120,1,1,1,90,1,120,
     SHOT_COST_MAX,
+    *WM_OBS_HIGH,
 ],dtype=np.float32)
 assert len(OBS_PHYS_LOW)==OBS_DIM==len(OBS_PHYS_HIGH)
 
@@ -103,10 +126,13 @@ PRIV_LABELS = [
     "true_alt_rel","true_speed_t","true_energy_delta",
     "true_tgt_wpn","true_tgt_has_lock",
     "true_nearest_threat_tgo","true_nearest_own_tgo","true_r_over_rmax_thr",
+    *WM_PRIV_LABELS,            # appended last, as for OBS_LABELS
 ]
 PRIV_DIM  = len(PRIV_LABELS)
-PRIV_PHYS_LOW  = np.array([0,-900,-1,-1,-1,-1,-1,-1,-12000,0,-12000,0,0,0,0,0],dtype=np.float32)
-PRIV_PHYS_HIGH = np.array([RANGE_MAX,900,1,1,1,1,1,1,12000,700,12000,6,1,120,120,3],dtype=np.float32)
+PRIV_DIM_1V1 = PRIV_DIM - len(WM_PRIV_LABELS)
+PRIV_PHYS_LOW  = np.array([0,-900,-1,-1,-1,-1,-1,-1,-12000,0,-12000,0,0,0,0,0,*WM_PRIV_LOW],dtype=np.float32)
+PRIV_PHYS_HIGH = np.array([RANGE_MAX,900,1,1,1,1,1,1,12000,700,12000,6,1,120,120,3,*WM_PRIV_HIGH],dtype=np.float32)
+assert len(PRIV_PHYS_LOW)==PRIV_DIM==len(PRIV_PHYS_HIGH)
 
 # The five components of the shaping potential, in the order _potential()
 # builds them. Consumers (trainer logging, GUI panel) key off this.
@@ -227,6 +253,12 @@ class BvrEnv(gym.Env):
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
         self._phi_terms={k:0.0 for k in PHI_TERMS}
         self._prev_phi_terms=dict(self._phi_terms)
+        # Team play (bvr_team): the wingman's observer, whose radar track is
+        # shared over the datalink, and whether the bandit is aiming at us.
+        # None / True in 1v1, where both change nothing.
+        self._wingman=None
+        self._bandit_targets_me=True
+        self._alive=True             # False once shot down or crashed (team play)
 
         self._viz=None
         if enable_viz:
@@ -304,7 +336,7 @@ class BvrEnv(gym.Env):
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
                 "cost_terms":{"heading":-hdg_cost,"shots":-shot_cost},
                 "doctrine":self._doctrine,
-                "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._track.state],
+                "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._trk_state()],
                 "fired":want_fire,"opponent":self._opponent_type.name,
                 "opponent_detail":getattr(self._opponent,"label",self._opponent_type.name)}
 
@@ -339,9 +371,9 @@ class BvrEnv(gym.Env):
 
     def _can_fire(self) -> bool:
         if self._state.get("wpn_remaining",0)<=0: return False
-        if self._track.state!=TrackState.TRACK:   return False
+        if self._trk_state()!=TrackState.TRACK:   return False
         if (self._t_sim-self._last_shot_t)<3.0:   return False
-        est=self._track.estimate()
+        est=self._est()
         if not est["valid"]: return False
         r=self._est_range(est); r_max,_=self._own_envelope(est)
         # BUG FIX: this used to read `r<=1.15*r_max` — a shot up to 15% BEYOND
@@ -408,7 +440,7 @@ class BvrEnv(gym.Env):
         t=ev.get("type")
         if t=="MISSILE_LAUNCH" and ev.get("owner")==1:
             self._shots_fired+=1; self._last_shot_t=self._t_sim
-            est=self._track.estimate(); r=self._est_range(est)
+            est=self._est(); r=self._est_range(est)
             r_max,r_nez=self._own_envelope(est)
             self._launch_log.append({
                 "missile_id":ev.get("id"),"t_sim":round(self._t_sim,2),
@@ -577,14 +609,105 @@ class BvrEnv(gym.Env):
         return self._env_thr.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach)
 
     def _guidance_packet(self) -> dict:
-        est=self._track.estimate()
-        if not est["valid"] or self._track.state==TrackState.NONE:
+        est=self._est()
+        if not est["valid"] or self._trk_state()==TrackState.NONE:
             return {"valid":0}
         return {"valid":1,
                 "tgt_pos":[round(float(v),1) for v in est["pos"]],
                 "tgt_vel":[round(float(v),2) for v in est["vel"]],
                 "pos_sigma":round(est["pos_sigma"],1),
                 "t_est":round(self._t_sim-est["age"],3)}
+
+    # ── datalink: the picture this aircraft fights on ─────────────────
+    # Error the datalink adds to a track it relays (registration and latency),
+    # added in quadrature to the sender's own position sigma.
+    DL_POS_SIGMA = 150.0
+    DL_AGE       = 0.2
+
+    def _dl_track(self):
+        """The wingman's firm radar track as received over the datalink, or None."""
+        wm=self._wingman
+        if wm is None or not wm._alive or wm._track.state!=TrackState.TRACK:
+            return None
+        e=wm._track.estimate()
+        if not e["valid"]: return None
+        e=dict(e)
+        e["pos_sigma"]=math.hypot(e["pos_sigma"],self.DL_POS_SIGMA)
+        e["age"]=e["age"]+self.DL_AGE
+        e["raw_rae"]=None
+        return e
+
+    def _est(self) -> dict:
+        """
+        The track this aircraft uses for everything (observation, shots,
+        missile support, commands): its own radar's when that is firm,
+        otherwise its wingman's over the datalink. With no wingman it is
+        always its own, exactly as in 1v1.
+        """
+        if self._wingman is None or self._track.state==TrackState.TRACK:
+            return self._track.estimate()
+        return self._dl_track() or self._track.estimate()
+
+    def _trk_state(self) -> int:
+        if self._wingman is None or self._track.state==TrackState.TRACK:
+            return self._track.state
+        return TrackState.TRACK if self._dl_track() is not None else self._track.state
+
+    def _dl_used(self) -> bool:
+        return (self._wingman is not None and self._track.state!=TrackState.TRACK
+                and self._dl_track() is not None)
+
+    @staticmethod
+    def _missiles_of(state, owner_label):
+        """(count, nearest tgo, any needs support) of live missiles with that owner label."""
+        n=0; tgo=None; sup=0.0
+        for m in state.get("missiles",[]) or []:
+            if m.get("state") in ("HIT","MISS","DUD") or m.get("owner")!=owner_label: continue
+            n+=1; t=float(m.get("tgo_est",0))
+            tgo=t if tgo is None else min(tgo,t)
+            sup=max(sup,float(m.get("needs_support",0)))
+        return n,(tgo or 0.0),sup
+
+    def _wingman_obs(self) -> list:
+        """The wingman inputs (WM_OBS_LABELS): what the datalink tells us about him."""
+        wm=self._wingman
+        if wm is None or not wm._alive or not wm._state:
+            return [0.0]*len(WM_OBS_LABELS)
+        s,w=self._state,wm._state
+        d=wm._own_pos_enu()-self._own_pos_enu()
+        rng=float(np.linalg.norm(d))
+        brg=_wrap_pi(math.atan2(d[0],d[1])-s.get("psi",0))
+        hdg=_wrap_pi(w.get("psi",0)-s.get("psi",0))
+        n,tgo,sup=self._missiles_of(w,1)
+        wrwr=w.get("rwr",{}) or {}
+        _,thr_tgo,_=self._missiles_of(w,2)
+        west=wm._est()
+        r_thr=0.0
+        if west["valid"]:
+            rmt,_=wm._threat_envelope(west)
+            r_thr=wm._est_range(west)/max(rmt,1)
+        return [1.0,math.log10(max(rng,100)),math.cos(brg),math.sin(brg),
+                float(w.get("alt",9000))-float(s.get("alt",9000)),
+                math.cos(hdg),math.sin(hdg),float(w.get("speed",0)),
+                1.0 if wm._track.state==TrackState.TRACK else 0.0,
+                1.0 if self._dl_used() else 0.0,
+                float(w.get("wpn_remaining",0)),
+                float(n),sup,tgo,
+                float(wrwr.get("launch_warn",0)),thr_tgo,r_thr]
+
+    def _wingman_priv(self) -> list:
+        """The critic's truth about the wingman (WM_PRIV_LABELS)."""
+        wm=self._wingman
+        me_tgt=1.0 if self._bandit_targets_me else 0.0
+        if wm is None or not wm._alive or not wm._state:
+            return [0.0]*(len(WM_PRIV_LABELS)-1)+[me_tgt]
+        w=wm._state
+        aat=w.get("aa_deg_t",180)*DEG2RAD
+        _,thr_tgo,_=self._missiles_of(w,2)
+        _,own_tgo,_=self._missiles_of(w,1)
+        return [1.0,float(w.get("range",RANGE_MAX)),math.cos(aat),math.sin(aat),
+                float(w.get("range",RANGE_MAX))/max(wm._bandit_rmax(),1),
+                thr_tgo,own_tgo,me_tgt]
 
     # ── observation ────────────────────────────────────────────────────
     def _missile_summary(self):
@@ -599,11 +722,11 @@ class BvrEnv(gym.Env):
         return own,thr,n
 
     def _build_obs(self):
-        s=self._state; est=self._track.estimate(); op=self._own_pos_enu()
+        s=self._state; est=self._est(); op=self._own_pos_enu()
         speed=s.get("speed",280); alt=s.get("alt",9000)
         mach=s.get("mach",speed/A_SOUND); phi=s.get("phi",0)
         e_own=alt+speed**2/(2*G)
-        oh=[0.0]*4; oh[int(self._track.state)]=1.0
+        oh=[0.0]*4; oh[int(self._trk_state())]=1.0
 
         if est["valid"]:
             d=est["pos"]-op; rng_e=float(np.linalg.norm(d))
@@ -649,6 +772,7 @@ class BvrEnv(gym.Env):
             self._step_num/float(self.MAX_STEPS),
             min(self._t_sim-self._last_shot_t,120) if self._last_shot_t>-900 else 120,
             self._shot_cost,
+            *self._wingman_obs(),
         ],dtype=np.float32)
         obs=self._norm(obs,self._obs_lo,self._obs_hi)
         if not self._privileged: return obs
@@ -673,6 +797,7 @@ class BvrEnv(gym.Env):
             float(tm.get("tgo_est",0)) if tm else 0,
             float(om.get("tgo_est",0)) if om else 0,
             rng/max(rmt,1),
+            *self._wingman_priv(),
         ],dtype=np.float32)
         return self._norm(p,self._priv_lo,self._priv_hi)
 
@@ -682,12 +807,13 @@ class BvrEnv(gym.Env):
 
     # ── potential ──────────────────────────────────────────────────────
     def _potential(self) -> float:
-        s=self._state; est=self._track.estimate(); rng=self._est_range(est)
+        s=self._state; est=self._est(); rng=self._est_range(est)
+        ts=self._trk_state()
         rm,rn=self._own_envelope(est); rmt,rnt=self._threat_envelope(est)
         pe=self.W_ENVELOPE*(_band(rng,rn,rm)-_band(rng,rnt,rmt))
-        if   self._track.state==TrackState.TRACK:     t=1.0
-        elif self._track.state==TrackState.COAST:     t=0.4*math.exp(-est["age"]/8)
-        elif self._track.state==TrackState.ACQUIRING: t=0.5
+        if   ts==TrackState.TRACK:     t=1.0
+        elif ts==TrackState.COAST:     t=0.4*math.exp(-est["age"]/8)
+        elif ts==TrackState.ACQUIRING: t=0.5
         else: t=0.0
         pt=self.W_TRACK*t
         eo=s.get("alt",9000)+s.get("speed",280)**2/(2*G)
@@ -695,7 +821,7 @@ class BvrEnv(gym.Env):
         pe2=self.W_ENERGY*math.tanh((eo-et)/4000)
         om,tm,_=self._missile_summary()
         ps=0.0
-        if om and om.get("needs_support",0) and self._track.state==TrackState.TRACK:
+        if om and om.get("needs_support",0) and ts==TrackState.TRACK:
             ps=self.W_SUPPORT*math.exp(-est["pos_sigma"]/600)
         pd=0.0
         if tm: pd=self.W_DEFENCE*math.tanh(float(tm.get("tgo_est",60))/25)
@@ -708,7 +834,7 @@ class BvrEnv(gym.Env):
 
     # ── action → command ───────────────────────────────────────────────
     def _encode_cmd(self,ih,ia,isp,ifire) -> dict:
-        s=self._state; est=self._track.estimate()
+        s=self._state; est=self._est()
         if est["valid"]:
             d=est["pos"]-self._own_pos_enu(); base=math.atan2(d[0],d[1])
         else: base=s.get("psi",0)

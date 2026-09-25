@@ -2,24 +2,42 @@
 sim_world.py  —  Simulation world
 ==================================
 
-Two F-16 aircraft + list of AIM-120 missiles + per-frame event queue.
+N aircraft in two teams + list of AIM-120 missiles + per-frame event queue.
 
-  world = SimWorld(seed=42)
+  world = SimWorld(seed=42)                       # 1v1: AC1 v AC2
   world.reset(ic, episode_id=7)
   for ...:
       tlm = world.step(cmd1, cmd2)  # one SIM_DT advance
+
+  world = SimWorld(seed=42, platforms=[a, b, c], teams=[1, 1, 2])   # 2v1
+  world.step_all([cmd1, cmd2, cmd3])
+  world.telemetry(me=1, other=3)
+
+Aircraft are numbered from 1 in the order given. A 1v1 world is the special
+case platforms=[p1, p2], teams=[1, 2], and behaves exactly as the two-aircraft
+world did before (same random draws, same packets).
 
 `tlm` is a dict with exactly the field names bvr_env.py reads via _ingest(),
 so the env needs no awareness of whether it is talking to a C++ process or
 to this class.
 
-cmd1 controls AC1 (RL agent), cmd2 controls AC2 (opponent).
-AC1's missile guidance comes from cmd1["msl_guidance"] (the radar estimate).
-AC2's comes from cmd2["msl_guidance"] when the opponent supplies one (a
-self-play policy guiding from its own radar track); scripted opponents send
-none and get truth guidance.
+A missile is guided by its shooter's command: cmd["msl_guidance"] (a radar
+or datalink estimate) when the command carries that key, otherwise truth on
+the missile's target, which is what scripted opponents get. A command may
+name its target with cmd["target"] (an aircraft number); without it the
+shooter fires at the first live enemy.
 
-telemetry(me) builds the same packet from either aircraft's point of view.
+telemetry(me, other) builds the packet from aircraft `me`'s point of view
+against enemy `other`. Missile and event owners are relabelled so the reader
+needs no aircraft numbers: 1 = me, 3 = a teammate, 2 = the enemy `other`
+and 4 = any other enemy; an enemy missile is owned by 2 when it is aimed at
+me and by 4 when it is aimed at someone else. In
+1v1 only 1 and 2 occur, exactly as before. view="team" instead labels by side
+(my team 1, the enemy 2): a scripted opponent reads the fight that way.
+
+Aircraft destroyed by a missile, or removed with kill() (a crash), stop
+flying; missiles aimed at them go on to their fuze or flight-time limit
+against the last position, as before the first kill ended every episode.
 """
 
 import math
@@ -56,58 +74,94 @@ class SimWorld:
     SIM_DT    = 0.02      # s — 50 Hz
     WPN_COUNT = 4
 
-    def __init__(self, seed: int = 42, platform1=None, platform2=None):
+    def __init__(self, seed: int = 42, platform1=None, platform2=None,
+                 platforms=None, teams=None):
         self._rng    = np.random.default_rng(seed)
-        # Library platforms (bvr_library.load_platform) for AC1 and AC2. None
-        # means the built-in F-16C / AIM-120 classes, as before the library.
-        self.platforms = (platform1, platform2)
-        self.ac1     = F16Aircraft(rng=self._rng, cfg=platform1.airframe if platform1 else None)
-        self.ac2     = F16Aircraft(rng=self._rng, cfg=platform2.airframe if platform2 else None)
+        # Library platforms (bvr_library.load_platform), one per aircraft.
+        # None means the built-in F-16C / AIM-120 classes, as before the library.
+        if platforms is None:
+            platforms, teams = [platform1, platform2], [1, 2]
+        if teams is None or len(teams) != len(platforms) or len(set(teams)) != 2:
+            raise ValueError("SimWorld needs one team number per aircraft and exactly two teams")
+        self.platforms = tuple(platforms)
+        self.teams     = tuple(int(t) for t in teams)
+        self.n         = len(self.platforms)
+        self.acs       = [F16Aircraft(rng=self._rng, cfg=p.airframe if p else None)
+                          for p in self.platforms]
         self.wpn_count = tuple(p.wpn_count if p else self.WPN_COUNT for p in self.platforms)
         self.missiles: list = []
         self._despawn_next: list = []
         self.events:   list = []
         self.t_sim     = 0.0
         self.episode_id = 0
-        self.wpn1      = self.WPN_COUNT
-        self.wpn2      = self.WPN_COUNT
-        self._prev_fire1 = 0
-        self._prev_fire2 = 0
+        self.wpn       = [self.WPN_COUNT] * self.n
+        self.alive     = [True] * self.n
+        self._prev_fire = [0] * self.n
         self._rwr_t_warn: dict = {}
+
+    # 1v1 names, kept for readers of the two-aircraft world
+    ac1  = property(lambda self: self.acs[0])
+    ac2  = property(lambda self: self.acs[1])
+    wpn1 = property(lambda self: self.wpn[0], lambda self, v: self.wpn.__setitem__(0, v))
+    wpn2 = property(lambda self: self.wpn[1], lambda self, v: self.wpn.__setitem__(1, v))
+
+    def enemies(self, i: int) -> list:
+        """Aircraft numbers of the other team, alive or not."""
+        return [j for j in range(1, self.n + 1) if self.teams[j - 1] != self.teams[i - 1]]
+
+    def friends(self, i: int) -> list:
+        """Aircraft numbers of i's teammates, not counting i."""
+        return [j for j in range(1, self.n + 1)
+                if j != i and self.teams[j - 1] == self.teams[i - 1]]
+
+    def pos(self, i: int) -> np.ndarray:
+        a = self.acs[i - 1]
+        return np.array([a.x, a.y, a.z])
 
     # ── episode setup ────────────────────────────────────────────────
     def reset(self, ic: dict, episode_id: int = 0) -> None:
         """
-        ic keys: ac1_lat, ac1_lon, ac1_alt, ac1_psi, ac1_spd,
-                 ac2_lat, ac2_lon, ac2_alt, ac2_psi, ac2_spd,
-                 wpn, wpn_t            (optional, default WPN_COUNT)
-                 fuel_frac             (optional, default 0.60)
+        ic keys, for each aircraft i (1..N): ac{i}_lat, ac{i}_lon, ac{i}_alt,
+        ac{i}_psi, ac{i}_spd, and optionally wpn{i} (default: its platform's
+        loadout; in 1v1 also the old names wpn and wpn_t).
+        fuel_frac: optional, default 0.60.
         """
         self.t_sim       = 0.0
         self.episode_id  = int(episode_id)
         self.missiles    = []
         self._despawn_next = []
         self.events      = []
-        self._prev_fire1 = 0
-        self._prev_fire2 = 0
+        self._prev_fire  = [0] * self.n
+        self.alive       = [True] * self.n
         self._rwr_t_warn = {}
-        self.wpn1 = int(ic.get("wpn",   self.wpn_count[0]))
-        self.wpn2 = int(ic.get("wpn_t", self.wpn_count[1]))
+        legacy = {1: "wpn", 2: "wpn_t"} if self.n == 2 else {}
+        self.wpn = [int(ic.get(f"wpn{i}", ic.get(legacy.get(i, ""), self.wpn_count[i - 1])))
+                    for i in range(1, self.n + 1)]
         AIM120._counter = 0
 
         fuel = float(ic.get("fuel_frac", 0.60))
-        x1, y1, z1 = _latlon_to_enu(ic["ac1_lat"], ic["ac1_lon"], ic["ac1_alt"])
-        x2, y2, z2 = _latlon_to_enu(ic["ac2_lat"], ic["ac2_lon"], ic["ac2_alt"])
-        self.ac1.reset_state(x1, y1, z1, float(ic["ac1_psi"]), float(ic["ac1_spd"]), fuel)
-        self.ac2.reset_state(x2, y2, z2, float(ic["ac2_psi"]), float(ic["ac2_spd"]), fuel)
+        for i, a in enumerate(self.acs, start=1):
+            x, y, z = _latlon_to_enu(ic[f"ac{i}_lat"], ic[f"ac{i}_lon"], ic[f"ac{i}_alt"])
+            a.reset_state(x, y, z, float(ic[f"ac{i}_psi"]), float(ic[f"ac{i}_spd"]), fuel)
+
+    def kill(self, i: int, cause: str = "CRASH") -> None:
+        """Remove aircraft i from the fight (a crash the env detected)."""
+        if self.alive[i - 1]:
+            self.alive[i - 1] = False
+            self.events.append({"type": "AC_REMOVED", "ac": i, "cause": cause,
+                                "t_sim": round(self.t_sim, 3)})
 
     # ── main step ───────────────────────────────────────────────────
     def step(self, cmd1: dict, cmd2: dict) -> dict:
         """
-        Advance one SIM_DT. Returns telemetry dict identical in schema to the
-        C++ telemetry packets bvr_env.py's _ingest() was reading.
-        cmd1 → AC1 (RL agent);   cmd2 → AC2 (scripted opponent)
+        1v1: advance one SIM_DT. Returns AC1's telemetry.
+        cmd1 → AC1 (RL agent);   cmd2 → AC2 (opponent)
         """
+        self.step_all([cmd1, cmd2])
+        return self.telemetry(1)
+
+    def step_all(self, cmds: list) -> None:
+        """Advance one SIM_DT with one command per aircraft (ignored for dead ones)."""
         self.events = []
 
         # Remove missiles that hit or missed last frame
@@ -115,59 +169,73 @@ class SimWorld:
         self._despawn_next  = []
 
         # ── guidance updates ─────────────────────────────────────────
-        g1 = cmd1.get("msl_guidance")        # estimate from AC1's radar
-        if "msl_guidance" in cmd2:
-            g2 = cmd2["msl_guidance"]        # self-play: AC2's own radar estimate
-        else:
-            g2 = {                           # scripted: tracks AC1 perfectly
-                "valid": 1,
-                "tgt_pos": [self.ac1.x, self.ac1.y, self.ac1.z],
-                "tgt_vel": self.ac1.vel_enu.tolist(),
-                "pos_sigma": 0.0,
-                "t_est": self.t_sim,
-            }
+        # From the shooter's own estimate when its command carries one;
+        # scripted shooters send none and guide on the target's truth.
         for m in self.missiles:
-            m.update_guidance(g1 if m.owner == 1 else g2)
+            cmd = cmds[m.owner - 1]
+            if "msl_guidance" in cmd:
+                m.update_guidance(cmd["msl_guidance"])
+            else:
+                t = self.acs[m.target - 1]
+                m.update_guidance({"valid": 1,
+                                   "tgt_pos": [t.x, t.y, t.z],
+                                   "tgt_vel": t.vel_enu.tolist(),
+                                   "pos_sigma": 0.0,
+                                   "t_est": self.t_sim})
 
         # ── fire commands (rising-edge) ──────────────────────────────
-        f1 = int(cmd1.get("fire", 0))
-        f2 = int(cmd2.get("fire", 0))
-        if f1 and not self._prev_fire1: self._launch(1, cmd1)
-        if f2 and not self._prev_fire2: self._launch(2, cmd2)
-        self._prev_fire1 = f1
-        self._prev_fire2 = f2
+        for i, cmd in enumerate(cmds, start=1):
+            f = int(cmd.get("fire", 0)) if self.alive[i - 1] else 0
+            if f and not self._prev_fire[i - 1]:
+                self._launch(i, cmd)
+            self._prev_fire[i - 1] = f
 
         # ── step missiles ────────────────────────────────────────────
-        pos1 = np.array([self.ac1.x, self.ac1.y, self.ac1.z])
-        pos2 = np.array([self.ac2.x, self.ac2.y, self.ac2.z])
-        vel1 = self.ac1.vel_enu
-        vel2 = self.ac2.vel_enu
-        ac_pos = {1: pos1, 2: pos2}
-        ac_vel = {1: vel1, 2: vel2}
+        ac_pos = {i: self.pos(i) for i in range(1, self.n + 1)}
+        ac_vel = {i: a.vel_enu for i, a in enumerate(self.acs, start=1)}
 
+        destroyed = []
         for m in list(self.missiles):
             tgt = m.target
             evs = m.step(self.SIM_DT, ac_pos[tgt], ac_vel[tgt])
+            if not self.alive[tgt - 1]:
+                # Nothing left to destroy: a wreck neither fuzes a missile
+                # nor dies twice.
+                evs = [e for e in evs if e.get("type") != "AC_DESTROYED"]
+                for e in evs:
+                    if e.get("type") == "MISSILE_HIT":
+                        e["killed"] = 0
             self.events.extend(evs)
+            destroyed += [e["ac"] for e in evs if e.get("type") == "AC_DESTROYED"]
             if m.phase in (MslPhase.HIT, MslPhase.MISS):
                 self._despawn_next.append(m)
 
         # ── step aircraft ────────────────────────────────────────────
-        self.ac1.step(self.SIM_DT, cmd1)
-        self.ac2.step(self.SIM_DT, cmd2)
+        for i, (a, cmd) in enumerate(zip(self.acs, cmds), start=1):
+            if self.alive[i - 1]:
+                a.step(self.SIM_DT, cmd)
+        # Killed this frame: flown this frame (as the two-aircraft world did
+        # on the frame that ended the episode), frozen from the next.
+        for i in destroyed:
+            self.alive[i - 1] = False
         self.t_sim += self.SIM_DT
-
-        return self.telemetry(1)
 
     # ── missile launch ───────────────────────────────────────────────
     def _launch(self, owner: int, cmd: dict) -> None:
-        wpn = self.wpn1 if owner == 1 else self.wpn2
-        if wpn <= 0:
+        if self.wpn[owner - 1] <= 0:
+            return
+        tgt_id = cmd.get("target")
+        if tgt_id is None:
+            live = [j for j in self.enemies(owner) if self.alive[j - 1]]
+            if not live:
+                return
+            tgt_id = live[0]
+        tgt_id = int(tgt_id)
+        if not self.alive[tgt_id - 1] or self.teams[tgt_id - 1] == self.teams[owner - 1]:
             return
 
-        ac_src = self.ac1 if owner == 1 else self.ac2
-        ac_tgt = self.ac2 if owner == 1 else self.ac1
-        tgt_id = 2      if owner == 1 else 1
+        ac_src = self.acs[owner - 1]
+        ac_tgt = self.acs[tgt_id - 1]
 
         pos_src = np.array([ac_src.x, ac_src.y, ac_src.z])
         pos_tgt = np.array([ac_tgt.x, ac_tgt.y, ac_tgt.z])
@@ -177,7 +245,7 @@ class SimWorld:
 
         # The shooter's missile type; its seeker, and so its hand-off range,
         # reach less far against a target with a smaller radar cross-section.
-        p_src, p_tgt = self.platforms[owner - 1], self.platforms[2 - owner]
+        p_src, p_tgt = self.platforms[owner - 1], self.platforms[tgt_id - 1]
         if p_src is None:
             mcfg, scale, lo, hi = None, 1.0, 8_000.0, 16_000.0
         else:
@@ -194,22 +262,39 @@ class SimWorld:
         self._rwr_t_warn[m.id] = self.t_sim
 
         self.missiles.append(m)
-        if owner == 1: self.wpn1 -= 1
-        else:          self.wpn2 -= 1
+        self.wpn[owner - 1] -= 1
         self.events.append({"type": "MISSILE_LAUNCH", "id": m.id,
                              "owner": owner, "t_sim": round(self.t_sim, 3)})
 
     # ── telemetry builder ────────────────────────────────────────────
-    def telemetry(self, me: int = 1) -> dict:
+    def _label(self, j: int, me: int, other: int, view: str, aimed_at: int = None) -> int:
         """
-        Telemetry from aircraft `me`'s point of view: unsuffixed keys are `me`,
-        `_t` keys the other aircraft, and missile/event ids are relabelled so
-        that 1 always means `me`. telemetry(1) is the agent's packet;
-        telemetry(2) lets a self-play opponent observe the fight exactly the
-        way the agent does.
+        Aircraft number j as `me` sees it (see the module docstring). For a
+        missile's owner, aimed_at is its target: an enemy missile counts as
+        the threat (2) only when it is aimed at me.
         """
-        a1, a2 = (self.ac1, self.ac2) if me == 1 else (self.ac2, self.ac1)
-        other = 3 - me
+        if view == "team":
+            return 1 if self.teams[j - 1] == self.teams[me - 1] else 2
+        if j == me:
+            return 1
+        if self.teams[j - 1] == self.teams[me - 1]:
+            return 3
+        if aimed_at is not None:
+            return 2 if aimed_at == me else 4
+        return 2 if j == other else 4
+
+    def telemetry(self, me: int = 1, other: int = None, view: str = "agent") -> dict:
+        """
+        Telemetry from aircraft `me`'s point of view against enemy `other`:
+        unsuffixed keys are `me`, `_t` keys `other`, and missile/event ids are
+        relabelled (module docstring). telemetry(1) is the agent's packet in
+        1v1; telemetry(2) lets a self-play opponent observe the fight exactly
+        the way the agent does.
+        """
+        if other is None:
+            live = [j for j in self.enemies(me) if self.alive[j - 1]]
+            other = (live or self.enemies(me))[0]
+        a1, a2 = self.acs[me - 1], self.acs[other - 1]
         lat1, lon1, alt1 = _enu_to_latlon(a1.x, a1.y, a1.z)
         lat2, lon2, alt2 = _enu_to_latlon(a2.x, a2.y, a2.z)
 
@@ -231,8 +316,9 @@ class SimWorld:
 
         # ── RWR synthesis ─────────────────────────────────────────────
         pos1 = np.array([a1.x, a1.y, a1.z])
+        my_team = self.teams[me - 1]
         inbound = [m for m in self.missiles
-                   if m.owner == other and m.target == me
+                   if self.teams[m.owner - 1] != my_team and m.target == me
                    and m.phase not in (MslPhase.HIT, MslPhase.MISS)]
         if inbound:
             cl = min(inbound, key=lambda m: float(np.linalg.norm(m.pos - pos1)))
@@ -249,18 +335,27 @@ class SimWorld:
                    "spike": 0, "seeker_active": 0, "n_threats": 0}
 
         # ── missile list (live + ones despawning this frame) ─────────
+        identity = self.n == 2 and me == 1 and view == "agent"
         msl_list = []
         for m in self.missiles + self._despawn_next:
             d = m.to_dict()
             la, lo, _ = _enu_to_latlon(*m.pos)
             d["lat"] = round(la, 6); d["lon"] = round(lo, 6)
-            if me == 2:
-                d["owner"], d["target"] = 3 - d["owner"], 3 - d["target"]
+            if not identity:
+                d["owner"]  = self._label(m.owner, me, other, view, aimed_at=m.target)
+                d["target"] = self._label(m.target, me, other, view)
             msl_list.append(d)
         events = list(self.events)
-        if me == 2:
-            events = [{k: (3 - v if k in ("owner", "target", "ac") and v in (1, 2) else v)
-                       for k, v in ev.items()} for ev in events]
+        if not identity:
+            def relabel(ev):
+                out = {}
+                for k, v in ev.items():
+                    if k in ("owner", "target", "ac") and isinstance(v, int) and 1 <= v <= self.n:
+                        v = self._label(v, me, other, view,
+                                        aimed_at=ev.get("target") if k == "owner" else None)
+                    out[k] = v
+                return out
+            events = [relabel(ev) for ev in events]
 
         return {
             "type":       "telemetry",
@@ -290,8 +385,8 @@ class SimWorld:
             "ata_deg": round(aa_deg, 2),
 
             # ── weapons ───────────────────────────────────────────────
-            "wpn_remaining":   self.wpn1 if me == 1 else self.wpn2,
-            "wpn_remaining_t": self.wpn2 if me == 1 else self.wpn1,
+            "wpn_remaining":   self.wpn[me - 1],
+            "wpn_remaining_t": self.wpn[other - 1],
             "wpn_ready": 1, "wpn_ready_t": 1,
 
             # ── missiles ──────────────────────────────────────────────

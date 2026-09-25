@@ -9,7 +9,7 @@ test means a specific module is wrong; a failure in a later one means the
 integration is broken. This ordering matters when debugging.
 """
 
-import math, time, sys
+import math, os, time, sys
 import numpy as np
 
 DEG = math.pi / 180.0
@@ -518,6 +518,62 @@ def test_perf_card_builtins():
     assert f["max_bank_turn_40s"][3000]["alt_error"] == 0.0     # turns hold altitude
     print("  performance cards ........... OK")
 
+
+def test_compat_widening():
+    """A checkpoint from before the wingman inputs loads and acts exactly as before."""
+    import tempfile
+    import gymnasium as gym
+    import torch as th
+    from gymnasium import spaces
+    from sb3_contrib import MaskablePPO
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
+    from bvr_env import OBS_DIM, PRIV_DIM, OBS_DIM_1V1, PRIV_DIM_1V1, ACTION_NVEC
+    from bvr_compat import load_model, N_STACK
+    from bvr_policy import AsymmetricMaskablePolicy
+
+    box = lambda n: spaces.Box(-1.0, 1.0, (n,), np.float32)
+
+    class OldLayout(gym.Env):
+        observation_space = spaces.Dict({"obs": box(OBS_DIM_1V1), "priv": box(PRIV_DIM_1V1)})
+        action_space = spaces.MultiDiscrete(ACTION_NVEC)
+        def reset(self, seed=None, options=None):
+            return self.observation_space.sample(), {}
+        def step(self, a):
+            return self.observation_space.sample(), 0.0, False, False, {}
+        def action_masks(self):
+            return np.ones(sum(ACTION_NVEC), dtype=bool)
+
+    vec = VecFrameStack(DummyVecEnv([OldLayout]), N_STACK)
+    old = MaskablePPO(AsymmetricMaskablePolicy, vec, n_steps=32, batch_size=32,
+                      policy_kwargs=dict(pi_arch=(64, 64), vf_arch=(64, 64)))
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "old.zip")
+        old.save(path)
+        new = load_model(path, log=None)
+    assert new.observation_space["obs"].shape == (OBS_DIM * N_STACK,)
+    assert new.observation_space["priv"].shape == (PRIV_DIM * N_STACK,)
+
+    rng = np.random.default_rng(0)
+    o = rng.uniform(-1, 1, (5, N_STACK, OBS_DIM_1V1)).astype(np.float32)
+    p = rng.uniform(-1, 1, (5, N_STACK, PRIV_DIM_1V1)).astype(np.float32)
+    # the new columns hold arbitrary values: they must change nothing
+    o_new = np.concatenate([o, rng.uniform(-1, 1, (5, N_STACK, OBS_DIM - OBS_DIM_1V1))], 2)
+    p_new = np.concatenate([p, rng.uniform(-1, 1, (5, N_STACK, PRIV_DIM - PRIV_DIM_1V1))], 2)
+
+    def run(model, oo, pp):
+        x = {"obs": th.as_tensor(oo.reshape(5, -1), dtype=th.float32),
+             "priv": th.as_tensor(pp.reshape(5, -1), dtype=th.float32)}
+        with th.no_grad():
+            dist = model.policy.get_distribution(x)
+            logits = th.cat([c.logits for c in dist.distributions], 1)
+            return logits.numpy(), model.policy.predict_values(x).numpy()
+
+    la, va = run(old, o, p)
+    lb, vb = run(new, o_new, p_new)
+    assert np.allclose(la, lb, atol=1e-5) and np.allclose(va, vb, atol=1e-5), \
+        (np.abs(la - lb).max(), np.abs(va - vb).max())
+    print("  checkpoint widening ......... OK")
+
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
 
@@ -544,6 +600,7 @@ if __name__ == "__main__":
         ("library RCS & loadout",   test_library_rcs_and_loadout),
         ("uncalibrated refused",    test_library_uncalibrated_missile_refused),
         ("performance cards",       test_perf_card_builtins),
+        ("checkpoint widening",     test_compat_widening),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)
