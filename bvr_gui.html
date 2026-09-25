@@ -293,6 +293,7 @@ select option{background:#050810}
            box-shadow:0 0 8px rgba(58,159,255,.45)}
 .t3chip.blue.on{background:rgba(20,80,140,.9);border-color:#37c8ff;box-shadow:0 0 8px rgba(55,200,255,.5)}
 .t3chip.red.on {background:rgba(120,28,34,.9);border-color:#ff4d54;box-shadow:0 0 8px rgba(255,77,84,.5)}
+.t3chip.wing.on{background:rgba(70,50,140,.9);border-color:#a98bff;box-shadow:0 0 8px rgba(169,139,255,.5)}
 
 /* legend */
 #t3-legend{position:absolute;right:8px;bottom:8px;width:296px;pointer-events:auto;
@@ -324,6 +325,7 @@ select option{background:#050810}
 .t3lbl .sub{color:#ffe9a8;font-size:11px;font-weight:bold}
 .t3lbl.blue{border-left-color:#37c8ff}
 .t3lbl.red {border-left-color:#ff4d54}
+.t3lbl.wing{border-left-color:#a98bff}
 .t3lbl.mid {border-left-color:transparent;background:rgba(6,10,18,.62);
             color:#cfe2ef;transform-origin:center;font-weight:bold;letter-spacing:.5px}
 .t3lbl.grn {border-left-color:#39ff9e;color:#39ff9e;font-size:11px;font-weight:bold;padding:2px 5px}
@@ -553,18 +555,25 @@ select option{background:#050810}
           <div class="field-label">
             <span>ENGAGEMENT</span>
             <button class="help-btn" onclick="help(this,'ENGAGEMENT',
-              'Who flies what.\n\n• FORMAT: 1 v 1 for now. 2 v 1 and larger come in phase 2.\n• AGENT FLIES: the platform the learning agent flies.\n• OPPONENT FLIES: the platform the scripted opponent flies.\n\nPlatforms are defined in the LIBRARY tab (top bar), where you can copy a built-in and change its parameters.\n\nWhen the two differ, self-play does not apply (a snapshot of the agent cannot fly the other aircraft), so the curriculum stops at ADAPTIVE SHOOTER. Each saved checkpoint records both platforms and every parameter.')">?</button>
+              'Who flies what.\n\n• FORMAT: 1 v 1, or 2 v 1: two blue aircraft flown by one shared policy against one red.\n• AGENT FLIES (LEAD FLIES in 2 v 1): the platform the learning agent flies.\n• WINGMAN FLIES (2 v 1): the second blue aircraft; by default the same as the lead.\n• OPPONENT FLIES: the platform the scripted opponent flies.\n\nIn 2 v 1 each blue aircraft flies on its own radar, and on its wingman\'s track over a datalink when its own radar has none: one aircraft can fire and turn away while the other keeps the missile supported. A kill or a loss counts for both. A 1 v 1 checkpoint can be resumed as 2 v 1: it starts by flying each aircraft as it flew alone.\n\nPlatforms are defined in the LIBRARY tab (top bar), where you can copy a built-in and change its parameters.\n\nSelf-play applies only to 1 v 1 with the same platform on both sides; otherwise the curriculum stops at ADAPTIVE SHOOTER. Each saved checkpoint records the format, every platform and every parameter.')">?</button>
           </div>
           <div class="row3">
-            <select id="cfg-format" title="Format">
+            <select id="cfg-format" title="Format" onchange="engageCheck()">
               <option value="1v1" selected>1 v 1</option>
-              <option value="2v1" disabled>2 v 1 (phase 2)</option>
+              <option value="2v1">2 v 1</option>
             </select>
             <select id="cfg-platform" title="Agent flies" onchange="engageCheck()"></select>
             <select id="cfg-opp-platform" title="Opponent flies" onchange="engageCheck()"></select>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
-            <span>FORMAT</span><span>AGENT FLIES</span><span>OPPONENT FLIES</span></div>
+            <span>FORMAT</span><span id="cfg-plat-lbl">AGENT FLIES</span><span>OPPONENT FLIES</span></div>
+          <div id="cfg-wing-row" style="display:none;margin-top:6px">
+            <div class="row3"><span></span>
+              <select id="cfg-wing-platform" title="Wingman flies"><option value="">as lead</option></select>
+              <span></span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
+              <span></span><span>WINGMAN FLIES</span><span></span></div>
+          </div>
           <div id="cfg-engage-warn" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
         </div>
 
@@ -908,6 +917,16 @@ select option{background:#050810}
               'The checkpoint always flies the platform it was trained on (stored in the checkpoint). This sets what the opponent flies; by default the opponent platform the checkpoint was trained against.')">?</button>
           </div>
           <select id="eval-opp-platform"><option value="">— checkpoint's training opponent —</option></select>
+          <div class="field-label" style="margin-top:6px">
+            <span>FORMAT</span>
+            <button class="help-btn" onclick="help(this,'FORMAT (eval)',
+              'By default a checkpoint is evaluated in the format it was trained in. 2 v 1 flies both blue aircraft with the checkpoint (the wingman on the checkpoint\'s wingman platform, or its own); a 2 v 1 checkpoint can also be watched in 1 v 1, where its wingman inputs read absent.')">?</button>
+          </div>
+          <select id="eval-format">
+            <option value="">— checkpoint's format —</option>
+            <option value="1v1">1 v 1</option>
+            <option value="2v1">2 v 1</option>
+          </select>
         </div>
 
         <div class="field">
@@ -1050,7 +1069,7 @@ let followAC=null;       // null | 1 | 2  — which aircraft to follow
 let _projOwn=null, _projTgt=null;  // projected screen positions for hit testing
 // Smoothed envelope radii (prevent jitter)
 let sRmax=0, sRnez=0, sRmaxT=0;
-const tacBuf1=[], tacBuf2=[], tacBuf3d1=[], tacBuf3d2=[], tacMsls={}, altBuf1=[], altBuf2=[];
+const tacBuf1=[], tacBuf2=[], tacBuf3d1=[], tacBuf3d2=[], tacMsls={}, altBuf1=[], altBuf2=[], altBuf3=[];
 const wrHist=[];
 let totalSteps=2000000, epStartTime=Date.now(), epCount=0, stepsDone=0;
 const TRACK_N=['NONE','ACQUIRING','TRACK','COAST'];
@@ -1299,6 +1318,7 @@ function refreshPlatformSelects() {
   };
   fill('cfg-platform', false, 'F-16C');
   fill('cfg-opp-platform', false, 'F-16C');
+  fill('cfg-wing-platform', true, '');
   fill('eval-opp-platform', true, '');
   fill('xp-scripted-platform', true, '');
   engageCheck();
@@ -1308,7 +1328,14 @@ function engageCheck() {
   const a = document.getElementById('cfg-platform').value, b = document.getElementById('cfg-opp-platform').value;
   const opp = document.getElementById('cfg-opponent').value;
   const w = document.getElementById('cfg-engage-warn');
-  if (a && b && a !== b) {
+  const team = document.getElementById('cfg-format').value === '2v1';
+  document.getElementById('cfg-wing-row').style.display = team ? '' : 'none';
+  document.getElementById('cfg-plat-lbl').textContent = team ? 'LEAD FLIES' : 'AGENT FLIES';
+  if (team) {
+    w.textContent = opp === 'self_play'
+      ? '⚠ 2 v 1 has no self-play stage yet; pick a scripted stage.'
+      : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.';
+  } else if (a && b && a !== b) {
     w.textContent = opp === 'self_play'
       ? '⚠ self-play needs both sides on the same platform; pick another stage.'
       : 'Different platforms: self-play does not apply, so the curriculum ends at ADAPTIVE SHOOTER.';
@@ -1896,6 +1923,7 @@ function handleFrame(f) {
   push(tacBuf3d2,[f.tgt[0],f.tgt[1],f.tgt[2]],200);
   push(altBuf1,f.alt,600);
   push(altBuf2,f.alt_t,600);
+  if(f.wing) push(altBuf3,f.wing.alt,600);
   for(const m of f.missiles){
     if(!tacMsls[m.id])tacMsls[m.id]={trail:[],trail3d:[],owner:m.owner,last:m};
     tacMsls[m.id].last=m;
@@ -1916,12 +1944,13 @@ function handleFrame(f) {
 }
 
 function onEpEnd(meta) {
-  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;
+  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k];
   t3ClearTrails();
   addLog(`[ep] outcome=${meta.outcome}  R=${meta.reward}  shots=${meta.shots}  support_losses=${meta.support_losses}`
         +(meta.doctrine?`  doctrine=${meta.doctrine}`:'')
-        +(meta.bank_rev_per_min!=null?`  bank_rev/min=${meta.bank_rev_per_min}`:''),'log-ok');
+        +(meta.bank_rev_per_min!=null?`  bank_rev/min=${meta.bank_rev_per_min}`:'')
+        +(meta.blue_losses!=null?`  blue_lost=${meta.blue_losses}`:''),'log-ok');
   fetch('/replay').then(r=>r.json()).then(d=>{
     lastDecisions=d.frames?extractShots(d.frames):[];
   }).catch(()=>{});
@@ -1954,13 +1983,13 @@ function drawAlt(){
   const ctx=cv.getContext('2d');
   ctx.fillStyle='#07090f';ctx.fillRect(0,0,W,H);
   if(!altBuf1.length)return;
-  const all=[...altBuf1,...altBuf2];
+  const all=[...altBuf1,...altBuf2,...altBuf3];
   const lo=Math.max(0,Math.min(...all)-800),hi=Math.max(...all)+800,range=hi-lo||1000,p=24;
   const sx=(W-2*p)/Math.max(altBuf1.length-1,1),sy=(H-2*p)/range;
   ctx.strokeStyle='rgba(50,85,130,0.7)';ctx.lineWidth=0.8;
   for(let i=0;i<=4;i++){const y=p+i*(H-2*p)/4;ctx.beginPath();ctx.moveTo(p,y);ctx.lineTo(W-p,y);ctx.stroke();
     ctx.fillStyle='rgba(110,165,220,0.9)';ctx.font='bold 11px Courier New';
-    ctx.fillText(`${Math.round(hi-(i*(range/4)))}m`,2,y+4);}
+    ctx.fillText(U.alt(hi-(i*(range/4))),2,y+4);}
   // fill under curves for better visibility
   const lineFill=(buf,strokeCol,fillCol)=>{
     if(buf.length<2)return;
@@ -1971,14 +2000,34 @@ function drawAlt(){
     ctx.fillStyle=fillCol;ctx.lineTo(p+(buf.length-1)*sx,H-p);ctx.lineTo(p,H-p);ctx.closePath();ctx.fill();
   };
   lineFill(altBuf1,'#4aaaff','rgba(58,160,255,0.12)');
+  if(altBuf3.length) lineFill(altBuf3,'#a98bff','rgba(169,139,255,0.10)');
   lineFill(altBuf2,'#ff5555','rgba(255,80,80,0.12)');
   if(lastFrame){
-    ctx.fillStyle='#4aaaff';ctx.font='bold 11px Courier New';ctx.fillText(`AC1 ${U.alt(lastFrame.alt)}`,W-110,15);
-    ctx.fillStyle='#ff5555';ctx.fillText(`AC2 ${U.alt(lastFrame.alt_t)}`,W-110,28);
+    const team=!!lastFrame.wing;
+    ctx.fillStyle='#4aaaff';ctx.font='bold 11px Courier New';
+    ctx.fillText(`${team?'LEAD':'AC1'} ${U.alt(lastFrame.alt)}`,W-120,15);
+    ctx.fillStyle='#ff5555';ctx.fillText(`${team?'RED':'AC2'} ${U.alt(lastFrame.alt_t)}`,W-120,28);
+    if(team){ ctx.fillStyle='#a98bff'; ctx.fillText(`WING ${U.alt(lastFrame.wing.alt)}`,W-120,41); }
   }
 }
 
 // ─── HUD ──────────────────────────────────────────────────────────
+// 2v1: the wingman, the datalink and whom red is engaging.
+function teamHud(f){
+  const w=f.wing, dead='<span class="hud-val bad">LOST</span>';
+  const tgt=f.red_tgt===1?'LEAD':'WING';
+  const wingMsls=f.missiles.filter(m=>m.owner===3).length, atWing=f.missiles.filter(m=>m.owner===4).length;
+  return `<div class="hud-block">
+  <div class="hud-title">TEAM — 2 v 1</div>
+  <div class="hud-row"><span class="hud-label">Lead</span>${f.own_alive?'<span class="hud-val good">flying</span>':dead}</div>
+  <div class="hud-row"><span class="hud-label">Wingman</span>${w.alive?`<span class="hud-val">${U.dist(w.rng,1)} from red · ${w.wpn} msl</span>`:dead}</div>
+  <div class="hud-row"><span class="hud-label">Lead flies on</span><span class="hud-val">${f.dl?'<span style="color:#a98bff">wingman\'s track (datalink)</span>':'own radar'}</span></div>
+  <div class="hud-row"><span class="hud-label">Wingman flies on</span><span class="hud-val">${!w.alive?'—':w.dl?'<span style="color:#a98bff">lead\'s track (datalink)</span>':'own radar · '+(TRACK_N[w.track]||'?')}</span></div>
+  <div class="hud-row"><span class="hud-label">Red is engaging</span><span class="hud-val ${f.red_tgt===1?'bad':''}">${tgt}</span></div>
+  <div class="hud-row"><span class="hud-label">Wingman missiles · red missiles at wingman</span><span class="hud-val">${wingMsls} · ${atWing}</span></div>
+</div>`;
+}
+
 function updateHUD(f){
   const inEnv=f.rng<f.rmax*1.15&&f.track===2&&f.wpn>0;
   const ownMsls=f.missiles.filter(m=>m.owner===1);
@@ -2000,14 +2049,14 @@ function updateHUD(f){
   <div class="hud-title">ENGAGEMENT</div>
   <div class="hud-row"><span class="hud-label">Range</span><span class="hud-val">${U.dist(f.rng, 2)}</span></div>
   <div class="hud-row"><span class="hud-label">Closure</span><span class="hud-val ${f.clos>0?'good':'bad'}">${U.spd(f.clos)}</span></div>
-  <div class="hud-row"><span class="hud-label">AC1 aspect (nose→AC2)</span><span class="hud-val">${f.aa.toFixed(1)}°</span></div>
-  <div class="hud-row"><span class="hud-label">AC2 aspect (nose→AC1)</span><span class="hud-val">${f.aa_t.toFixed(1)}°</span></div>
+  <div class="hud-row"><span class="hud-label">${f.wing?'Lead aspect (nose→RED)':'AC1 aspect (nose→AC2)'}</span><span class="hud-val">${f.aa.toFixed(1)}°</span></div>
+  <div class="hud-row"><span class="hud-label">${f.wing?'Red aspect (nose→LEAD)':'AC2 aspect (nose→AC1)'}</span><span class="hud-val">${f.aa_t.toFixed(1)}°</span></div>
 </div>
 <div class="hud-block">
   <div class="hud-title">RADAR TRACK</div>
   <div class="hud-row"><span class="hud-label">State</span><span class="hud-val" style="color:${TRACK_C[f.track]}">${TRACK_N[f.track]||'?'}</span></div>
   <div class="hud-row"><span class="hud-label">Position σ (uncertainty)</span><span class="hud-val ${f.pos_sig<500?'good':f.pos_sig>2000?'bad':'warn'}">${U.alt(f.pos_sig)}</span></div>
-  <div class="hud-row"><span class="hud-label">Track age</span><span class="hud-val">${f.trk_age.toFixed(1)} s</span></div>
+  <div class="hud-row"><span class="hud-label">Track age</span><span class="hud-val">${f.track===0?'—':f.trk_age.toFixed(1)+' s'}</span></div>
 </div>
 <div class="hud-block">
   <div class="hud-title">LAUNCH ENVELOPE ${inEnv?'<span style="color:var(--green);font-size:12px">✓ IN ENVELOPE</span>':''}</div>
@@ -2016,10 +2065,11 @@ function updateHUD(f){
   <div class="hud-row"><span class="hud-label">Own Rmax / Threat Rmax</span><span class="hud-val">${U.dist(f.rmax)} / <span class="${f.rng<f.rmax_t*1.1?'bad':''}">${U.dist(f.rmax_t)}</span></span></div>
 </div>
 <div class="hud-block">
-  <div class="hud-title">WEAPONS — AC1: ${f.wpn}× &nbsp; AC2: ${f.wpn_t}×</div>
+  <div class="hud-title">WEAPONS — ${f.wing?'LEAD':'AC1'}: ${f.wpn}× &nbsp; ${f.wing?'WING: '+f.wing.wpn+'× &nbsp; RED':'AC2'}: ${f.wpn_t}×</div>
   ${ownMsls.map(mslLine).join('')}
   ${thrMsls.length?`<div style="font-size:11px;color:var(--red);letter-spacing:1px;margin-top:4px">INBOUND:</div>${thrMsls.map(mslLine).join('')}`:''}
 </div>
+${f.wing?teamHud(f):''}
 ${f.rwr_warn?`<div style="background:#1a0000;border:1px solid var(--red);padding:6px 8px;font-size:12px;color:var(--red);font-weight:bold">
   ⚠ ${f.rwr_sa?'🎯 SEEKER ACTIVE — EVADE NOW':'LAUNCH WARNING — MISSILE INBOUND'}
 </div>`:''}`;
@@ -2060,12 +2110,18 @@ document.getElementById('btn-train').onclick=()=>{
   STAGE_IDS.forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
-  addLog(`▶ Training: ${document.getElementById('cfg-platform').value} v ${document.getElementById('cfg-opp-platform').value}  opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
+  const fmtSel=document.getElementById('cfg-format').value;
+  const wingSel=document.getElementById('cfg-wing-platform').value;
+  const blueDesc=fmtSel==='2v1'
+    ? `2v1 ${document.getElementById('cfg-platform').value} + ${wingSel||document.getElementById('cfg-platform').value}`
+    : document.getElementById('cfg-platform').value;
+  addLog(`▶ Training: ${blueDesc} v ${document.getElementById('cfg-opp-platform').value}  opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
     batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine,
     platform:document.getElementById('cfg-platform').value||'F-16C',
-    opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C'}});
+    opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C',
+    format:fmtSel, wingman_platform:(fmtSel==='2v1'&&wingSel)||undefined}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
@@ -2081,12 +2137,13 @@ document.getElementById('btn-eval').onclick=()=>{
   const ckpt=document.getElementById('eval-ckpt').value.trim();
   const speed=parseFloat(document.getElementById('eval-speed').value)||3;
   const doctrine=document.getElementById('eval-doctrine').value;
-  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;
+  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k]; lastFrame=null;
   t3ClearTrails();
   addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok');
   send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,
-    opponent_platform:document.getElementById('eval-opp-platform').value||undefined}});
+    opponent_platform:document.getElementById('eval-opp-platform').value||undefined,
+    format:document.getElementById('eval-format').value||undefined}});
   send({cmd:'set_eval_speed',speed});
 };
 document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn');send({cmd:'stop_eval'})};
@@ -2376,7 +2433,7 @@ const T3 = {
   follow:'fit',        // 'fit' | 'blue' | 'red' | 'free'
   autoFit:true,
   showRings:true, showLabels:true, showTrails:true, showGrid:true,
-  showBlue:true, showRed:true, showMslBlue:true, showMslRed:true, showLinks:true,
+  showBlue:true, showRed:true, showWing:true, showMslBlue:true, showMslRed:true, showLinks:true,
   labels:{}, seen:new Set(),
   zx:1,                // altitude exaggeration (1/3/6) — see the ALT chip
 
@@ -2389,6 +2446,7 @@ const T3_TRAIL = 260;
 // readable. Horizontal geometry is never touched, and the chip shows the factor.
 const ZX = z => z*T3.zx;
 const COLB = 0x37c8ff, COLR = 0xff4d54;      // blufor / opfor
+const COLW = 0xa98bff;                        // 2v1: the blue wingman
 const DEG = 180/Math.PI;
 
 // ── init ───────────────────────────────────────────────────────────
@@ -2469,6 +2527,28 @@ function t3Grid(step, span, color, opacity, z){
   g.setAttribute('position', new THREE.Float32BufferAttribute(p,3));
   const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color,transparent:true,opacity}));
   l.position.z=z; T3.scn.add(l); return l;
+}
+
+// 2v1: the wingman's jet, trails and line of sight, made on the first 2v1 frame.
+function t3EnsureWing(){
+  if(T3.jet3) return;
+  T3.jet3 = t3MakeJet(COLW);
+  T3.tr3  = t3MakeTrail(COLW,0.95); T3.gt3 = t3MakeTrail(COLW,0.30);
+  T3.shadow3 = t3MakeShadow(); T3.stalk3 = t3MakeStalk(COLW);
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6),3));
+  T3.los2 = new THREE.Line(lg, new THREE.LineDashedMaterial(
+    {color:0xffffff,transparent:true,opacity:0.45,dashSize:900,gapSize:700,depthTest:false}));
+  T3.los2.renderOrder=3; T3.los2.frustumCulled=false; T3.scn.add(T3.los2);
+  const chip=document.querySelector('#t3-follow .t3chip[data-m="wing"]'); if(chip) chip.style.display='';
+  const lg2=document.getElementById('t3-lg-wing'); if(lg2) lg2.style.display='';
+}
+function t3Los(line, a, b, op){
+  const lp=line.geometry.attributes.position.array;
+  lp[0]=a[0];lp[1]=a[1];lp[2]=ZX(a[2]); lp[3]=b[0];lp[4]=b[1];lp[5]=ZX(b[2]);
+  line.geometry.attributes.position.needsUpdate=true;
+  line.computeLineDistances();
+  line.material.opacity=op;
 }
 
 // ── meshes ─────────────────────────────────────────────────────────
@@ -2611,11 +2691,11 @@ function t3TrailBuf(tr){
 }
 // redraw every trail after the exaggeration factor changes
 function t3RefreshTrails(){
-  [T3.tr1,T3.tr2,T3.gt1,T3.gt2].forEach(t=>{ if(t) t3TrailBuf(t); });
+  [T3.tr1,T3.tr2,T3.gt1,T3.gt2,T3.tr3,T3.gt3].forEach(t=>{ if(t) t3TrailBuf(t); });
   Object.values(T3.missiles).forEach(m=>{ if(m&&m.trail) t3TrailBuf(m.trail); });
 }
 function t3ClearTrails(){
-  [T3.tr1,T3.tr2,T3.gt1,T3.gt2].forEach(t=>{ if(t){t.pts=[];t.line.geometry.setDrawRange(0,0);} });
+  [T3.tr1,T3.tr2,T3.gt1,T3.gt2,T3.tr3,T3.gt3].forEach(t=>{ if(t){t.pts=[];t.line.geometry.setDrawRange(0,0);} });
   Object.keys(T3.missiles).forEach(id=>t3KillMsl(id));
   T3.fA=T3.fB=null;
 }
@@ -2646,7 +2726,7 @@ function t3Ring(ring,cx,cy,cz,r){
 // ── missiles ───────────────────────────────────────────────────────
 function t3GetMsl(id,owner){
   if(T3.missiles[id]) return T3.missiles[id];
-  const col = owner===1?0xffdd22:0xff5566;
+  const col = (owner===1||owner===3)?0xffdd22:0xff5566;   // blue team: lead 1, wingman 3
   const mesh = t3MakeMslMesh(col);
   const trail = t3MakeTrail(col,0.9);
   const stalk = t3MakeStalk(col);
@@ -2675,7 +2755,7 @@ function t3UpdateCam(){
 function t3SetFollow(mode){
   T3.follow = mode;
   T3.autoFit = (mode!=='free');
-  followAC = mode==='blue' ? 1 : mode==='red' ? 2 : null;   // legacy global
+  followAC = mode==='blue' ? 1 : mode==='red' ? 2 : null;   // legacy global (1v1 display)
   document.querySelectorAll('#t3-follow .t3chip').forEach(c=>
     c.classList.toggle('on', c.dataset.m===mode));
   t3Sync();
@@ -2770,10 +2850,11 @@ function t3Controls(el, box){
     const mx=e.clientX-rect.left, my=e.clientY-rect.top;
     const ss=p=>{ const c=new THREE.Vector3(p[0],p[1],p[2]).project(T3.cam);
                   return [(c.x*0.5+0.5)*rect.width, (-c.y*0.5+0.5)*rect.height]; };
-    const [x1,y1]=ss(f.own), [x2,y2]=ss(f.tgt);
-    const d1=Math.hypot(mx-x1,my-y1), d2=Math.hypot(mx-x2,my-y2), TH=46;
-    if(d1<TH && d1<=d2)      t3SetFollow(T3.follow==='blue'?'fit':'blue');
-    else if(d2<TH && d2<d1)  t3SetFollow(T3.follow==='red' ?'fit':'red');
+    const cands=[['blue',f.own],['red',f.tgt]];
+    if(f.wing && f.wing.alive) cands.push(['wing',f.wing.pos]);
+    let best=null, bd=46;                                  // px: how close a click must land
+    for(const [m,p] of cands){ const [x,y]=ss(p), d=Math.hypot(mx-x,my-y); if(d<bd){ bd=d; best=m; } }
+    if(best) t3SetFollow(T3.follow===best?'fit':best);
   });
 
   // touch: one finger orbits, two fingers pinch-zoom
@@ -2806,6 +2887,7 @@ function t3Controls(el, box){
     if(k==='1') t3SetFollow('blue');
     else if(k==='2') t3SetFollow('red');
     else if(k==='3') t3SetFollow('fit');
+    else if(k==='4' && T3.jet3) t3SetFollow('wing');
     else if(k==='0') t3SetFollow('free');
     else if(k==='t') t3Preset('top');
     else if(k==='s') t3Preset('side');
@@ -2831,6 +2913,7 @@ function t3BuildOverlay(box){
         <span class="t3lab">FOLLOW</span>
         <button class="t3chip on" data-m="fit">BOTH</button>
         <button class="t3chip blue" data-m="blue">BLUE</button>
+        <button class="t3chip wing" data-m="wing" style="display:none">WING</button>
         <button class="t3chip red"  data-m="red">RED</button>
         <button class="t3chip" data-m="free">FREE</button>
       </div>
@@ -2853,6 +2936,7 @@ function t3BuildOverlay(box){
       <div class="t3lgh" id="t3-lgh">LEGEND <span style="float:right;opacity:.9">hide &times;</span></div>
       <div style="font-size:11px;opacity:.6;letter-spacing:.5px;margin:-2px 0 3px">checkbox = show/hide on the 3D view</div>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showBlue"><i style="background:#37c8ff"></i>BLUE — the agent</label>
+      <label class="t3lgr ck" id="t3-lg-wing" style="display:none"><input type="checkbox" checked data-t3show="showWing"><i style="background:#a98bff"></i>WING — the agent's wingman (2 v 1)</label>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showRed"><i style="background:#ff4d54"></i>RED — bandit</label>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showMslBlue"><i style="background:#ffdd22"></i>Blue missile in flight</label>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showMslRed"><i style="background:#ff5566"></i>Red missile (inbound)</label>
@@ -2929,6 +3013,11 @@ function t3UpdateScene(f){
   t3Push(T3.tr2,f.tgt[0],f.tgt[1],f.tgt[2]);
   t3Push(T3.gt1,f.own[0],f.own[1],4);
   t3Push(T3.gt2,f.tgt[0],f.tgt[1],4);
+  if(f.wing){
+    t3EnsureWing();
+    const w=f.wing.pos;
+    t3Push(T3.tr3,w[0],w[1],w[2]); t3Push(T3.gt3,w[0],w[1],4);
+  }
   for(const m of (f.missiles||[])){
     if(m.state==='HIT'||m.state==='MISS') continue;
     t3Push(t3GetMsl(m.id,m.owner).trail, m.pos[0],m.pos[1],m.pos[2]);
@@ -2996,11 +3085,26 @@ function t3DrawFrame(A,B,t){
 
   t3Orient(T3.jet1, own[0],own[1],ZX(own[2]), psi,  theta,  phi,  jetS);
   t3Orient(T3.jet2, tgt[0],tgt[1],ZX(tgt[2]), psi_t,theta_t,phi_t,jetS);
+  // 2v1: the wingman; an aircraft that has been lost is drawn no more
+  const W2 = B.wing, wA = (A.wing||W2);
+  const wing = W2 ? P(wA.pos, W2.pos) : null;
+  const leadUp = B.own_alive!==false, wingUp = !!(W2 && W2.alive);
+  if(wing && T3.jet3){
+    t3Orient(T3.jet3, wing[0],wing[1],ZX(wing[2]), _alerp(wA.psi,W2.psi,t),
+             _alerp(wA.theta||0,W2.theta||0,t), _alerp(wA.phi||0,W2.phi||0,t), jetS);
+    T3.jet3.visible = T3.shadow3.visible = T3.stalk3.visible = T3.showWing && wingUp;
+    T3.tr3.line.visible = T3.gt3.line.visible = T3.showWing;
+    T3.shadow3.position.set(wing[0],wing[1],6); T3.shadow3.scale.setScalar(jetS*0.38);
+    t3Stalk(T3.stalk3, wing[0],wing[1],wing[2]);
+    T3.los2.visible = T3.showWing && T3.showRed && wingUp;
+    t3Los(T3.los2, wing, tgt, B.red_tgt===2 ? 0.75 : 0.25);
+  }
 
   // legend checkboxes: BLUE/RED gate the jet plus everything that belongs to
   // it — trail, ground track, shadow, altitude stalk.
   T3.jet1.visible = T3.tr1.line.visible = T3.gt1.line.visible
                    = T3.shadow1.visible = T3.stalk1.visible = T3.showBlue;
+  if(!leadUp) T3.jet1.visible = T3.shadow1.visible = T3.stalk1.visible = false;
   T3.jet2.visible = T3.tr2.line.visible = T3.gt2.line.visible
                    = T3.shadow2.visible = T3.stalk2.visible = T3.showRed;
 
@@ -3010,12 +3114,10 @@ function t3DrawFrame(A,B,t){
   t3Stalk(T3.stalk1, own[0],own[1],own[2]);
   t3Stalk(T3.stalk2, tgt[0],tgt[1],tgt[2]);
 
-  // line of sight — only means something with both ends actually on screen
-  T3.los.visible = T3.showBlue && T3.showRed;
-  const lp=T3.los.geometry.attributes.position.array;
-  lp[0]=own[0];lp[1]=own[1];lp[2]=ZX(own[2]); lp[3]=tgt[0];lp[4]=tgt[1];lp[5]=ZX(tgt[2]);
-  T3.los.geometry.attributes.position.needsUpdate=true;
-  T3.los.computeLineDistances();
+  // line of sight — only means something with both ends actually on screen.
+  // In 2v1 the line to the aircraft red is engaging is drawn brighter.
+  T3.los.visible = T3.showBlue && T3.showRed && leadUp;
+  t3Los(T3.los, own, tgt, W2 ? (B.red_tgt===1 ? 0.75 : 0.25) : 0.45);
 
   // envelope rings, drawn at each shooter's own altitude
   t3Ring(T3.rings.rmax,  own[0],own[1],own[2], sRmax);
@@ -3035,23 +3137,25 @@ function t3DrawFrame(A,B,t){
     const mpsi = Math.atan2(v[0],v[1]);                       // ENU → psi from north
     const mth  = Math.atan2(v[2]*T3.zx, Math.hypot(v[0],v[1]));
     t3Orient(mo.mesh, pos[0],pos[1],ZX(pos[2]), mpsi, mth, 0, mslS);
-    const hot = m.seeker_active ? 0x22ffdd : (m.owner===1?0xffdd22:0xff5566);
+    const blueTeam = m.owner===1 || m.owner===3;
+    const hot = m.seeker_active ? 0x22ffdd : (blueTeam?0xffdd22:0xff5566);
     mo.mesh.userData.mat.color.setHex(hot);
     mo.stalk.material.color.setHex(hot);
     t3Stalk(mo.stalk, pos[0],pos[1],pos[2]);
-    const showMsl = m.owner===1 ? T3.showMslBlue : T3.showMslRed;
+    const showMsl = blueTeam ? T3.showMslBlue : T3.showMslRed;
     mo.mesh.visible = mo.trail.line.visible = mo.stalk.visible = showMsl;
 
-    if(m.owner===2){ inbound++;
+    if(!blueTeam){ inbound++;
       if(m.tgo>0 && m.tgo<900 && (nearestTgo==null || m.tgo<nearestTgo)) nearestTgo=m.tgo; }
 
     // datalink support: while the missile is blind it is flying on BLUE's track.
     // Gated on showMsl too — a link dangling to a missile you've hidden looks
     // like a stray line, not a control.
-    if(T3.showLinks && showMsl && m.owner===1 && m.needs_support && !m.seeker_active && linkN<T3.links.length){
+    const src = m.owner===1 ? own : (m.owner===3 ? wing : null);   // the shooter supports its missile
+    if(T3.showLinks && showMsl && src && m.needs_support && !m.seeker_active && linkN<T3.links.length){
       const L=T3.links[linkN++];
       const p=L.geometry.attributes.position.array;
-      p[0]=own[0];p[1]=own[1];p[2]=ZX(own[2]); p[3]=pos[0];p[4]=pos[1];p[5]=ZX(pos[2]);
+      p[0]=src[0];p[1]=src[1];p[2]=ZX(src[2]); p[3]=pos[0];p[4]=pos[1];p[5]=ZX(pos[2]);
       L.geometry.attributes.position.needsUpdate=true; L.computeLineDistances();
       L.material.color.setHex(m.t_stale>1.8?0xff4d54:0xffb020);
       L.material.opacity = 0.55+0.45*Math.sin(performance.now()/180);
@@ -3059,7 +3163,7 @@ function t3DrawFrame(A,B,t){
     }
 
     if(T3.showLabels && showMsl){
-      const el=t3Label('m'+m.id, m.owner===1?'blue':'red');
+      const el=t3Label('m'+m.id, blueTeam?'blue':'red');
       // tgo reads 999 until the missile has a usable solution — don't print that
       const ttg = (m.tgo>0 && m.tgo<900) ? ' · TTG '+m.tgo.toFixed(0)+'s' : '';
       const phase = m.seeker_active ? 'PITBULL'
@@ -3079,19 +3183,28 @@ function t3DrawFrame(A,B,t){
   if(T3.showLabels){
     if(T3.showBlue){
       const l1=t3Label('ac1','blue');
-      l1.innerHTML = `<b>BLUE</b> ${U.altLbl(own[2])} · M${(B.mach||0).toFixed(2)}`
-                   + `<br><span class="sub">${(B.nz||1).toFixed(1)}G · ${B.wpn} msl</span>`;
+      l1.innerHTML = !leadUp ? `<b>LEAD</b> ✕ LOST`
+                   : `<b>${W2?'LEAD':'BLUE'}</b> ${U.altLbl(own[2])} · M${(B.mach||0).toFixed(2)}`
+                   + `<br><span class="sub">${(B.nz||1).toFixed(1)}G · ${B.wpn} msl${B.dl?' · on datalink':''}</span>`;
       t3PlaceLabel(l1, own[0],own[1],own[2], 16, -34);
+    }
+    if(W2 && T3.showWing){
+      const l3=t3Label('ac3','wing');
+      l3.innerHTML = !wingUp ? `<b>WING</b> ✕ LOST`
+                   : `<b>WING</b> ${U.altLbl(wing[2])} · M${(W2.mach||0).toFixed(2)}`
+                   + `<br><span class="sub">${(W2.nz||1).toFixed(1)}G · ${W2.wpn} msl${W2.dl?' · on datalink':''}</span>`;
+      t3PlaceLabel(l3, wing[0],wing[1],wing[2], 16, 10);   // below its jet: clear of the lead's in formation
     }
     if(T3.showRed){
       const l2=t3Label('ac2','red');
       l2.innerHTML = `<b>RED</b> ${U.altLbl(tgt[2])} · M${(B.mach_t||0).toFixed(2)}`
-                   + `<br><span class="sub">${(B.nz_t||1).toFixed(1)}G · ${B.wpn_t} msl</span>`;
+                   + `<br><span class="sub">${(B.nz_t||1).toFixed(1)}G · ${B.wpn_t} msl`
+                   + `${W2?' · engaging '+(B.red_tgt===1?'LEAD':'WING'):''}</span>`;
       t3PlaceLabel(l2, tgt[0],tgt[1],tgt[2], 16, -34);
     }
     // range read-out sitting on the LOS midpoint — only means something with
     // both ends actually on screen (matches T3.los.visible above)
-    if(T3.showBlue && T3.showRed){
+    if(T3.showBlue && T3.showRed && leadUp){
       const lr=t3Label('rng','mid');
       lr.textContent = U.dist(B.rng)+'  '+(B.clos>=0?'+':'')+U.spd(B.clos);
       t3PlaceLabel(lr,(own[0]+tgt[0])/2,(own[1]+tgt[1])/2,(own[2]+tgt[2])/2, 0, -14);
@@ -3122,9 +3235,15 @@ function t3DrawFrame(A,B,t){
   // ── camera target + auto-fit ──
   if(T3.follow==='blue')      T3.tgtWant.set(own[0],own[1],ZX(own[2]));
   else if(T3.follow==='red')  T3.tgtWant.set(tgt[0],tgt[1],ZX(tgt[2]));
+  else if(T3.follow==='wing' && wing) T3.tgtWant.set(wing[0],wing[1],ZX(wing[2]));
   else if(T3.follow==='fit'){
     let cx=(own[0]+tgt[0])/2, cy=(own[1]+tgt[1])/2, cz=ZX((own[2]+tgt[2])/2);
     let need=Math.hypot(tgt[0]-own[0],tgt[1]-own[1],ZX(tgt[2]-own[2]));
+    if(wing){                                           // 2v1: frame all three
+      cx=(own[0]+tgt[0]+wing[0])/3; cy=(own[1]+tgt[1]+wing[1])/3; cz=ZX((own[2]+tgt[2]+wing[2])/3);
+      need=0;
+      for(const q of [own,tgt,wing]) need=Math.max(need, 2*Math.hypot(q[0]-cx,q[1]-cy,ZX(q[2])-cz));
+    }
     for(const m of (B.missiles||[])){                 // keep missiles in frame too
       if(m.state==='HIT'||m.state==='MISS') continue;
       need=Math.max(need, 2*Math.hypot(m.pos[0]-cx,m.pos[1]-cy,ZX(m.pos[2])-cz));
@@ -3132,8 +3251,9 @@ function t3DrawFrame(A,B,t){
     T3.tgtWant.set(cx,cy,cz);
     if(T3.autoFit) T3.rWant=Math.max(2500,Math.min(300000,need*1.45+4000));
   }
-  if(T3.follow==='blue'||T3.follow==='red'){
-    if(T3.autoFit) T3.rWant=Math.max(2500,Math.min(300000,B.rng*0.85+5000));
+  if(T3.follow==='blue'||T3.follow==='red'||T3.follow==='wing'){
+    const r = T3.follow==='wing' && W2 ? W2.rng : B.rng;
+    if(T3.autoFit) T3.rWant=Math.max(2500,Math.min(300000,r*0.85+5000));
   }
 
   t3Chrome(B, inbound, nearestTgo);

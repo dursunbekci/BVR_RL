@@ -433,7 +433,10 @@ class TrainingManager:
             "--doctrine",   str(config.get("doctrine", "mixed")).lower(),
             "--platform",   str(config.get("platform") or "F-16C"),
             "--opponent-platform", str(config.get("opponent_platform") or "F-16C"),
+            "--format",     str(config.get("format") or "1v1"),
         ]
+        if config.get("format") == "2v1" and config.get("wingman_platform"):
+            cmd += ["--wingman-platform", str(config["wingman_platform"])]
         if config.get("resume"):
             # The GUI's dropdown sends a path relative to the model dir (as
             # listed by /models, e.g. "latest.zip" or "archive/best_..."),
@@ -567,6 +570,22 @@ class EvalRunner:
         self._stop_evt.set()
         HUB.set_status(evaluating=False, msg="Eval stopped")
 
+    def _run_team(self, config, model, privileged, opponent, scen, red_platform):
+        from bvr_team import TeamBvrEnv
+        from bvr_opponents import BvrOpponentType
+        if opponent == BvrOpponentType.SELF_PLAY:
+            raise RuntimeError("2v1 has no self-play opponent yet: choose a scripted one")
+        blue = (scen["platform"], scen.get("wingman_platform") or scen["platform"])
+        env = TeamBvrEnv(opponent_type=opponent, seed=config.get("seed", 0),
+                         privileged_critic=privileged, gamma_discount=0.997,
+                         doctrine=config.get("doctrine", "BALANCED"),
+                         blue_platforms=blue, red_platform=red_platform)
+        HUB.push({"type": "log", "msg": f"Eval 2v1: {blue[0]} + {blue[1]} v {red_platform}"
+                                        f" (one policy flies both blue aircraft)"})
+        HUB.set_status(evaluating=True,
+                       msg=f"Eval 2v1 vs {opponent.name}, {env._doctrine_cfg} doctrine")
+        _eval_team_loop(self, env, model, privileged, self._stop_evt)
+
     def _run(self, config: dict):
         try:
             from bvr_env import BvrEnv
@@ -614,6 +633,10 @@ class EvalRunner:
                 "opponent_platform": DEFAULT_PLATFORM}
             platform = scen["platform"]
             opp_platform = config.get("opponent_platform") or scen["opponent_platform"]
+            fmt = config.get("format") or scen.get("format", "1v1")
+            if fmt == "2v1":
+                self._run_team(config, model, privileged, opponent, scen, opp_platform)
+                return
             if opponent_name == "SELF_PLAY" and platform != opp_platform:
                 raise RuntimeError(f"SELF_PLAY needs both sides on one platform; this checkpoint "
                                    f"flies {platform} and the opponent {opp_platform}")
@@ -683,14 +706,94 @@ class EvalRunner:
             HUB.set_status(evaluating=False, msg=f"Eval error: {e}")
 
 
+def _eval_team_loop(runner, env, model, privileged, stop_evt):
+    """Evaluation episodes in 2v1: the checkpoint flies both blue aircraft."""
+    episode = 0
+    while not stop_evt.is_set():
+        obs, info = env.reset()
+        stackers = [FrameStacker(N_STACK) for _ in obs] if model is not None else None
+        sobs = [st.reset(o) for st, o in zip(stackers, obs)] if stackers else None
+        frames, ep_r = [], 0.0
+        infos = [{}]
+        while not stop_evt.is_set():
+            masks = env.action_masks()
+            if model is not None:
+                acts = [model.predict(sobs[k], deterministic=True, action_masks=masks[k])[0]
+                        for k in range(env.n_agents)]
+            else:
+                acts = []
+                for k in range(env.n_agents):
+                    a = env.action_space.sample(); a[-1] = 0
+                    acts.append(a)
+            t0 = time.perf_counter()
+            obs, r, term, trunc, infos = env.step(acts)
+            if stackers:
+                sobs = [st.update(o) for st, o in zip(stackers, obs)]
+            step_s = time.perf_counter() - t0
+            ep_r += float(np.mean(r))
+            frame = _build_team_frame(env, infos)
+            frame["ep"] = episode
+            frames.append(frame)
+            if len(frames) > RECORD_BUFFER_SIZE:
+                frames.pop(0)
+            HUB.push({"type": "telemetry", "data": frame})
+            with runner._speed_lock: spd = runner._speed
+            sleep_needed = (1.0 / spd) - step_s
+            if sleep_needed > 0.002:
+                time.sleep(sleep_needed)
+            if term or trunc:
+                break
+        fin = infos[0]
+        meta = {"episode": episode, "outcome": fin.get("terminal_outcome", "?"),
+                "reward": round(ep_r, 3), "shots": fin.get("shots_fired", 0),
+                "support_losses": fin.get("support_losses", 0),
+                "doctrine": fin.get("doctrine", ""), "blue_losses": fin.get("blue_losses", 0),
+                "bank_rev_per_min": round(60.0 * fin.get("bank_reversals", 0)
+                                          / max(fin.get("flight_time", 0.0), 1.0), 1)}
+        HUB.set_replay(list(frames), meta)
+        HUB.push({"type": "episode_end", "meta": meta})
+        episode += 1
+    env.close()
+
+
+def _pos(la, lo, alt):
+    import math
+    R=6_371_000.0; D=math.pi/180
+    x=(lo-35.0)*D*R*math.cos(39.0*D)
+    y=(la-39.0)*D*R
+    return [round(x,1), round(y,1), round(alt,1)]
+
+
+def _build_team_frame(env, infos: list) -> dict:
+    """
+    2v1 frame: the lead's 1v1 frame (built from fresh truth, so it stays
+    right after the lead is lost) plus the wingman and whom red engages.
+    """
+    w = env._world
+    lead, wing = env._obs
+    f = _build_frame(w.telemetry(1, env.RED), lead, infos[0])
+    sw = w.telemetry(2, env.RED)
+    f["fmt"] = "2v1"
+    f["own_alive"] = bool(lead._alive)
+    f["dl"] = int(lead._alive and lead._dl_used())
+    f["red_tgt"] = int(env._red_tgt)
+    f["blue_losses"] = len(env._lost)
+    f["wing"] = {
+        "pos":   _pos(sw.get("lat", 39), sw.get("lon", 35), sw.get("alt", 9000)),
+        "psi":   round(sw.get("psi", 0), 4), "theta": round(sw.get("theta", 0), 4),
+        "phi":   round(sw.get("phi", 0), 4), "alt": round(sw.get("alt", 9000), 1),
+        "speed": round(sw.get("speed", 0), 1), "mach": round(sw.get("mach", 0), 3),
+        "nz":    round(sw.get("nz", 1), 2), "wpn": int(sw.get("wpn_remaining", 0)),
+        "rng":   round(sw.get("range", 0), 1),
+        "alive": bool(wing._alive),
+        "track": int(wing._trk_state()) if wing._alive else 0,
+        "dl":    int(wing._alive and wing._dl_used()),
+    }
+    return f
+
+
 def _build_frame(s: dict, env, info: dict) -> dict:
     """Compact frame for the WebSocket stream — only what the display needs."""
-    def _pos(la, lo, alt):
-        import math
-        R=6_371_000.0; D=math.pi/180
-        x=(lo-35.0)*D*R*math.cos(39.0*D)
-        y=(la-39.0)*D*R
-        return [round(x,1), round(y,1), round(alt,1)]
 
     own = _pos(s.get("lat",39),s.get("lon",35),s.get("alt",9000))
     tgt = _pos(s.get("lat_t",39),s.get("lon_t",35),s.get("alt_t",9000))
@@ -714,7 +817,7 @@ def _build_frame(s: dict, env, info: dict) -> dict:
             "rng_to_target":  m.get("rng_to_target",0),
         })
 
-    est = env._track.estimate()
+    est = env._est()          # the track the aircraft fights on (its own, or its wingman's)
     rmax,rnez = env._own_envelope(est)
     rmxt,rnzt = env._threat_envelope(est)
     rwr = s.get("rwr",{}) or {}
@@ -748,7 +851,7 @@ def _build_frame(s: dict, env, info: dict) -> dict:
         "fuel":   round(s.get("fuel_frac",1),3),
         "wpn":    int(s.get("wpn_remaining",4)),
         "wpn_t":  int(s.get("wpn_remaining_t",4)),
-        "track":  env._track.state,
+        "track":  env._trk_state(),
         "pos_sig":round(est["pos_sigma"],0) if est["valid"] else 9999,
         "trk_age":round(est["age"],1),
         "rmax":   round(rmax,0),"rnez": round(rnez,0),
