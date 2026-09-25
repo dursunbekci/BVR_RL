@@ -574,6 +574,85 @@ def test_compat_widening():
         (np.abs(la - lb).max(), np.abs(va - vb).max())
     print("  checkpoint widening ......... OK")
 
+
+def test_team_datalink():
+    """2v1: a blue aircraft whose own radar never tracks fires and kills on its wingman's track."""
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+    e = TeamBvrEnv(opponent_type=T.STRAIGHT, seed=11, doctrine="AGGRESSIVE")
+    own, kills, rewards = 0, 0, []
+    for ep in range(3):
+        e.reset()
+        e._obs[0]._radar.max_range = 1.0
+        done = False
+        while not done:
+            acts = [[0, 2, 2, int(k == 0 and o._alive and o._can_fire())] for k, o in enumerate(e._obs)]
+            _, r, t, tr, infos = e.step(acts)
+            own += e._obs[0]._track.state == TrackState.TRACK
+            done = t or tr
+        if infos[0]["killer"] == 1:
+            kills += 1
+            rewards.append(r)
+    assert own == 0 and kills >= 1, (own, kills)
+    # a kill is a team reward: both agents receive it on the same step
+    assert all(min(r) > 0.5 for r in rewards), rewards
+    print(f"  2v1 datalink ................ OK  ({kills}/3 kills by the blind aircraft)")
+
+
+def test_team_losses():
+    """2v1: a lost aircraft keeps a slot with one legal action; red then engages the other."""
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_env import ACTION_NVEC
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=5, doctrine="AGGRESSIVE")
+    seen_loss = False
+    for ep in range(4):
+        obs, _ = e.reset()
+        targets, done = set(), False
+        while not done:
+            lost_before = [not o._alive for o in e._obs]
+            obs, r, t, tr, infos = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            targets.add(e._red_tgt)
+            for k, o in enumerate(e._obs):
+                if not o._alive:
+                    seen_loss = True
+                    assert e.action_masks()[k].sum() == len(ACTION_NVEC)
+                    assert not obs[k]["obs"].any()
+                if lost_before[k]:
+                    assert infos[k]["shaping"] == 0.0     # no shaping once lost
+            done = t or tr
+        assert targets == {1, 2} or infos[0]["blue_losses"] == 0
+    assert seen_loss
+    print("  2v1 losses .................. OK")
+
+
+def test_team_vec_env():
+    """2v1 as SB3 slots: two slots per fight, one mask row each, both end and reset together."""
+    from bvr_team import TeamBvrEnv
+    from bvr_team_vec import TeamVecEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_env import OBS_DIM, ACTION_NVEC
+    vec = TeamVecEnv([lambda: TeamBvrEnv(opponent_type=T.STRAIGHT, seed=2)], in_process=True)
+    assert vec.num_envs == 2 and vec.has_attr("action_masks")
+    obs = vec.reset()
+    assert obs["obs"].shape == (2, OBS_DIM)
+    masks = np.stack(vec.env_method("action_masks"))
+    assert masks.shape == (2, sum(ACTION_NVEC))
+    vec.set_attr("_opponent_type", T.EVASIVE)
+    assert vec.get_attr("_opponent_type") == [T.EVASIVE, T.EVASIVE]
+    for _ in range(400):
+        obs, r, dones, infos = vec.step(np.array([[0, 2, 2, 0], [0, 2, 2, 0]]))
+        assert r.shape == (2,) and dones[0] == dones[1]
+        if dones[0]:
+            assert all("terminal_observation" in i for i in infos)
+            assert "terminal_outcome" in infos[0] and "terminal_outcome" not in infos[1]
+            break
+    else:
+        raise AssertionError("no episode ended in 400 steps")
+    vec.close()
+    print("  2v1 vec env ................. OK")
+
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
 
@@ -601,6 +680,9 @@ if __name__ == "__main__":
         ("uncalibrated refused",    test_library_uncalibrated_missile_refused),
         ("performance cards",       test_perf_card_builtins),
         ("checkpoint widening",     test_compat_widening),
+        ("2v1 datalink",            test_team_datalink),
+        ("2v1 losses",              test_team_losses),
+        ("2v1 vec env",             test_team_vec_env),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

@@ -490,15 +490,22 @@ DEFAULT_PLATFORM = "F-16C"
 
 
 # ── scenarios recorded in checkpoints ─────────────────────────────────
-def scenario_record(platform_id: str, opponent_platform_id: str) -> dict:
+def scenario_record(platform_id: str, opponent_platform_id: str,
+                    wingman_platform_id: str = None, fmt: str = "1v1") -> dict:
     """
-    What a model is trained with: both platforms and every library item they
-    use, in full. Stored on the model (model.bvr_scenario), so it is saved
-    inside each checkpoint and survives later edits to the library.
+    What a model is trained with: the format, every platform and every
+    library item they use, in full. Stored on the model (model.bvr_scenario),
+    so it is saved inside each checkpoint and survives later edits to the
+    library. In 2v1, "platform" is the lead's and "wingman_platform" the
+    wingman's; "opponent_platform" is always the enemy's.
     """
-    rec = {"platform": platform_id, "opponent_platform": opponent_platform_id,
+    rec = {"format": fmt, "platform": platform_id, "opponent_platform": opponent_platform_id,
            "fingerprints": {}, "items": {}}
-    for side, pid in (("platform", platform_id), ("opponent_platform", opponent_platform_id)):
+    sides = [("platform", platform_id), ("opponent_platform", opponent_platform_id)]
+    if wingman_platform_id is not None:
+        rec["wingman_platform"] = wingman_platform_id
+        sides.append(("wingman_platform", wingman_platform_id))
+    for side, pid in sides:
         p = load_platform(pid)
         rec["items"][side] = copy.deepcopy(p.items)
         rec["fingerprints"][side] = {k: fingerprint(v) for k, v in p.items.items()}
@@ -509,8 +516,9 @@ def scenario_of(model) -> dict:
     """A checkpoint's scenario; checkpoints from before the library were F-16C v F-16C."""
     rec = getattr(model, "bvr_scenario", None)
     if isinstance(rec, dict) and rec.get("platform"):
-        return rec
-    return {"platform": DEFAULT_PLATFORM, "opponent_platform": DEFAULT_PLATFORM, "legacy": True}
+        return {"format": "1v1", **rec}
+    return {"format": "1v1", "platform": DEFAULT_PLATFORM, "opponent_platform": DEFAULT_PLATFORM,
+            "legacy": True}
 
 
 def scenario_drift(rec: dict) -> list:

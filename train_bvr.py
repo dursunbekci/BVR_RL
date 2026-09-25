@@ -1,6 +1,6 @@
 """
-train_bvr.py  —  MaskablePPO training for 1v1 BVR
-=================================================
+train_bvr.py  —  MaskablePPO training for 1v1 and 2v1 BVR
+=========================================================
 
     pip install sb3-contrib
 
@@ -10,6 +10,16 @@ train_bvr.py  —  MaskablePPO training for 1v1 BVR
     python train_bvr.py --n-envs 8                 # parallel environments
     python train_bvr.py --platform GENERIC-UCAV --opponent-platform F-16C
                                                    # library platforms (library/)
+    python train_bvr.py --format 2v1 --platform GENERIC-UCAV --opponent-platform F-16C
+                                                   # two agents (one shared policy) v one
+    python train_bvr.py --format 2v1 --resume models_bvr/archive/best_ADAPTIVE_SHOOTER_0.700
+                                                   # warm start 2v1 from a 1v1 checkpoint
+
+2v1 (bvr_team): both blue aircraft are flown by the same policy, each on its
+own observation, with their radar tracks shared over a datalink; red is the
+scripted curriculum opponent (self-play is 1v1 only for now). --platform is
+the lead's aircraft, --wingman-platform the wingman's (default: the same).
+With --n-envs N there are N fights and 2N agent slots.
 
 TensorBoard:
     bvr/win_rate            KILL fraction over last 50 TERMINAL episodes
@@ -26,6 +36,8 @@ TensorBoard:
     bvr/bank_rev_per_min    wing-rocking: bank reversals per minute of flight
     bvr/<DOCTRINE>_shots    shots per episode under each missile doctrine
     bvr/<DOCTRINE>_pk       (with --doctrine mixed, they should separate)
+    bvr/blue_losses_per_ep  2v1: blue aircraft lost per episode (0-2). MUTUAL_KILL
+                            is red killed at the cost of a blue aircraft
 
 Win rate is computed over TERMINAL episode outcomes only. Per-step outcome
 counting dilutes it by ~the episode length and makes the curriculum advance
@@ -54,6 +66,8 @@ from bvr_library import (DEFAULT_PLATFORM, LibraryError, load_platform, scenario
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
 from bvr_selfplay import snapshot as selfplay_snapshot
+from bvr_team import TeamBvrEnv
+from bvr_team_vec import TeamVecEnv
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -103,8 +117,11 @@ SELFPLAY_SNAPSHOT_STEPS = 250_000
 class BvrCallback(BaseCallback):
 
     def __init__(self, vec_env, opponent_type, save_dir="models_bvr",
-                 auto_curriculum=True, selfplay_pool=None, allow_selfplay=True, verbose=1):
+                 auto_curriculum=True, selfplay_pool=None, allow_selfplay=True,
+                 no_selfplay_reason="the two sides fly different platforms, so self-play "
+                                    "does not apply", verbose=1):
         super().__init__(verbose)
+        self.no_selfplay_reason = no_selfplay_reason
         # False when the two sides fly different platforms: a snapshot of the
         # agent was trained on the agent's platform and cannot fly the other.
         self.allow_selfplay = allow_selfplay
@@ -140,6 +157,8 @@ class BvrCallback(BaseCallback):
         self.doctrine_eps = deque(maxlen=150)
         # (bank reversals, seconds flown) per episode.
         self.bank = deque(maxlen=50)
+        # 2v1: blue aircraft lost per episode.
+        self.blue_losses = deque(maxlen=50)
         os.makedirs(save_dir, exist_ok=True)
 
     def _on_step(self) -> bool:
@@ -170,6 +189,8 @@ class BvrCallback(BaseCallback):
                                       int(info.get("shots_fired", 0))))
             self.bank.append((int(info.get("bank_reversals", 0)),
                               float(info.get("flight_time", 0.0))))
+            if "blue_losses" in info:
+                self.blue_losses.append(int(info["blue_losses"]))
             for lg in info.get("launch_log", []):
                 self.launch_rngs.append(lg["range_true"] if lg["range_true"] > 0 else lg["range_est"])
                 self.launch_ratios.append(lg["r_over_rmax"])
@@ -226,6 +247,9 @@ class BvrCallback(BaseCallback):
         flown = sum(t for _, t in self.bank)
         bank_rpm = 60.0 * sum(r for r, _ in self.bank) / flown if flown > 0 else 0.0
         rec("bvr/bank_rev_per_min", bank_rpm)
+        losses_ep = float(np.mean(self.blue_losses)) if self.blue_losses else None
+        if losses_ep is not None:
+            rec("bvr/blue_losses_per_ep", losses_ep)
         doctrine = {}
         for d in DOCTRINES:
             eps = [(o, sh) for dd, o, sh in self.doctrine_eps if dd == d]
@@ -250,7 +274,8 @@ class BvrCallback(BaseCallback):
                   f"win {win_rate:5.1%} loss {losses/n:5.1%} mut {mutual/n:5.1%} "
                   f"to {timeouts/n:5.1%} crash {crashes/n:5.1%} bcrash {bandit_crashes/n:5.1%} | "
                   f"Pk {(kills+mutual)/total_shots:4.2f} | "
-                  f"shots/ep {total_shots/n:4.2f} | rev/min {bank_rpm:4.1f}{split}{dline}")
+                  f"shots/ep {total_shots/n:4.2f} | rev/min {bank_rpm:4.1f}"
+                  f"{f' | lost/ep {losses_ep:4.2f}' if losses_ep is not None else ''}{split}{dline}")
 
         # Write metrics for the GUI. Appended to a rolling history list so
         # the browser can draw trend charts without accumulating unbounded data.
@@ -285,6 +310,7 @@ class BvrCallback(BaseCallback):
                 "term_share":    {k: round(v/term_total, 4) if term_total > 0 else 0.0
                                   for k, v in term_mean.items()},
                 "bank_rev_per_min": round(bank_rpm, 2),
+                "blue_losses_per_ep": round(losses_ep, 3) if losses_ep is not None else None,
                 "doctrine":      doctrine,
                 "history":       hist,
                 "steps_done":    int(self.model.num_timesteps),
@@ -315,8 +341,7 @@ class BvrCallback(BaseCallback):
             return
         if nxt == BvrOpponentType.SELF_PLAY and not self.allow_selfplay:
             if not getattr(self, "_told_no_selfplay", False):
-                print("[bvr] curriculum ends at ADAPTIVE_SHOOTER: the two sides fly different "
-                      "platforms, so self-play does not apply")
+                print(f"[bvr] curriculum ends at ADAPTIVE_SHOOTER: {self.no_selfplay_reason}")
                 self._told_no_selfplay = True
             return
         self.model.save(os.path.join(self.save_dir, "archive",
@@ -334,6 +359,7 @@ class BvrCallback(BaseCallback):
         self.shots.clear()
         self.opp_kinds.clear()
         self.doctrine_eps.clear()
+        self.blue_losses.clear()
         self.stage_episodes = 0
         self.best_win = -1.0
 
@@ -355,6 +381,16 @@ def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfpl
                       envelope_table=envelope_table,
                       selfplay_pool=selfplay_pool, doctrine=doctrine,
                       platform=platform, opponent_platform=opponent_platform)
+    return _init
+
+
+def make_team_env(idx, opponent, seed, privileged, envelope_table, gamma, doctrine,
+                  blue_platforms, red_platform):
+    def _init():
+        return TeamBvrEnv(opponent_type=opponent, gamma_discount=gamma, seed=seed + idx,
+                          instance_id=idx, privileged_critic=privileged,
+                          envelope_table=envelope_table, doctrine=doctrine,
+                          blue_platforms=blue_platforms, red_platform=red_platform)
     return _init
 
 
@@ -383,6 +419,10 @@ def main():
                     help="library platform the agent flies (see library/)")
     ap.add_argument("--opponent-platform", default=DEFAULT_PLATFORM,
                     help="library platform the opponent flies")
+    ap.add_argument("--format", default="1v1", choices=["1v1", "2v1"],
+                    help="1v1, or 2v1: two agents on one shared policy against one opponent")
+    ap.add_argument("--wingman-platform", default=None,
+                    help="2v1: the wingman's platform (default: the same as --platform)")
     ap.add_argument("--envelope-table", type=str, default="library",
                     help="'library' (default): each missile's calibrated table from "
                          "library/envelopes; or a path to one table used for every missile")
@@ -394,22 +434,34 @@ def main():
                  f"{', '.join(o.name.lower() for o in CURRICULUM)}")
     privileged = not args.no_privileged
 
-    # Resolve both platforms now, so a missing item, an invalid value or an
+    team = args.format == "2v1"
+    wingman = (args.wingman_platform or args.platform) if team else None
+    if args.wingman_platform and not team:
+        ap.error("--wingman-platform needs --format 2v1")
+
+    # Resolve every platform now, so a missing item, an invalid value or an
     # uncalibrated missile stops the run here with a clear message.
     try:
-        for pid in (args.platform, args.opponent_platform):
-            load_platform(pid)
+        for pid in (args.platform, args.opponent_platform, wingman):
+            if pid:
+                load_platform(pid)
         from bvr_env import BvrEnv as _probe
-        _probe(opponent_type=BvrOpponentType.STRAIGHT, platform=args.platform,
-               opponent_platform=args.opponent_platform, envelope_table=args.envelope_table)
+        for pid in {args.platform, wingman} - {None}:
+            _probe(opponent_type=BvrOpponentType.STRAIGHT, platform=pid,
+                   opponent_platform=args.opponent_platform, envelope_table=args.envelope_table)
     except LibraryError as e:
         ap.error(str(e))
     heterogeneous = args.platform != args.opponent_platform
     if heterogeneous and opponent == BvrOpponentType.SELF_PLAY:
         ap.error(f"self-play needs both sides on the same platform (here {args.platform} v "
                  f"{args.opponent_platform}): a snapshot of the agent cannot fly the other side")
+    if team and opponent == BvrOpponentType.SELF_PLAY:
+        ap.error("2v1 has no self-play stage yet: choose a scripted opponent")
     envelope_table = args.envelope_table
-    print(f"[bvr] platforms: agent {args.platform} v opponent {args.opponent_platform}")
+    if team:
+        print(f"[bvr] 2v1: agents {args.platform} + {wingman} v opponent {args.opponent_platform}")
+    else:
+        print(f"[bvr] platforms: agent {args.platform} v opponent {args.opponent_platform}")
 
     # gamma MUST match the value PPO trains with (passed below via kwargs) —
     # potential-based shaping (bvr_env._potential / step()'s `gamma*phi -
@@ -418,10 +470,16 @@ def main():
     # PPO_KWARGS["gamma"] here, the module DEFAULT, so a --gamma override on
     # the CLI silently desynced the two and broke that guarantee.
     selfplay_pool = os.path.join(args.save_dir, "selfplay_pool")
-    fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
-                    selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform)
-           for i in range(args.n_envs)]
-    vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
+    if team:
+        fns = [make_team_env(i, opponent, args.seed, privileged, envelope_table, args.gamma,
+                             args.doctrine.upper(), (args.platform, wingman), args.opponent_platform)
+               for i in range(args.n_envs)]
+        vec = TeamVecEnv(fns, in_process=(args.n_envs == 1))
+    else:
+        fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
+                        selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform)
+               for i in range(args.n_envs)]
+        vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
     # VecFrameStack over a Dict space stacks every sub-key, which is what we
     # want — the critic benefits from privileged history too.
@@ -445,16 +503,19 @@ def main():
             k: v for k, v in kwargs.items() if k not in ("policy_kwargs",)})
         print(f"[bvr] resumed from {args.resume}")
         prev = scenario_of(model)
-        if prev["platform"] != args.platform or prev["opponent_platform"] != args.opponent_platform:
-            print(f"[bvr] NOTE: this checkpoint was trained as {prev['platform']} v "
-                  f"{prev['opponent_platform']}; continuing as {args.platform} v "
-                  f"{args.opponent_platform} (a warm start, not a continuation)")
+        was = (prev["format"], prev["platform"], prev.get("wingman_platform"), prev["opponent_platform"])
+        now = (args.format, args.platform, wingman, args.opponent_platform)
+        if was != now:
+            desc = lambda f, p, w, o: f"{f} {p}{' + ' + w if w else ''} v {o}"
+            print(f"[bvr] NOTE: this checkpoint was trained as {desc(*was)}; continuing as "
+                  f"{desc(*now)} (a warm start, not a continuation)")
         for msg in scenario_drift(prev):
             print(f"[bvr] NOTE: {msg}")
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
     # Saved inside every checkpoint this run writes, self-play snapshots included.
-    model.bvr_scenario = scenario_record(args.platform, args.opponent_platform)
+    model.bvr_scenario = scenario_record(args.platform, args.opponent_platform,
+                                         wingman_platform_id=wingman, fmt=args.format)
 
     if opponent == BvrOpponentType.SELF_PLAY:
         # learn() resets every env before any callback runs, and a SELF_PLAY
@@ -462,7 +523,9 @@ def main():
         print(f"[bvr] self-play snapshot -> {selfplay_snapshot(model, selfplay_pool)}")
 
     cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
-                     auto_curriculum=not args.no_curriculum, allow_selfplay=not heterogeneous)
+                     auto_curriculum=not args.no_curriculum,
+                     allow_selfplay=not (heterogeneous or team),
+                     **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
     failure = None
     try:
