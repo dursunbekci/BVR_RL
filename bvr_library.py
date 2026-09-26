@@ -220,6 +220,26 @@ def list_items(kind: str = None) -> list:
     return out
 
 
+def list_problems() -> list:
+    """Why list_items() may be missing something, as readable strings.
+
+    list_items() skips unreadable files so one bad file cannot empty the
+    library; this reports what it skipped and any missing folder, so the GUI
+    can say why a list is empty instead of showing nothing.
+    """
+    out = []
+    for k in KINDS:
+        if not (BUILTIN_DIR / k).is_dir():
+            out.append(f"missing folder {BUILTIN_DIR / k}")
+        for root in (BUILTIN_DIR, USER_DIR):
+            for f in sorted((root / k).glob("*.json")):
+                try:
+                    json.loads(f.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as e:
+                    out.append(f"unreadable {f.relative_to(LIB_DIR)}: {e}")
+    return out
+
+
 def get_item(kind: str, item_id: str) -> dict:
     if kind not in KINDS:
         raise LibraryError(f"unknown kind {kind!r}")

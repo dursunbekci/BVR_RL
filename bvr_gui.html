@@ -53,7 +53,19 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 .ts-chart .ch-tip{position:absolute;pointer-events:none;background:#0d1a2b;border:1px solid var(--border);
           padding:4px 8px;font-size:12px;color:var(--text);white-space:nowrap;display:none;line-height:1.5;z-index:2}
 .ts-chart .ch-tip b{color:var(--bright);font-weight:normal}
-#train-log-lines{max-height:240px;overflow-y:auto;font-size:12px;line-height:1.5}
+#train-log-lines{height:260px;overflow-y:auto;font-size:12px;line-height:1.5;
+                 scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+#train-log-card .badge{margin-left:0}
+#run-info{font-size:12px;line-height:1.5}
+#run-info .run-kv{display:grid;grid-template-columns:auto 1fr;column-gap:10px;row-gap:1px}
+#run-info .run-kv span:nth-child(odd){color:var(--muted);letter-spacing:1px;font-size:11px;padding-top:1px}
+#run-info .run-kv span:nth-child(even){color:var(--bright);overflow-wrap:anywhere}
+#run-info .run-notes{margin-top:8px;border-top:1px solid var(--border);padding-top:6px}
+#run-info .run-notes div{padding:1px 0;color:var(--text);overflow-wrap:anywhere}
+#run-info .run-notes div.warn{color:var(--amber)}
+#code-warn{display:none;border:1px solid var(--red);background:#1a0808;color:#ffb3a8;
+           padding:8px 12px;font-size:12px;line-height:1.5}
+#code-warn b{color:#ffd4cc}
 #lib-list{width:290px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
           padding:8px;background:var(--panel)}
 #lib-list h4{font-size:11px;letter-spacing:2px;color:#c79bff;margin:10px 0 4px}
@@ -686,9 +698,25 @@ select option{background:#050810}
       </div>
     </div>
 
-    <!-- TRAINING PROGRESS -->
+    <!-- CURRENT RUN: what the running (or last) trainer was launched with -->
+    <div class="section" id="sec-run">
+      <div class="sec-head" onclick="toggle(this)">▶ CURRENT RUN<span>▲</span></div>
+      <div class="sec-body">
+        <div class="field-label" style="margin-bottom:4px">
+          <span id="run-state">NO RUN YET</span>
+          <button class="help-btn" onclick="help(this,'CURRENT RUN',
+            'The settings the running (or most recent) training run was started with, and what the trainer reported when it started: the platforms it loaded, the checkpoint it resumed from, any note that a resume is a warm start, and its curriculum plan.
+
+These stay here for the whole run instead of scrolling out of the log. They are the settings as launched: changing the configuration above does not affect a running trainer.
+
+CODE is the checked-out commit of the repository. Files marked as modified differ from that commit; they are what training actually runs, so check them if results look wrong.')">?</button>
+        </div>
+        <div id="run-info"><div style="color:var(--muted)">Start a run above; its settings and startup notes appear here.</div></div>
+      </div>
+    </div>
   </div>
   <div id="train-dash">
+    <div id="code-warn"></div>
     <div class="dash-row">
       <div class="dash-card" style="flex:2">
         <div style="font-size:12px;letter-spacing:2px;color:var(--bright);font-weight:bold;margin-bottom:4px">CURRICULUM STAGE</div>
@@ -854,9 +882,15 @@ select option{background:#050810}
         <div style="font-size:13px;line-height:1.7;color:var(--bright)" id="kv-doc">—</div>
       </div>
     </div>
-    <div class="dash-card">
-      <div class="dash-head"><span class="dash-title">LOG</span><span class="dash-sub" style="margin:0 0 0 8px">the trainer's output (also on the WATCH tab)</span></div>
-      <div id="train-log-lines"></div>
+    <div class="dash-card" id="train-log-card">
+      <div class="dash-head" style="gap:8px;flex-wrap:wrap">
+        <span class="dash-title">TRAINING LOG</span>
+        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
+        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
+        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
+        <span class="dash-sub" style="margin:0 0 0 auto">trainer, cross-play, library and calibration</span>
+      </div>
+      <div id="train-log-lines"><div class="log-info">Waiting for training to start...</div></div>
     </div>
   </div>
 </div>
@@ -889,16 +923,13 @@ select option{background:#050810}
     <!-- LOG -->
     <div class="panel" id="log-bar">
       <div id="log-header">
-        <span>LOG</span>
-        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
-        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
-        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
+        <span>EVAL LOG</span>
         <button class="btn" id="btn-decisions"
           style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
         <button class="ph-toggle" style="margin-left:auto" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
       </div>
       <div id="log-lines">
-        <div class="log-info">Waiting for training to start...</div>
+        <div class="log-info">Evaluation output appears here.</div>
       </div>
     </div>
   </div>
@@ -1063,7 +1094,7 @@ let ws, wsRetry = 0;
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen  = () => { document.getElementById('ws-dot').style.color='var(--green)'; wsRetry=0;
-                       addLog('[status] Connected.','log-info'); };
+                       addLog('[status] Connected.','log-info','both'); };
   ws.onclose = () => { document.getElementById('ws-dot').style.color='var(--red)';
                        setTimeout(connect, Math.min(5000, 500*++wsRetry)); };
   ws.onmessage = e => { try { handle(JSON.parse(e.data)); } catch(x) { console.warn(x); } };
@@ -1129,7 +1160,7 @@ function handle(m) {
   if(m.type==='status')    setState(m);
   if(m.type==='telemetry') handleFrame(m.data);
   if(m.type==='metrics')   handleMetrics(m.data);
-  if(m.type==='log')       handleLog(m.msg);
+  if(m.type==='log')       handleLog(m.msg, m.src);
   if(m.type==='episode_end') onEpEnd(m.meta);
   if(m.type==='crossplay_progress') xpProgress(m);
   if(m.type==='crossplay_done') { xpLoadResults(); refreshModelList(); }
@@ -1139,7 +1170,7 @@ function handle(m) {
 // Training (a subprocess) and eval (a thread in the server) are independent
 // and may run at once, so the server sends a flag for each rather than one
 // state word. appState stays as the derived label the progress/ETA code reads.
-let isTraining=false, isEval=false, isXplay=false;
+let isTraining=false, isEval=false, isXplay=false, lastStatusMsg=null;
 function setState(st) {
   const wasTraining=isTraining, wasEval=isEval;
   isTraining = !!st.training;
@@ -1155,7 +1186,15 @@ function setState(st) {
   if(isXplay) { txt = (txt==='IDLE' ? '' : txt+' + ') + 'CROSS-PLAY'; if(cls==='idle') cls='eval'; }
   p.className = 'pill '+cls; p.textContent = txt;
 
-  if(st.msg) addLog('[status] '+st.msg, 'log-info');
+  // Every status push repeats the last message; log it only when it changes,
+  // in the log of whichever activity it is about.
+  if(st.msg && st.msg!==lastStatusMsg) {
+    lastStatusMsg=st.msg;
+    addLog('[status] '+st.msg, 'log-info', /^eval/i.test(st.msg) ? 'watch' : 'train');
+  }
+  if('run' in st) { RUN=st.run; }
+  if('code' in st) { CODE=st.code; renderCodeWarn(); }
+  renderRun();
   document.getElementById('btn-train').style.display      = isTraining ? 'none' : '';
   document.getElementById('btn-stop-train').style.display = isTraining ? ''     : 'none';
   document.getElementById('btn-eval').style.display       = isEval    ? 'none' : '';
@@ -1342,8 +1381,24 @@ function libConfirmLeave() {
   libSetDirty(false); return true;
 }
 
+// Why the platform lists are empty, if they are; shown under ENGAGEMENT.
+let LIB_ERR=null;
 async function loadLibrary() {
-  try { LIB = await (await fetch('/library')).json(); } catch (e) { return; }
+  let d;
+  try {
+    const r = await fetch('/library');
+    d = await r.json();
+    if (!r.ok || d.error || !Array.isArray(d.items))
+      throw new Error(d.error || `HTTP ${r.status}`);
+  } catch (e) {
+    LIB_ERR = `The library could not be read from the server (${e.message}). `
+      + `See the server console for the error; a stale or edited bvr_library.py is a common cause.`;
+    addLog('Library: '+LIB_ERR, 'log-err');
+    refreshPlatformSelects();
+    return;
+  }
+  LIB = d; LIB_ERR = null;
+  for (const p of (LIB.problems || [])) addLog('Library: '+p, 'log-warn');
   const box = document.getElementById('lib-list');
   box.innerHTML = Object.keys(KIND_TITLE).map(k => {
     const items = LIB.items.filter(i => i.kind === k);
@@ -1359,12 +1414,19 @@ async function loadLibrary() {
 }
 
 function refreshPlatformSelects() {
-  if (!LIB) return;
-  const plats = LIB.items.filter(i => i.kind === 'platform');
+  const plats = LIB ? LIB.items.filter(i => i.kind === 'platform') : [];
+  if (LIB && !plats.length && !LIB_ERR)
+    LIB_ERR = `No platforms found in ${LIB.library_dir || 'the library folder'}/builtin/platform or user/platform.`
+      + ((LIB.problems||[]).length ? ' Problems: ' + LIB.problems.join('; ') : '');
   const fill = (id, keepBlank, dflt) => {
     const el = document.getElementById(id); if (!el) return;
+    if (!plats.length) {
+      // Say so in the list itself rather than showing an empty dropdown.
+      if (!keepBlank) el.innerHTML = '<option value="" disabled selected>— no platforms found —</option>';
+      return;
+    }
     const prev = el.value;
-    const blank = keepBlank ? el.options[0].outerHTML : '';
+    const blank = keepBlank && el.options.length && el.options[0].value === '' ? el.options[0].outerHTML : '';
     el.innerHTML = blank + plats.map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('');
     el.value = plats.some(p => p.id === prev) || (keepBlank && prev === '') ? prev : (dflt || '');
   };
@@ -1383,7 +1445,10 @@ function engageCheck() {
   const team = document.getElementById('cfg-format').value === '2v1';
   document.getElementById('cfg-wing-row').style.display = team ? '' : 'none';
   document.getElementById('cfg-plat-lbl').textContent = team ? 'LEAD FLIES' : 'AGENT FLIES';
-  if (team) {
+  w.style.color = LIB_ERR ? 'var(--red)' : 'var(--amber)';
+  if (LIB_ERR) {
+    w.textContent = '⚠ ' + LIB_ERR;
+  } else if (team) {
     w.textContent = opp === 'self_play'
       ? '⚠ 2 v 1 has no self-play stage yet; pick a scripted stage.'
       : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.';
@@ -1789,26 +1854,91 @@ loadLibrary();
 window.addEventListener('beforeunload', e => { if (libDirty) { e.preventDefault(); e.returnValue = ''; } });
 
 // ─── Log ─────────────────────────────────────────────────────────
-const MAX_LOG=150; let logArr=[];
-function addLog(msg, cls='log-info') {
-  logArr.push({msg,cls});
-  if(logArr.length>MAX_LOG) logArr.shift();
-  // The same log shows on the TRAINING and WATCH tabs.
-  const html=logArr.map(l=>`<div class="${l.cls}">${esc(l.msg)}</div>`).join('');
-  for(const id of ['log-lines','train-log-lines']){
-    const el=document.getElementById(id); if(!el) continue;
-    el.innerHTML=html; el.scrollTop=el.scrollHeight;
+// Two logs: TRAINING (trainer, cross-play, library, calibration) on the
+// TRAINING tab and EVAL (evaluation runs and their episodes) on the WATCH tab.
+const MAX_LOG=300;
+const LOGS={train:{arr:[], el:'train-log-lines'}, watch:{arr:[], el:'log-lines'}};
+function addLog(msg, cls='log-info', where='train') {
+  for(const k of (where==='both' ? ['train','watch'] : [where])){
+    const L=LOGS[k]; if(!L) continue;
+    L.arr.push({msg,cls});
+    if(L.arr.length>MAX_LOG) L.arr.shift();
+    const el=document.getElementById(L.el); if(!el) continue;
+    // Keep the reader's place when they have scrolled up to read older lines.
+    const atEnd=el.scrollHeight-el.scrollTop-el.clientHeight<24;
+    el.innerHTML=L.arr.map(l=>`<div class="${l.cls}">${esc(l.msg)}</div>`).join('');
+    if(atEnd) el.scrollTop=el.scrollHeight;
   }
 }
+function clearLog(where){ LOGS[where].arr=[]; }
+// ─── Current run ─────────────────────────────────────────────────
+// RUN comes from the server's status (the configuration it launched the
+// trainer with), RUN_NOTES from bvr_metrics.json (what the trainer reported
+// at startup), CODE from the server (the checked-out commit).
+let RUN=null, RUN_NOTES=null, CODE=null;
+function renderRun() {
+  const box=document.getElementById('run-info'), hd=document.getElementById('run-state');
+  if(!box) return;
+  // Notes belong to this run only if the trainer started after the launch
+  // (its run id begins with its start time in seconds).
+  const notesStart=RUN_NOTES ? parseInt(String(RUN_NOTES.run||'0')) : 0;
+  const notes=RUN && RUN.notes ? RUN.notes
+    : RUN_NOTES && (!RUN || notesStart>=RUN.started-5) ? RUN_NOTES.notes : null;
+  if(!RUN && !notes) return;
+  hd.textContent = RUN ? (isTraining ? 'RUNNING' : 'LAST RUN · ENDED') : 'FROM bvr_metrics.json';
+  hd.style.color = RUN && isTraining ? 'var(--green)' : '';
+  let html='';
+  if(RUN) {
+    const c=RUN.config||{}, team=c.format==='2v1';
+    const t=new Date(RUN.started*1000);
+    const rows=[
+      ['MODEL', `${c.run_name||'latest'}.zip`],
+      ['STARTED', t.toLocaleString()],
+      ['RESUMED', c.resume||'fresh start'],
+      ['FORMAT', team?'2 v 1':'1 v 1'],
+      [team?'BLUE':'AGENT', team?`${c.platform||'F-16C'} + ${c.wingman_platform||c.platform||'F-16C'}`:(c.platform||'F-16C')],
+      ['OPPONENT', `${c.opponent_platform||'F-16C'} · start at ${String(c.opponent||'straight').toUpperCase()}`],
+      ['CURRICULUM', c.curriculum===false?'off (stays on stage)':'auto-advance'],
+      ['DOCTRINE', String(c.doctrine||'mixed').toUpperCase()],
+      ['STEPS', `${fmt(c.steps||0)} on ${c.n_envs||1} env${(c.n_envs||1)>1?'s':''}`],
+      ['PPO', `γ ${c.gamma} · lr ${c.lr} · batch ${c.batch_size}`],
+    ];
+    const code=RUN.code||CODE;
+    if(code) rows.push(['CODE', code.commit ? `${code.branch} @ ${code.commit}`
+      +(code.modified&&code.modified.length?` · ${code.modified.length} modified file${code.modified.length>1?'s':''}`:'')
+      : (code.error||'unknown')]);
+    html+='<div class="run-kv">'+rows.map(([k,v])=>`<span>${k}</span><span>${esc(v)}</span>`).join('')+'</div>';
+  }
+  if(notes && notes.length)
+    html+='<div class="run-notes"><div style="color:var(--muted);font-size:11px;letter-spacing:1px">TRAINER AT STARTUP</div>'
+      +notes.map(n=>`<div class="${/NOTE|WARN|blocked|stays/i.test(n)?'warn':''}">${esc(n)}</div>`).join('')+'</div>';
+  else if(RUN && isTraining)
+    html+='<div class="run-notes"><div style="color:var(--muted)">Waiting for the trainer to start…</div></div>';
+  box.innerHTML=html;
+}
+function renderCodeWarn() {
+  const el=document.getElementById('code-warn'); if(!el) return;
+  const mod=CODE && CODE.modified || [];
+  if(CODE && CODE.commit && mod.length) {
+    el.innerHTML=`<b>⚠ ${mod.length} file${mod.length>1?'s':''} differ from the checked-out commit `
+      +`${esc(CODE.branch)} @ ${esc(CODE.commit)}:</b> ${mod.map(esc).join(', ')}.<br>`
+      +`Training and evaluation run these edited files. If that is not intended, restore them `
+      +`with <code>git checkout -- &lt;file&gt;</code> and restart the GUI.`;
+    el.style.display='block';
+  } else el.style.display='none';
+}
+
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-function handleLog(msg) {
-  if(msg.includes('[bvr]')||msg.includes('[status]')) hasReceivedTrainingData=true;
+function handleLog(msg, src) {
   const cls = msg.includes('===')         ? 'log-warn'
             : msg.includes('win')&&msg.includes('ep') ? 'log-ok'
             : msg.toLowerCase().includes('error')       ? 'log-err'
-            : msg.includes('WARNING')                   ? 'log-warn' : 'log-info';
-  addLog(msg, cls);
+            : msg.includes('WARNING')||msg.includes('NOTE:') ? 'log-warn' : 'log-info';
+  if(src==='eval') { addLog(msg, cls, 'watch'); return; }
+  addLog(msg, cls, 'train');
+  if(src && src!=='train') return;
+  if(msg.includes('[bvr]')) hasReceivedTrainingData=true;
   const em = msg.match(/ep\s+(\d+)/);
   if(em) {
     epCount = parseInt(em[1]);
@@ -1830,6 +1960,7 @@ function handleLog(msg) {
 let lastMetrics = null;
 function handleMetrics(d) {
   lastMetrics = d;
+  if(d.run_notes) { RUN_NOTES={run:d.run, notes:d.run_notes}; renderRun(); }
   epCount    = d.episode||epCount;
   if(d.steps_done && d.steps_done>0) stepsDone=d.steps_done;
 
@@ -2117,7 +2248,7 @@ function onEpEnd(meta) {
   addLog(`[ep] outcome=${meta.outcome}  R=${meta.reward}  shots=${meta.shots}  support_losses=${meta.support_losses}`
         +(meta.doctrine?`  doctrine=${meta.doctrine}`:'')
         +(meta.bank_rev_per_min!=null?`  bank_rev/min=${meta.bank_rev_per_min}`:'')
-        +(meta.blue_losses!=null?`  blue_lost=${meta.blue_losses}`:''),'log-ok');
+        +(meta.blue_losses!=null?`  blue_lost=${meta.blue_losses}`:''),'log-ok','watch');
   fetch('/replay').then(r=>r.json()).then(d=>{
     lastDecisions=d.frames?extractShots(d.frames):[];
   }).catch(()=>{});
@@ -2244,6 +2375,8 @@ ${f.rwr_warn?`<div style="background:#1a0000;border:1px solid var(--red);padding
 
 // ─── Controls ─────────────────────────────────────────────────────
 document.getElementById('btn-train').onclick=()=>{
+  if(LIB_ERR && !confirm('The platform library could not be loaded:\n\n'+LIB_ERR
+     +'\n\nStart anyway with F-16C on both sides?')) return;
   const opp=document.getElementById('cfg-opponent').value;
   const ne=parseInt(document.getElementById('cfg-nenvs').value)||1;
   const steps=parseInt(document.getElementById('cfg-steps').value)||2000000;
@@ -2255,7 +2388,7 @@ document.getElementById('btn-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   const doctrine=document.getElementById('cfg-doctrine').value;
   totalSteps=steps; epStartTime=Date.now(); epCount=0; stepsDone=0;
-  logArr=[];
+  clearLog('train');
   // Clear all displays so old-run values don't mislead
   dashHist=[]; drawDash();
   ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf','kv-rev','kv-doc','kv-lost'].forEach(id=>{
@@ -2308,13 +2441,13 @@ document.getElementById('btn-eval').onclick=()=>{
   tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k]; lastFrame=null;
   t3ClearTrails();
-  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok');
+  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok', 'watch');
   send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,
     opponent_platform:document.getElementById('eval-opp-platform').value||undefined,
     format:document.getElementById('eval-format').value||undefined}});
   send({cmd:'set_eval_speed',speed});
 };
-document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn');send({cmd:'stop_eval'})};
+document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn','watch');send({cmd:'stop_eval'})};
 
 // ETA update
 function updateETA() {

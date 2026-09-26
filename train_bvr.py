@@ -356,6 +356,7 @@ class BvrCallback(BaseCallback):
                 "blue_losses_per_ep": round(losses_ep, 3) if losses_ep is not None else None,
                 "doctrine":      doctrine,
                 "curriculum":    self.curriculum_state(),
+                "run_notes":     getattr(self, "run_notes", []),
                 "history":       hist,
                 "steps_done":    int(self.model.num_timesteps),
             }
@@ -488,6 +489,13 @@ def main():
 
     team = args.format == "2v1"
     wingman = (args.wingman_platform or args.platform) if team else None
+    # Startup facts worth keeping in view: printed as usual and also written to
+    # bvr_metrics.json, where the GUI's CURRENT RUN panel shows them for the
+    # whole run instead of letting them scroll out of the log.
+    run_notes = []
+    def note(msg):
+        print(f"[bvr] {msg}")
+        run_notes.append(msg)
     if args.wingman_platform and not team:
         ap.error("--wingman-platform needs --format 2v1")
 
@@ -511,9 +519,9 @@ def main():
         ap.error("2v1 has no self-play stage yet: choose a scripted opponent")
     envelope_table = args.envelope_table
     if team:
-        print(f"[bvr] 2v1: agents {args.platform} + {wingman} v opponent {args.opponent_platform}")
+        note(f"2v1: agents {args.platform} + {wingman} v opponent {args.opponent_platform}")
     else:
-        print(f"[bvr] platforms: agent {args.platform} v opponent {args.opponent_platform}")
+        note(f"platforms: agent {args.platform} v opponent {args.opponent_platform}")
 
     # gamma MUST match the value PPO trains with (passed below via kwargs) —
     # potential-based shaping (bvr_env._potential / step()'s `gamma*phi -
@@ -553,16 +561,16 @@ def main():
         # inputs were added (bvr_compat), widening them without changing a choice.
         model = load_model(args.resume, env=vec, **{
             k: v for k, v in kwargs.items() if k not in ("policy_kwargs",)})
-        print(f"[bvr] resumed from {args.resume}")
+        note(f"resumed from {args.resume}")
         prev = scenario_of(model)
         was = (prev["format"], prev["platform"], prev.get("wingman_platform"), prev["opponent_platform"])
         now = (args.format, args.platform, wingman, args.opponent_platform)
         if was != now:
             desc = lambda f, p, w, o: f"{f} {p}{' + ' + w if w else ''} v {o}"
-            print(f"[bvr] NOTE: this checkpoint was trained as {desc(*was)}; continuing as "
-                  f"{desc(*now)} (a warm start, not a continuation)")
+            note(f"NOTE: this checkpoint was trained as {desc(*was)}; continuing as "
+                 f"{desc(*now)} (a warm start, not a continuation)")
         for msg in scenario_drift(prev):
-            print(f"[bvr] NOTE: {msg}")
+            note(f"NOTE: {msg}")
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
     # Saved inside every checkpoint this run writes, self-play snapshots included.
@@ -579,7 +587,11 @@ def main():
                      allow_selfplay=not (heterogeneous or team),
                      **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
-    print(f"[bvr] {cb.describe_curriculum()}")
+    note(cb.describe_curriculum())
+    cb.run_notes = run_notes
+    # One machine-readable line for the GUI server, which shows these notes
+    # at once rather than waiting for the first metrics write.
+    print("[bvr] run-notes: " + json.dumps(run_notes), flush=True)
     failure = None
     try:
         model.learn(total_timesteps=args.steps, callback=cb,

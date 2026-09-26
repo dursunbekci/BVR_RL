@@ -65,8 +65,12 @@ class Hub:
         # Training and eval are independent: training is a subprocess, eval is
         # a thread in this process, and running both at once is supported. A
         # single "state" string cannot represent that, so each has its own flag.
+        # "run" is the configuration of the latest training launch and "code"
+        # the checked-out version; both ride in the status snapshot so a
+        # page opened or reloaded mid-run still shows them.
         self._status  = {"type": "status", "training": False,
-                         "eval": False, "crossplay": False, "msg": "Ready"}
+                         "eval": False, "crossplay": False, "msg": "Ready",
+                         "run": None, "code": None}
         self._clients = set()
         self._queue   = []              # outbound message queue
         self._replay_frames = []        # last episode recording
@@ -82,13 +86,16 @@ class Hub:
         return out
 
     def set_status(self, *, training: bool = None, evaluating: bool = None,
-                   crossplay: bool = None, msg: str = None):
+                   crossplay: bool = None, msg: str = None,
+                   run: dict = None, code: dict = None):
         """Update only the fields given, then broadcast the whole snapshot."""
         with self._lock:
             if training is not None:   self._status["training"] = bool(training)
             if evaluating is not None: self._status["eval"]     = bool(evaluating)
             if crossplay is not None:  self._status["crossplay"] = bool(crossplay)
             if msg is not None:        self._status["msg"]      = msg
+            if run is not None:        self._status["run"]      = run
+            if code is not None:       self._status["code"]     = code
             snapshot = dict(self._status)
         self.push(snapshot)
 
@@ -190,6 +197,32 @@ class GUIHandler(SimpleHTTPRequestHandler):
             self.send_error(404)
 
 
+def _code_info() -> dict:
+    """The checked-out commit and any tracked files that differ from it.
+
+    A stale or hand-edited file (twice now, bvr_opponents.py) changes a run
+    silently; showing this in the GUI makes it visible before training.
+    """
+    def git(*a):
+        return subprocess.run(["git", *a], cwd=HERE, capture_output=True,
+                              text=True, timeout=5).stdout.rstrip()
+    try:
+        commit = git("rev-parse", "--short", "HEAD")
+        if not commit:
+            return {"commit": None, "error": "not a git checkout"}
+        # Porcelain lines are "XY path"; the status letters may start with a space.
+        modified = [ln[3:] for ln in git("status", "--porcelain", "--untracked-files=no").splitlines()
+                    if ln[3:].endswith((".py", ".html", ".json"))]
+        return {"commit": commit, "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+                "date": git("log", "-1", "--format=%cd", "--date=short"),
+                "modified": modified}
+    except Exception as e:
+        return {"commit": None, "error": f"git unavailable ({type(e).__name__})"}
+
+
+CODE_INFO = None
+
+
 def _library_summary() -> dict:
     import bvr_library as L
     items = L.list_items()
@@ -200,7 +233,8 @@ def _library_summary() -> dict:
                 calibrated[it["id"]] = L.envelope_path(L.missile_config(it["id"])).exists()
             except Exception:
                 calibrated[it["id"]] = False
-    return {"items": items, "schema": L.schema_json(), "calibrated": calibrated}
+    return {"items": items, "schema": L.schema_json(), "calibrated": calibrated,
+            "problems": L.list_problems(), "library_dir": str(L.LIB_DIR)}
 
 
 def _library_item(kind, item_id) -> dict:
@@ -231,6 +265,12 @@ def _handler_library_get(self):
             self.send_error(404)
     except (L.LibraryError, KeyError, ValueError) as e:
         self._json({"error": str(e)}, 400)
+    except Exception as e:
+        # Anything else used to drop the connection, leaving the page's
+        # platform lists silently empty; report it so the page can say why.
+        import traceback
+        traceback.print_exc()
+        self._json({"error": f"{type(e).__name__}: {e}"}, 500)
 
 
 GUIHandler._library_get = _handler_library_get
@@ -300,7 +340,7 @@ class CrossplayManager:
             return
         models = [os.path.join(self._model_dir, m) for m in config.get("models", [])]
         if not models:
-            HUB.push({"type": "log", "msg": "[crossplay] no checkpoints selected"})
+            HUB.push({"type": "log", "src": "xplay", "msg": "[crossplay] no checkpoints selected"})
             return
         cmd = [sys.executable, str(HERE / "crossplay.py"), *models,
                "--episodes", str(int(config.get("episodes", 40))),
@@ -334,7 +374,7 @@ class CrossplayManager:
                 HUB.push({"type": "crossplay_progress", "done": int(m.group(1)),
                           "total": int(m.group(2)), "msg": line})
             else:
-                HUB.push({"type": "log", "msg": line})
+                HUB.push({"type": "log", "src": "xplay", "msg": line})
         proc.wait()
         ok = proc.returncode == 0
         HUB.push({"type": "crossplay_done", "ok": ok})
@@ -382,14 +422,14 @@ class CalibrationManager:
 
     def start(self, missile_id: str):
         if self.running:
-            HUB.push({"type": "log", "msg": f"[calibrate] already calibrating {self._missile}"})
+            HUB.push({"type": "log", "src": "lib", "msg": f"[calibrate] already calibrating {self._missile}"})
             return
         self._missile = missile_id
         self._proc = subprocess.Popen(
             [sys.executable, str(HERE / "sweep_envelope.py"), "--missile", missile_id],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True, cwd=str(HERE))
         threading.Thread(target=self._tail, daemon=True).start()
-        HUB.push({"type": "log", "msg": f"[calibrate] {missile_id}: flying the missile over the "
+        HUB.push({"type": "log", "src": "lib", "msg": f"[calibrate] {missile_id}: flying the missile over the "
                                         f"launch grid (a few minutes)"})
 
     def _tail(self):
@@ -401,7 +441,7 @@ class CalibrationManager:
                 HUB.push({"type": "calibrate_progress", "id": mid, "done": int(m.group(1)),
                           "total": int(m.group(2)), "msg": line.strip()})
             elif line:
-                HUB.push({"type": "log", "msg": f"[calibrate] {line}"})
+                HUB.push({"type": "log", "src": "lib", "msg": f"[calibrate] {line}"})
         proc.wait()
         HUB.push({"type": "calibrate_done", "id": mid, "ok": proc.returncode == 0})
 
@@ -415,6 +455,7 @@ class TrainingManager:
         self._thread    = None
         self._model_dir = model_dir
         self._stop_evt  = threading.Event()
+        self._run       = None
 
     def start(self, config: dict):
         if self._proc and self._proc.poll() is None:
@@ -456,8 +497,11 @@ class TrainingManager:
             bufsize=1, text=True, creationflags=flags)
         self._thread = threading.Thread(target=self._tail, daemon=True)
         self._thread.start()
+        self._run = {"config": dict(config), "started": time.time(),
+                     "code": CODE_INFO, "notes": None}
         HUB.set_status(training=True,
-                       msg=f"Training: {config.get('opponent','straight')}")
+                       msg=f"Training: {config.get('opponent','straight')}",
+                       run=dict(self._run))
 
     # Seconds to let the trainer write its checkpoint before escalating.
     GRACE_TIMEOUT = 60.0
@@ -492,7 +536,7 @@ class TrainingManager:
     def _graceful_stop(self):
         proc = self._proc
         HUB.set_status(training=True, msg="Stopping — saving checkpoint…")
-        HUB.push({"type": "log", "msg": "[bvr_gui] interrupting trainer; "
+        HUB.push({"type": "log", "src": "train", "msg": "[bvr_gui] interrupting trainer; "
                                         "waiting for it to save its model…"})
         try:
             if os.name == "nt":
@@ -500,32 +544,39 @@ class TrainingManager:
             else:
                 proc.send_signal(signal.SIGINT)
         except Exception as e:
-            HUB.push({"type": "log", "msg": f"[bvr_gui] interrupt failed ({e}); terminating"})
+            HUB.push({"type": "log", "src": "train", "msg": f"[bvr_gui] interrupt failed ({e}); terminating"})
             proc.terminate()
 
         try:
             proc.wait(timeout=self.GRACE_TIMEOUT)
-            HUB.push({"type": "log", "msg": "[bvr_gui] trainer exited cleanly — model saved."})
+            HUB.push({"type": "log", "src": "train", "msg": "[bvr_gui] trainer exited cleanly — model saved."})
             return
         except subprocess.TimeoutExpired:
             pass
 
-        HUB.push({"type": "log",
+        HUB.push({"type": "log", "src": "train",
                   "msg": f"[bvr_gui] no clean exit after {self.GRACE_TIMEOUT:.0f}s — "
                          f"terminating (checkpoint may be lost)."})
         proc.terminate()
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            HUB.push({"type": "log", "msg": "[bvr_gui] still alive — killing."})
+            HUB.push({"type": "log", "src": "train", "msg": "[bvr_gui] still alive — killing."})
             proc.kill()
 
     def _tail(self):
         """Read subprocess stdout line by line, push to hub."""
         for line in self._proc.stdout:
             line = line.rstrip()
+            if line.startswith("[bvr] run-notes: "):
+                try:
+                    self._run["notes"] = json.loads(line.split(": ", 1)[1])
+                    HUB.set_status(run=dict(self._run))
+                    continue
+                except ValueError:
+                    pass
             if line:
-                HUB.push({"type": "log", "msg": line})
+                HUB.push({"type": "log", "src": "train", "msg": line})
         self._proc.wait()
         HUB.set_status(training=False,
                        msg=f"Training ended (exit {self._proc.returncode})")
@@ -580,7 +631,7 @@ class EvalRunner:
                          privileged_critic=privileged, gamma_discount=0.997,
                          doctrine=config.get("doctrine", "BALANCED"),
                          blue_platforms=blue, red_platform=red_platform)
-        HUB.push({"type": "log", "msg": f"Eval 2v1: {blue[0]} + {blue[1]} v {red_platform}"
+        HUB.push({"type": "log", "src": "eval", "msg": f"Eval 2v1: {blue[0]} + {blue[1]} v {red_platform}"
                                         f" (one policy flies both blue aircraft)"})
         HUB.set_status(evaluating=True,
                        msg=f"Eval 2v1 vs {opponent.name}, {env._doctrine_cfg} doctrine")
@@ -616,14 +667,14 @@ class EvalRunner:
                     # Widens checkpoints saved before the latest observation
                     # inputs (e.g. the doctrine input) were added.
                     model = load_model(str(ckpt_path), env=None,
-                                       log=lambda m: HUB.push({"type":"log","msg":m}))
+                                       log=lambda m: HUB.push({"type":"log","src":"eval","msg":m}))
                     privileged = isinstance(model.observation_space, spaces.Dict)
                     stacker = FrameStacker(N_STACK)
-                    HUB.push({"type":"log","msg":f"Loaded checkpoint: {ckpt_path}"})
+                    HUB.push({"type":"log","src":"eval","msg":f"Loaded checkpoint: {ckpt_path}"})
                 except Exception as e:
-                    HUB.push({"type":"log","msg":f"Could not load checkpoint: {e}; using random policy"})
+                    HUB.push({"type":"log","src":"eval","msg":f"Could not load checkpoint: {e}; using random policy"})
             elif ckpt:
-                HUB.push({"type":"log","msg":f"Checkpoint not found: {ckpt_path}; using random policy"})
+                HUB.push({"type":"log","src":"eval","msg":f"Checkpoint not found: {ckpt_path}; using random policy"})
 
             # The checkpoint flies the platform it was trained on; the opponent
             # flies the one chosen here, or the checkpoint's training opponent.
@@ -645,7 +696,7 @@ class EvalRunner:
                          selfplay_pool=str(Path(self._model_dir) / "selfplay_pool"),
                          doctrine=config.get("doctrine", "BALANCED"),
                          platform=platform, opponent_platform=opp_platform)
-            HUB.push({"type": "log", "msg": f"Eval platforms: {platform} v {opp_platform}"})
+            HUB.push({"type": "log", "src": "eval", "msg": f"Eval platforms: {platform} v {opp_platform}"})
 
             HUB.set_status(evaluating=True,
                            msg=f"Eval vs {opponent_name}, {env._doctrine_cfg} doctrine")
@@ -702,7 +753,7 @@ class EvalRunner:
             env.close()
         except Exception as e:
             import traceback
-            HUB.push({"type":"log","msg":f"Eval error: {e}\n{traceback.format_exc()}"})
+            HUB.push({"type":"log","src":"eval","msg":f"Eval error: {e}\n{traceback.format_exc()}"})
             HUB.set_status(evaluating=False, msg=f"Eval error: {e}")
 
 
@@ -956,7 +1007,7 @@ async def run_ws(port: int):
 
 
 def main():
-    global TRAINING_MGR, EVAL_RUNNER, XPLAY_MGR, CALIB_MGR, MODEL_DIR
+    global TRAINING_MGR, EVAL_RUNNER, XPLAY_MGR, CALIB_MGR, MODEL_DIR, CODE_INFO
     ap = argparse.ArgumentParser()
     ap.add_argument("--port",      type=int, default=5006)
     ap.add_argument("--ws-port",   type=int, default=5010)
@@ -964,6 +1015,8 @@ def main():
     args = ap.parse_args()
 
     MODEL_DIR    = HERE / args.model_dir
+    CODE_INFO = _code_info()
+    HUB.set_status(code=CODE_INFO)
     TRAINING_MGR = TrainingManager(args.model_dir)
     EVAL_RUNNER  = EvalRunner(args.model_dir)
     XPLAY_MGR    = CrossplayManager(args.model_dir)
@@ -975,6 +1028,12 @@ def main():
     print(f"[bvr_gui]  http://localhost:{args.port}")
     print(f"[bvr_gui]  ws://localhost:{args.ws_port}")
     print(f"[bvr_gui]  model dir: {args.model_dir}")
+    if CODE_INFO.get("commit"):
+        print(f"[bvr_gui]  code: {CODE_INFO['branch']} @ {CODE_INFO['commit']} ({CODE_INFO['date']})")
+        for f in CODE_INFO["modified"]:
+            print(f"[bvr_gui]  WARNING: {f} differs from the checked-out version")
+    else:
+        print(f"[bvr_gui]  code version unknown: {CODE_INFO.get('error')}")
     print(f"[bvr_gui]  Press Ctrl+C to exit")
 
     try:
