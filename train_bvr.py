@@ -159,6 +159,9 @@ class BvrCallback(BaseCallback):
         self.bank = deque(maxlen=50)
         # 2v1: blue aircraft lost per episode.
         self.blue_losses = deque(maxlen=50)
+        # Identifies this run in bvr_metrics.json, so its history is not
+        # mixed with a previous run's.
+        self.run_id = f"{int(time.time())}-{os.getpid()}"
         os.makedirs(save_dir, exist_ok=True)
 
     def curriculum_state(self) -> dict:
@@ -309,11 +312,28 @@ class BvrCallback(BaseCallback):
             if os.path.exists(mpath):
                 try: prev = json.loads(open(mpath).read())
                 except Exception: pass
-            hist = prev.get("history", [])
-            hist.append([self.ep_count, round(win_rate, 3),
-                         round((kills+mutual)/max(losses+mutual,1), 2)])
-            if len(hist) > 300: hist = hist[-300:]   # keep last 300 points
+            # One point per log (every 10 episodes) for the GUI's training
+            # dashboard. History belongs to this run: an earlier run's points
+            # in the same file are dropped rather than drawn as if continued.
+            hist = prev.get("history", []) if prev.get("run") == self.run_id else []
+            r3 = lambda v: round(float(v), 3)
+            hist.append({
+                "ep": self.ep_count, "steps": int(self.model.num_timesteps),
+                "win": r3(win_rate), "loss": r3(losses / n), "mut": r3(mutual / n),
+                "to": r3(timeouts / n),
+                "exch": round((kills + mutual) / max(losses + mutual, 1), 2),
+                "pk": r3((kills + mutual) / total_shots), "shots": r3(total_shots / n),
+                "rrmax": r3(np.mean(self.launch_ratios)) if self.launch_ratios else None,
+                "track": r3(np.mean(self.track_hits)) if self.track_hits else None,
+                "rev": round(bank_rpm, 2),
+                "lost": r3(losses_ep) if losses_ep is not None else None,
+                "stage": self.opponent_type.name})
+            # A long run keeps its whole shape: past 600 points, every other
+            # older point is dropped, so the chart always spans the run.
+            if len(hist) > 600:
+                hist = hist[:-100:2] + hist[-100:]
             metrics = {
+                "run":           self.run_id,
                 "episode":       self.ep_count,
                 "opponent":      self.opponent_type.name,
                 "win_rate":      round(win_rate, 3),

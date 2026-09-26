@@ -32,6 +32,28 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 
 /* LIBRARY VIEW */
 #library-view{display:none;flex:1;overflow:hidden}
+#train-view{display:flex;flex:1;overflow:hidden}
+#train-side{width:460px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);padding:4px;
+            scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+#train-dash{flex:1;min-width:0;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:12px;
+            scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+.dash-row{display:flex;gap:12px}
+.dash-card{background:var(--panel);border:1px solid var(--border);padding:10px 14px;min-width:0}
+.dash-head{display:flex;align-items:center;gap:6px}
+.dash-title{font-size:12px;letter-spacing:1.5px;color:var(--bright);font-weight:bold}
+.dash-sub{font-size:11px;color:var(--muted);margin:2px 0 6px}
+.dash-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:12px}
+.dash-grid .wide{grid-column:1 / -1}
+.ts-chart{position:relative;min-height:170px}
+.ts-chart svg{display:block;width:100%}
+.ts-chart .ts-empty{font-size:12px;color:var(--muted);padding:60px 0;text-align:center}
+.ts-chart .ch-legend{display:flex;gap:16px;font-size:12px;color:var(--text);margin-bottom:2px}
+.ts-chart .ch-legend i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.ts-chart .ch-tip{position:absolute;pointer-events:none;background:#0d1a2b;border:1px solid var(--border);
+          padding:4px 8px;font-size:12px;color:var(--text);white-space:nowrap;display:none;line-height:1.5;z-index:2}
+.ts-chart .ch-tip b{color:var(--bright);font-weight:normal}
+#train-log-lines{max-height:240px;overflow-y:auto;font-size:12px;line-height:1.5}
 #lib-list{width:290px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
           padding:8px;background:var(--panel)}
 #lib-list h4{font-size:11px;letter-spacing:2px;color:#c79bff;margin:10px 0 4px}
@@ -92,7 +114,7 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 .perf-tbl tr:last-child td{border-bottom:none}
 
 /* MAIN LAYOUT */
-#main{display:flex;flex:1;overflow:hidden}
+#main{display:none;flex:1;overflow:hidden}
 #left-col{display:flex;flex-direction:column;min-width:0;gap:0;padding:4px 2px 4px 4px}
 #right-col{overflow-y:auto;display:flex;flex-direction:column;
            gap:3px;padding:4px 4px 4px 2px;scrollbar-width:thin;
@@ -372,7 +394,8 @@ select option{background:#050810}
 <!-- TOP BAR -->
 <div id="topbar">
   <h1>BVR RL — TRAINING CONSOLE</h1>
-  <button class="tab on" id="tab-console" onclick="showView('console')">CONSOLE</button>
+  <button class="tab on" id="tab-train" onclick="showView('train')">TRAINING</button>
+  <button class="tab" id="tab-watch" onclick="showView('watch')">WATCH</button>
   <button class="tab" id="tab-xplay" onclick="showView('xplay')">CROSS-PLAY<span id="xp-tab-prog"></span></button>
   <button class="tab" id="tab-library" onclick="showView('library')">LIBRARY</button>
   <button class="tab" id="units-btn" onclick="toggleUnits()" title="Show lengths and speeds in metric (m, km, m/s) or aviation units (ft, nm, kt). Stored values stay metric.">m · m/s</button>
@@ -499,53 +522,9 @@ select option{background:#050810}
   </div>
 </div>
 
-<!-- MAIN -->
-<div id="main">
-
-  <!-- LEFT: canvases -->
-  <div id="left-col">
-    <div class="panel" id="panel-tac" style="flex:3">
-      <div class="ph">
-        <span>TACTICAL VIEW</span>
-        <span class="ph-right">
-          <span id="tac-info" style="font-size:11px;color:var(--text)"></span>
-          <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
-        </span>
-      </div>
-      <div id="cv-tac" style="position:relative;overflow:hidden"></div>
-    </div>
-    <div class="vsplit" data-above="panel-tac" data-below="panel-alt" title="Drag to resize"></div>
-    <div class="panel" id="panel-alt" style="flex:1">
-      <div class="ph">
-        <span>ALTITUDE PROFILE</span>
-        <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
-      </div>
-      <canvas id="cv-alt"></canvas>
-    </div>
-    <div class="vsplit" data-above="panel-alt" data-below="log-bar" title="Drag to resize"></div>
-
-    <!-- LOG -->
-    <div class="panel" id="log-bar">
-      <div id="log-header">
-        <span>LOG</span>
-        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
-        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
-        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
-        <button class="btn" id="btn-decisions"
-          style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
-        <button class="ph-toggle" style="margin-left:auto" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
-      </div>
-      <div id="log-lines">
-        <div class="log-info">Waiting for training to start...</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="hsplit" title="Drag to resize"></div>
-
-  <!-- RIGHT: controls -->
-  <div id="right-col">
-
+<!-- TRAINING: configuration and the metrics dashboard (no 3D) -->
+<div id="train-view">
+  <div id="train-side">
     <!-- TRAINING CONFIGURATION -->
     <div class="section" id="sec-train">
       <div class="sec-head" onclick="toggle(this)">⚙ TRAINING CONFIGURATION<span>▲</span></div>
@@ -708,10 +687,10 @@ select option{background:#050810}
     </div>
 
     <!-- TRAINING PROGRESS -->
-    <div class="section" id="sec-prog">
-      <div class="sec-head" onclick="toggle(this)">📊 TRAINING PROGRESS<span>▲</span></div>
-      <div class="sec-body">
-
+  </div>
+  <div id="train-dash">
+    <div class="dash-row">
+      <div class="dash-card" style="flex:2">
         <div style="font-size:12px;letter-spacing:2px;color:var(--bright);font-weight:bold;margin-bottom:4px">CURRICULUM STAGE</div>
         <div class="curr-track">
           <div class="curr-stage" id="cs-straight">STRAIGHT</div>
@@ -742,6 +721,8 @@ select option{background:#050810}
           <div style="position:absolute;right:0;top:0;font-size:13px;color:var(--bright);font-weight:bold" id="wr-pct">—</div>
         </div>
 
+      </div>
+      <div class="dash-card" style="flex:1">
         <div class="row2" style="margin-top:10px">
           <div>
             <div style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">STEPS</div>
@@ -756,8 +737,9 @@ select option{background:#050810}
         </div>
         <div style="font-size:12px;color:var(--amber);margin-top:4px" id="prog-eta">—</div>
 
-        <!-- KPI CARDS -->
-        <div class="kpi-grid">
+      </div>
+    </div>
+    <div class="dash-kpis">
           <div class="kpi" id="kpi-wr">
             <button class="help-btn" onclick="help(this,'WIN RATE',
               'Kills divided by total episodes (last 50). The most important number.\n\nHealthy progression for STRAIGHT: should exceed 65% within 200k–500k steps.\n\nIf stuck below 30%: try lowering the learning rate, or reset to fresh start.')">?</button>
@@ -782,82 +764,149 @@ select option{background:#050810}
             <div class="kval" id="kv-to">—</div>
             <div class="klabel">TIMEOUT RATE</div>
           </div>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:6px;margin:4px 0 2px">
-          <span style="font-size:12px;letter-spacing:1px;font-weight:bold;color:var(--bright)">WIN RATE TREND</span>
-          <span style="font-size:11px;color:var(--muted)">(last 300 episodes)</span>
-        </div>
-        <div class="chart-wrap"><canvas id="cv-wr"></canvas></div>
-
-        <div class="row2" style="margin-top:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">LAUNCH RANGE</span>
-              <button class="help-btn" onclick="help(this,'LAUNCH RANGE',
+          <div class="kpi" id="kpi-rng">
+            <button class="help-btn" onclick="help(this,'LAUNCH RANGE',
                 'Average distance from the enemy when a missile is fired.\n\nCompare to your Rmax (shown in the tactical view as the green dashed ring).\n\nIdeal: shoot at 55–85% of Rmax. Too close = wasted energy advantage. Too far = shot cannot reach.\n\nIf this is consistently above Rmax, the fire mask is failing — check bvr_env._can_fire().')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rng">—</div>
+            <div class="kval" id="kv-rng">—</div>
+            <div class="klabel">LAUNCH RANGE</div>
           </div>
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">r / Rmax AT SHOT</span>
-              <button class="help-btn" onclick="help(this,'r / Rmax AT SHOT',
+          <div class="kpi" id="kpi-rrm">
+            <button class="help-btn" onclick="help(this,'r / Rmax AT SHOT',
                 'Launch range divided by maximum missile range at the moment of firing.\n\n• 0.5–0.9 = ideal (inside the envelope, with energy margin)\n• >1.0 = shot outside the envelope (miss guaranteed, masking failed)\n• <0.4 = shooting too close (did not use the range advantage)\n\nThis is the single best diagnostic for shot quality.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rrm">—</div>
+            <div class="kval" id="kv-rrm">—</div>
+            <div class="klabel">r / Rmax AT SHOT</div>
           </div>
-        </div>
-        <div class="row2" style="margin-top:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">SHOTS / EPISODE</span>
-              <button class="help-btn" onclick="help(this,'SHOTS PER EPISODE',
+          <div class="kpi" id="kpi-sh">
+            <button class="help-btn" onclick="help(this,'SHOTS PER EPISODE',
                 'Average missiles fired per episode.\n\n• 1–2 = typical for a well-trained agent (fires once, supports, wins)\n• 3–4 = panic firing or shots outside envelope\n• 0–0.5 = agent is too passive to engage\n\nWatch this alongside Pk. High shots + low Pk = fires recklessly.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-sh">—</div>
+            <div class="kval" id="kv-sh">—</div>
+            <div class="klabel">SHOTS / EPISODE</div>
           </div>
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">TRACK FRACTION</span>
-              <button class="help-btn" onclick="help(this,'TRACK FRACTION',
+          <div class="kpi" id="kpi-tf">
+            <button class="help-btn" onclick="help(this,'TRACK FRACTION',
                 'Fraction of simulation time the radar was in TRACK state (actively tracking the enemy).\n\n• >0.7 = good radar management — agent keeps the enemy on the nose\n• 0.4–0.7 = average\n• <0.4 = agent is cranking past the radar gimbal too often\n\nLow track fraction with high timeout rate = agent is running away and losing radar contact.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-tf">—</div>
+            <div class="kval" id="kv-tf">—</div>
+            <div class="klabel">TRACK FRACTION</div>
           </div>
-        </div>
-
-        <div class="row2" style="margin-top:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">BANK REVERSALS / MIN</span>
-              <button class="help-btn" onclick="help(this,'BANK REVERSALS PER MINUTE',
+          <div class="kpi" id="kpi-rev">
+            <button class="help-btn" onclick="help(this,'BANK REVERSALS PER MINUTE',
                 'How often the aircraft rolls from one side to the other (past 15° of bank each way), per minute of flight, over the last 50 episodes.\n\nA real intercept reverses a few times a minute at most. Tens per minute is wing-rocking: the policy flipping between two heading choices every second. The heading-change cost is there to push this down; if it stays high, raise W_HDG_CHANGE in bvr_env.py.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rev">—</div>
+            <div class="kval" id="kv-rev">—</div>
+            <div class="klabel">BANK REVERSALS / MIN</div>
           </div>
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">BY DOCTRINE</span>
-              <button class="help-btn" onclick="help(this,'BY DOCTRINE',
-                'Shots per episode and realised Pk under each missile doctrine, over the last 150 episodes (shown when the run trains more than one).\n\nIf the doctrine is being learned, shots fall and Pk rises from AGGRESSIVE to CONSERVATIVE. Identical rows mean the policy is still ignoring its doctrine input.')">?</button>
-            </div>
-            <div style="font-size:11px;line-height:1.5;color:var(--bright)" id="kv-doc">—</div>
+          <div class="kpi" id="kpi-lost" style="display:none">
+            <button class="help-btn" onclick="help(this,'BLUE LOST / EPISODE','2 v 1 only: blue aircraft lost per episode over the last 50 (0 to 2).\n\nA clean kill loses none; MUTUAL KILL means red was killed at the cost of a blue aircraft. This should fall as the pair learns to support each other.')">?</button>
+            <div class="kval" id="kv-lost">—</div>
+            <div class="klabel">BLUE LOST / EPISODE</div>
           </div>
-        </div>
-
-        <!-- REWARD DRIVERS -->
-        <div style="margin-top:12px">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-            <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">REWARD DRIVERS</span>
-            <button class="help-btn" onclick="help(this,'REWARD DRIVERS',
-              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — time-to-go on the nearest inbound missile\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button>
-          </div>
-          <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
-        </div>
-
+    </div>
+    <div class="dash-grid">
+      <div class="dash-card wide" id="card-outcomes">
+        <div class="dash-head"><span class="dash-title">OUTCOMES</span><button class="help-btn" onclick="help(this,'OUTCOMES','How the last 50 finished episodes ended, plotted every 10 episodes.\n\n• WIN: my missile killed the bandit\n• LOSS: shot down\n• MUTUAL: both killed (in 2 v 1: red killed at the cost of a blue aircraft)\n• TIMEOUT: nobody died in 300 s\n\nThe dashed line is the 65% advance mark. A rising timeout line is the first sign of passivity.')">?</button></div>
+        <div class="dash-sub">share of the last 50 episodes · dashed: the 65% advance mark</div>
+        <div class="ts-chart" id="ch-outcomes"></div>
+      </div>
+      <div class="dash-card" id="card-exch">
+        <div class="dash-head"><span class="dash-title">EXCHANGE RATIO</span></div>
+        <div class="dash-sub">kills ÷ (losses + mutual kills)</div>
+        <div class="ts-chart" id="ch-exch"></div>
+      </div>
+      <div class="dash-card" id="card-pk">
+        <div class="dash-head"><span class="dash-title">REALISED Pk</span></div>
+        <div class="dash-sub">kills per missile fired</div>
+        <div class="ts-chart" id="ch-pk"></div>
+      </div>
+      <div class="dash-card" id="card-shots">
+        <div class="dash-head"><span class="dash-title">SHOTS / EPISODE</span></div>
+        <div class="dash-sub">missiles fired per episode</div>
+        <div class="ts-chart" id="ch-shots"></div>
+      </div>
+      <div class="dash-card" id="card-rrmax">
+        <div class="dash-head"><span class="dash-title">r / Rmax AT SHOT</span></div>
+        <div class="dash-sub">where in the envelope it shoots · band: the 0.6–0.85 target</div>
+        <div class="ts-chart" id="ch-rrmax"></div>
+      </div>
+      <div class="dash-card" id="card-track">
+        <div class="dash-head"><span class="dash-title">TRACK FRACTION</span></div>
+        <div class="dash-sub">share of steps with a firm track</div>
+        <div class="ts-chart" id="ch-track"></div>
+      </div>
+      <div class="dash-card" id="card-rev">
+        <div class="dash-head"><span class="dash-title">BANK REVERSALS / MIN</span></div>
+        <div class="dash-sub">wing-rocking check: a few a minute is normal</div>
+        <div class="ts-chart" id="ch-rev"></div>
+      </div>
+      <div class="dash-card" id="card-lost" style="display:none">
+        <div class="dash-head"><span class="dash-title">BLUE LOST / EPISODE</span></div>
+        <div class="dash-sub">2 v 1: blue aircraft lost per episode, 0–2</div>
+        <div class="ts-chart" id="ch-lost"></div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-head"><span class="dash-title">REWARD DRIVERS</span><button class="help-btn" onclick="help(this,'REWARD DRIVERS',
+              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — time-to-go on the nearest inbound missile\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button></div>
+        <div class="dash-sub">share of the shaping reward by term, last ~5000 steps</div>
+        <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-head"><span class="dash-title">BY DOCTRINE</span><button class="help-btn" onclick="help(this,'BY DOCTRINE',
+                'Shots per episode and realised Pk under each missile doctrine, over the last 150 episodes (shown when the run trains more than one).\n\nIf the doctrine is being learned, shots fall and Pk rises from AGGRESSIVE to CONSERVATIVE. Identical rows mean the policy is still ignoring its doctrine input.')">?</button></div>
+        <div class="dash-sub">shots, Pk and win under each doctrine, last 150 episodes</div>
+        <div style="font-size:13px;line-height:1.7;color:var(--bright)" id="kv-doc">—</div>
       </div>
     </div>
+    <div class="dash-card">
+      <div class="dash-head"><span class="dash-title">LOG</span><span class="dash-sub" style="margin:0 0 0 8px">the trainer's output (also on the WATCH tab)</span></div>
+      <div id="train-log-lines"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- LEFT: canvases -->
+  <div id="left-col">
+    <div class="panel" id="panel-tac" style="flex:3">
+      <div class="ph">
+        <span>TACTICAL VIEW</span>
+        <span class="ph-right">
+          <span id="tac-info" style="font-size:11px;color:var(--text)"></span>
+          <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+        </span>
+      </div>
+      <div id="cv-tac" style="position:relative;overflow:hidden"></div>
+    </div>
+    <div class="vsplit" data-above="panel-tac" data-below="panel-alt" title="Drag to resize"></div>
+    <div class="panel" id="panel-alt" style="flex:1">
+      <div class="ph">
+        <span>ALTITUDE PROFILE</span>
+        <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+      </div>
+      <canvas id="cv-alt"></canvas>
+    </div>
+    <div class="vsplit" data-above="panel-alt" data-below="log-bar" title="Drag to resize"></div>
+
+    <!-- LOG -->
+    <div class="panel" id="log-bar">
+      <div id="log-header">
+        <span>LOG</span>
+        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
+        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
+        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
+        <button class="btn" id="btn-decisions"
+          style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
+        <button class="ph-toggle" style="margin-left:auto" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+      </div>
+      <div id="log-lines">
+        <div class="log-info">Waiting for training to start...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hsplit" title="Drag to resize"></div>
+
+  <!-- RIGHT: controls -->
+  <div id="right-col">
 
     <!-- EVALUATION -->
     <div class="section" id="sec-eval">
@@ -1265,17 +1314,20 @@ function applyUnits() {
 setTimeout(applyUnits, 0);
 
 // ─── Library ─────────────────────────────────────────────────────
-let VIEW = 'console';
+let VIEW = 'train';
 function showView(v) {
   if (v !== 'library' && !libConfirmLeave()) return;
   VIEW = v;
-  document.getElementById('main').style.display = v === 'console' ? '' : 'none';
-  document.getElementById('xplay-view').style.display = v === 'xplay' ? 'flex' : 'none';
-  document.getElementById('library-view').style.display = v === 'library' ? 'flex' : 'none';
-  for (const t of ['console', 'xplay', 'library'])
+  const views = {train: 'train-view', watch: 'main', xplay: 'xplay-view', library: 'library-view'};
+  for (const [k, id] of Object.entries(views))
+    document.getElementById(id).style.display = v === k ? 'flex' : 'none';
+  for (const t of Object.keys(views))
     document.getElementById('tab-' + t).classList.toggle('on', v === t);
   if (v === 'library') loadLibrary();
   if (v === 'xplay') xpLoadResults();
+  // Hidden views have no size: lay out the one just shown.
+  if (v === 'watch') setTimeout(resize, 0);
+  if (v === 'train') setTimeout(drawDash, 0);
 }
 const KIND_TITLE = {platform: 'PLATFORMS', airframe: 'AIRFRAMES', radar: 'RADARS', missile: 'MISSILES'};
 let LIB = null, libSel = null, libCur = null, libPerf = null, libDirty = false;
@@ -1741,9 +1793,12 @@ const MAX_LOG=150; let logArr=[];
 function addLog(msg, cls='log-info') {
   logArr.push({msg,cls});
   if(logArr.length>MAX_LOG) logArr.shift();
-  const el=document.getElementById('log-lines');
-  el.innerHTML=logArr.map(l=>`<div class="${l.cls}">${esc(l.msg)}</div>`).join('');
-  el.scrollTop=el.scrollHeight;
+  // The same log shows on the TRAINING and WATCH tabs.
+  const html=logArr.map(l=>`<div class="${l.cls}">${esc(l.msg)}</div>`).join('');
+  for(const id of ['log-lines','train-log-lines']){
+    const el=document.getElementById(id); if(!el) continue;
+    el.innerHTML=html; el.scrollTop=el.scrollHeight;
+  }
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -1844,11 +1899,12 @@ function handleMetrics(d) {
   }
   updateTermBars(d.term_share, d.term_abs);
 
-  if(d.history) {
-    wrHist.length=0;
-    for(const [,w] of d.history) wrHist.push(w);
-    drawMini('cv-wr', wrHist, 0, 1, 'var(--green)', 0.65);
-  }
+  // 2v1 only: blue aircraft lost per episode
+  const team = d.blue_losses_per_ep!=null;
+  document.getElementById('kpi-lost').style.display = team ? '' : 'none';
+  document.getElementById('card-lost').style.display = team ? '' : 'none';
+  if(team) setKPI('kpi-lost','kv-lost',d.blue_losses_per_ep.toFixed(2), d.blue_losses_per_ep<0.3, d.blue_losses_per_ep>1);
+  if(d.history) { dashHist = histPoints(d.history); drawDash(); }
 }
 
 // Order mirrors REWARD_TERMS in bvr_env.py: PHI_TERMS, then COST_TERMS.
@@ -1894,6 +1950,108 @@ function updateCurriculum(name) {
     el.className='curr-stage'+(i<idx?' done':i===idx?' active':'');
   });
 }
+
+// ─── Training dashboard charts ────────────────────────────────────
+// One time series per card, x = episodes of this run. Colours validated for
+// the dark card surface (dataviz validator: all checks pass for the four
+// outcome colours); several series get a legend and direct labels.
+const TS_COL = {win:'#3987e5', loss:'#d95926', to:'#199e70', mut:'#c98500'};
+let dashHist = [];
+function histPoints(h){
+  // older trainers wrote [episode, win rate, exchange ratio]
+  return (h||[]).map(e => Array.isArray(e) ? {ep:e[0], win:e[1], exch:e[2]} : e);
+}
+const DASH = [
+  {id:'outcomes', y0:0, y1:1, fmt:v=>(v*100).toFixed(0)+'%', ref:0.65,
+   series:[{k:'win',name:'win',c:TS_COL.win},{k:'loss',name:'loss',c:TS_COL.loss},
+           {k:'to',name:'timeout',c:TS_COL.to},{k:'mut',name:'mutual',c:TS_COL.mut}]},
+  {id:'exch',  y0:0, fmt:v=>v.toFixed(2), series:[{k:'exch',name:'exchange ratio',c:TS_COL.win}]},
+  {id:'pk',    y0:0, y1:1, fmt:v=>v.toFixed(2), series:[{k:'pk',name:'realised Pk',c:TS_COL.win}]},
+  {id:'shots', y0:0, fmt:v=>v.toFixed(2), series:[{k:'shots',name:'shots per episode',c:TS_COL.win}]},
+  {id:'rrmax', y0:0, y1:1.2, fmt:v=>v.toFixed(2), band:[0.6,0.85], series:[{k:'rrmax',name:'r / Rmax',c:TS_COL.win}]},
+  {id:'track', y0:0, y1:1, fmt:v=>(v*100).toFixed(0)+'%', series:[{k:'track',name:'track fraction',c:TS_COL.win}]},
+  {id:'rev',   y0:0, fmt:v=>v.toFixed(1), series:[{k:'rev',name:'reversals / min',c:TS_COL.win}]},
+  {id:'lost',  y0:0, y1:2, fmt:v=>v.toFixed(2), series:[{k:'lost',name:'blue lost / episode',c:TS_COL.win}]},
+];
+function drawDash(){
+  if(VIEW!=='train') return;
+  for(const cfg of DASH){
+    const box=document.getElementById('ch-'+cfg.id);
+    if(box && box.offsetParent!==null) tsChart(box, cfg, dashHist);
+  }
+}
+function tsChart(box, cfg, hist){
+  const multi = cfg.series.length>1;
+  const ser = cfg.series.map(s=>({...s, pts: hist.filter(h=>typeof h[s.k]==='number').map(h=>[h.ep,h[s.k]])}))
+                        .filter(s=>s.pts.length);
+  if(!ser.length || Math.max(...ser.map(s=>s.pts.length))<2){
+    box.innerHTML='<div class="ts-empty">waiting for data: a point every 10 episodes</div>'; return;
+  }
+  const W=Math.max(300, box.clientWidth), H=180, L=48, R=multi?84:16, T=10, B=24;
+  const pw=W-L-R, ph=H-T-B;
+  const all=ser.flatMap(s=>s.pts);
+  let x0=Math.min(...all.map(p=>p[0])), x1=Math.max(...all.map(p=>p[0]));
+  if(x1<=x0) x1=x0+1;
+  let y0=cfg.y0??Math.min(...all.map(p=>p[1]));
+  let y1=cfg.y1??Math.max(...all.map(p=>p[1]))*1.1;
+  if(cfg.y1!=null) y1=Math.max(cfg.y1, Math.max(...all.map(p=>p[1])));
+  if(y1<=y0) y1=y0+1;
+  const yt=niceTicks(y0,y1,4), xt=niceTicks(x0,x1,5);
+  y1=Math.max(y1, yt.ticks[yt.ticks.length-1]);
+  const X=x=>L+(x-x0)/(x1-x0)*pw, Y=y=>T+ph-(y-y0)/(y1-y0)*ph;
+  let g='';
+  if(cfg.band){
+    const [b0,b1]=cfg.band;
+    g+=`<rect x="${L}" y="${Y(b1)}" width="${pw}" height="${Y(b0)-Y(b1)}" fill="rgba(57,135,229,0.12)"/>`;
+  }
+  for(const v of yt.ticks) if(v>=y0-1e-9 && v<=y1+1e-9)
+    g+=`<line x1="${L}" x2="${L+pw}" y1="${Y(v)}" y2="${Y(v)}" stroke="#16263a"/>
+        <text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${cfg.fmt(v)}</text>`;
+  for(const v of xt.ticks) if(v>=x0 && v<=x1)
+    g+=`<text x="${X(v)}" y="${T+ph+17}" text-anchor="middle">${Math.round(v).toLocaleString('en-US')}</text>`;
+  g+=`<line x1="${L}" x2="${L+pw}" y1="${T+ph}" y2="${T+ph}" stroke="#2a3d57"/>`;
+  if(cfg.ref!=null && cfg.ref<=y1)
+    g+=`<line x1="${L}" x2="${L+pw}" y1="${Y(cfg.ref)}" y2="${Y(cfg.ref)}" stroke="#9ab3cf" stroke-dasharray="4 4" opacity="0.7"/>`;
+  for(const s of ser)
+    g+=`<path d="${s.pts.map((p,i)=>`${i?'L':'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('')}" fill="none" stroke="${s.c}" stroke-width="2" stroke-linejoin="round"/>`;
+  if(multi){                                   // direct labels, pushed apart
+    const ends=ser.map(s=>({s,y:Y(s.pts[s.pts.length-1][1])})).sort((a,b)=>a.y-b.y);
+    for(let i=1;i<ends.length;i++) if(ends[i].y-ends[i-1].y<14) ends[i].y=ends[i-1].y+14;
+    // lines that end together near the axis would push labels off the chart:
+    // pin the lowest to the axis and re-space upward, moving only the labels
+    // that collide, so a label far above stays beside its line
+    const n=ends.length;
+    if(n && ends[n-1].y>T+ph){
+      ends[n-1].y=T+ph;
+      for(let i=n-2;i>=0;i--) if(ends[i].y>ends[i+1].y-14) ends[i].y=ends[i+1].y-14;
+    }
+    g+=ends.map(e=>`<text x="${L+pw+8}" y="${e.y+4}" fill="#b8d4ee">${e.s.name}</text>`).join('');
+  }
+  const legend = multi ? `<div class="ch-legend">${ser.map(s=>`<span><i style="border-top-color:${s.c}"></i>${s.name}</span>`).join('')}</div>` : '';
+  box.innerHTML = `${legend}<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" fill="#9ab3cf" font-family="inherit">${g}
+    <g class="ts-hover" style="display:none"><line y1="${T}" y2="${T+ph}" stroke="#6f86a3" stroke-dasharray="2 3"/>
+    ${ser.map(s=>`<circle r="4" fill="${s.c}" stroke="#0d1220" stroke-width="2"/>`).join('')}</g>
+    <rect x="${L}" y="${T}" width="${pw}" height="${ph}" fill="transparent" style="cursor:crosshair"/></svg><div class="ch-tip"></div>`;
+  const svg=box.querySelector('svg'), hov=box.querySelector('.ts-hover'), tip=box.querySelector('.ch-tip');
+  const hit=box.querySelector('rect:last-of-type');
+  hit.addEventListener('mousemove', e=>{
+    const r=svg.getBoundingClientRect(), ex=x0+((e.clientX-r.left)*W/r.width-L)/pw*(x1-x0);
+    const vals=ser.map(s=>s.pts.reduce((a,p)=>Math.abs(p[0]-ex)<Math.abs(a[0]-ex)?p:a));
+    const px=X(vals[0][0]);
+    hov.style.display='';
+    hov.querySelector('line').setAttribute('x1',px); hov.querySelector('line').setAttribute('x2',px);
+    hov.querySelectorAll('circle').forEach((c,i)=>{c.setAttribute('cx',X(vals[i][0])); c.setAttribute('cy',Y(vals[i][1]));});
+    const h=hist.find(q=>q.ep===vals[0][0]);
+    tip.innerHTML=`<b>episode ${vals[0][0].toLocaleString('en-US')}</b>${h&&h.stage?' · '+h.stage.replace('_SHOOTER',''):''}`
+      +ser.map((s,i)=>`<div><span style="color:${s.c}">━</span> ${s.name}: <b>${cfg.fmt(vals[i][1])}</b></div>`).join('');
+    tip.style.display='block';
+    const bx=box.getBoundingClientRect(), sx=e.clientX-bx.left, sy=e.clientY-bx.top;
+    tip.style.left=(sx+14+tip.offsetWidth>bx.width ? sx-14-tip.offsetWidth : sx+14)+'px';
+    tip.style.top=Math.max(0,sy-tip.offsetHeight-8)+'px';
+  });
+  hit.addEventListener('mouseleave',()=>{hov.style.display='none'; tip.style.display='none';});
+}
+if(window.ResizeObserver) new ResizeObserver(()=>drawDash()).observe(document.getElementById('train-dash'));
 
 // ─── Mini chart ───────────────────────────────────────────────────
 function drawMini(id,data,lo,hi,col,thr) {
@@ -2099,10 +2257,11 @@ document.getElementById('btn-train').onclick=()=>{
   totalSteps=steps; epStartTime=Date.now(); epCount=0; stepsDone=0;
   logArr=[];
   // Clear all displays so old-run values don't mislead
-  ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf','kv-rev','kv-doc'].forEach(id=>{
+  dashHist=[]; drawDash();
+  ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf','kv-rev','kv-doc','kv-lost'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.textContent='—';
   });
-  ['kpi-wr','kpi-ex','kpi-pk','kpi-to'].forEach(id=>{
+  ['kpi-wr','kpi-ex','kpi-pk','kpi-to','kpi-lost'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.className='kpi';
   });
   document.getElementById('wr-bar').style.width='0%';
@@ -2263,6 +2422,7 @@ function leftColAvail(){
 // collapse/expand instead of overflowing or leaving a gap.
 function leftColNormalize(){
   const avail = leftColAvail();
+  if (avail <= 0) return;            // WATCH tab hidden: nothing to lay out
   const totalWeight = LEFT_IDS.reduce((s,k)=>s+LEFT_WEIGHT[k],0);
   LEFT_IDS.forEach(id => {
     if (LEFT_H[id] == null) LEFT_H[id] = avail * LEFT_WEIGHT[id] / totalWeight;
@@ -2348,6 +2508,7 @@ function mainColAvail(){
 
 function mainColNormalize(){
   const avail = mainColAvail();
+  if (avail <= 0) return;            // WATCH tab hidden
   if (MAIN_RIGHT_W == null) MAIN_RIGHT_W = 360;   // matches the old fixed width
   MAIN_RIGHT_W = Math.max(MAIN_MIN_RIGHT, Math.min(MAIN_RIGHT_W, avail-MAIN_MIN_LEFT));
   const leftW = Math.max(MAIN_MIN_LEFT, avail-MAIN_RIGHT_W);
@@ -2400,7 +2561,7 @@ function resize(){
   // 2D altitude canvas
   const calt=document.getElementById('cv-alt'); if(calt){calt.width=calt.clientWidth;calt.height=calt.clientHeight;}
   if(lastFrame){drawAlt();}
-  drawMini('cv-wr',wrHist,0,1,'var(--green)',0.65);
+  drawDash();
 }
 window.addEventListener('resize',resize);
 setTimeout(resize,100);
@@ -3047,6 +3208,7 @@ const _lerp=(a,b,t)=>a+(b-a)*t;
 function _alerp(a,b,t){ let d=b-a; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI; return a+d*t; }
 
 function t3Render(){
+  if(VIEW!=='watch') return;         // no 3D work while another tab is shown
   const A=T3.fA, B=T3.fB;
   if(A&&B){
     const t = T3.dtEMA>16 ? Math.min(1,(performance.now()-T3.tB)/T3.dtEMA) : 1;
