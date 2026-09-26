@@ -174,6 +174,9 @@ class BvrEnv(gym.Env):
 
     R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.5
     R_ESCAPE=-0.6; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
+    # Longest wait for missiles still in flight after the agent is killed; a
+    # missile's own lifetime (MAX_FLIGHT, 120 s) ends it sooner.
+    RESOLVE_MAX_S=130.0
 
     # Cost of changing the heading choice, per 180° of change. Heading
     # choices are offsets from the line to the bandit, re-picked every second;
@@ -244,6 +247,7 @@ class BvrEnv(gym.Env):
         self._state={}; self._step_num=0; self._t_sim=0.0
         self._ready=False; self._episode_id=0; self._opponent=None
         self._outcome=None; self._last_shot_t=-999.0
+        self._done=False; self._frozen_phi=None; self.resolve_hook=None
         self._shots_fired=0; self._misses=0; self._support_losses=0
         self._events_seen=set(); self._launch_log=[]; self._last_convert_t=-1e9
         self._cmd_hdg=0.0; self._cmd_alt=9000.0; self._cmd_spd=300.0
@@ -275,6 +279,7 @@ class BvrEnv(gym.Env):
             return self._build_obs(),{}
 
         self._step_num=0; self._t_sim=0.0; self._ready=False; self._outcome=None
+        self._done=False; self._frozen_phi=None
         self._last_shot_t=-999.0; self._shots_fired=0; self._misses=0
         self._support_losses=0; self._events_seen.clear(); self._launch_log=[]
         self._state={}; self._last_convert_t=-1e9
@@ -315,22 +320,30 @@ class BvrEnv(gym.Env):
         hdg_cost = self.W_HDG_CHANGE*abs(_wrap_deg(off-self._prev_hdg_off))/180.0
         self._prev_hdg_off = off
         shots_before = self._shots_fired
+        was_resolving = self._frozen_phi is not None
         self._advance(1.0/self.DECISION_HZ, cmd, fire=want_fire)
         shot_cost = self._shot_cost*(self._shots_fired-shots_before)
 
         obs   = self._build_obs()
-        phi   = self._potential()
-        shaping = self._gamma*phi - self._prev_phi
+        # After a kill the potential stays where it was at the kill: with the
+        # bandit gone the track and envelope terms would drift for reasons
+        # that have nothing to do with how the agent flies.
+        if self._frozen_phi is not None: phi, terms = self._frozen_phi
+        else: phi = self._potential(); terms = self._phi_terms
+        if was_resolving:
+            shaping = 0.0
+            shaping_terms = {k: 0.0 for k in PHI_TERMS}
+        else:
+            shaping = self._gamma*phi - self._prev_phi
+            # Same gamma*new - old applied per term, so these sum to `shaping`
+            # exactly and show which part of the potential moved the reward.
+            shaping_terms = {k: self._gamma*terms[k] - self._prev_phi_terms[k]
+                             for k in PHI_TERMS}
         self._prev_phi = phi
-        # Same gamma*new - old applied per term, so these sum to `shaping`
-        # exactly and show which part of the potential moved the reward.
-        terms = self._phi_terms
-        shaping_terms = {k: self._gamma*terms[k] - self._prev_phi_terms[k]
-                         for k in PHI_TERMS}
         self._prev_phi_terms = dict(terms)
         reward = float(shaping) - hdg_cost - shot_cost
 
-        terminated = self._outcome is not None
+        terminated = self._done
         truncated  = (not terminated) and (self._step_num >= self.MAX_STEPS)
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
@@ -341,7 +354,9 @@ class BvrEnv(gym.Env):
                 "opponent_detail":getattr(self._opponent,"label",self._opponent_type.name)}
 
         if terminated or truncated:
-            if truncated: self._outcome="TIMEOUT"
+            # Truncated while a kill waits on missiles still in flight: the
+            # kill stands.
+            if truncated: self._outcome=self._outcome or "TIMEOUT"
             reward += self._terminal_reward(self._outcome)
             info.update({"terminal_outcome":self._outcome,
                          "shots_fired":self._shots_fired,
@@ -399,7 +414,16 @@ class BvrEnv(gym.Env):
         # decision: it changes slowly, and at 50 Hz it cost ~30% of throughput.
         self._opponent.rmax_t = self._bandit_rmax()
 
-        for k in range(n_frames):
+        # Frames past the decision period: the agent is dead but its missile
+        # is still flying, so the rest of the fight is flown out here, with
+        # the opponent still flying, and the episode ends in this step.
+        k = 0
+        ff_limit = n_frames + int(self.RESOLVE_MAX_S/sim_dt)
+        while k < n_frames or self._fast_forward():
+            if k >= ff_limit:
+                self._done = True; return
+            if k >= n_frames and k % n_frames == 0 and self.resolve_hook is not None:
+                self.resolve_hook(self)
             pkt = dict(cmd)
             pkt["fire"]         = 1 if k<fire_frames else 0
             pkt["msl_guidance"] = self._guidance_packet()
@@ -414,6 +438,10 @@ class BvrEnv(gym.Env):
 
             tlm = self._world.step(pkt, opp)
             self._ingest(tlm)
+            k += 1
+            if not self._state.get("alive",1):
+                if self._check_terminal(): return
+                continue
             ph = self._state.get("phi",0.0)
             if abs(ph) > self.BANK_REV_DEG*DEG2RAD:
                 sg = 1 if ph > 0 else -1
@@ -462,18 +490,38 @@ class BvrEnv(gym.Env):
             if   ev.get("ac")==1: self._outcome="CRASH"
             elif ev.get("ac")==2 and self._outcome is None: self._outcome="BANDIT_CRASH"
 
+    def _fast_forward(self) -> bool:
+        """The agent is dead and the episode waits only on its missiles."""
+        return (self._outcome is not None and not self._done
+                and not self._state.get("alive",1))
+
     def _check_terminal(self) -> bool:
-        if self._outcome is not None: return True
+        if self._done: return True
         s=self._state
+        if self._outcome is not None:
+            # A kill ends the fight only once no missile is left in flight at
+            # a live aircraft: a shooter killed with its missile already on
+            # its own seeker can still take its killer with it (MUTUAL_KILL).
+            # The survivor flies on meanwhile; if that is the agent it can
+            # still defend, if it is the opponent the rest is flown out in
+            # _advance within this step.
+            if self._outcome=="KILL" and s.get("alt",9000)<self.MIN_ALT:
+                self._outcome="MUTUAL_KILL"   # flew into the ground defending
+            elif self._outcome in ("KILL","SHOT_DOWN") and self._world.missiles_pending():
+                if self._frozen_phi is None:
+                    self._frozen_phi=(self._potential(), dict(self._phi_terms))
+                return False
+            self._done=True; return True
         if not s: return False
-        if s.get("alt",9000)<self.MIN_ALT:    self._outcome="CRASH";  return True
+        if s.get("alt",9000)<self.MIN_ALT:    self._outcome="CRASH"
         # The world never reports a crash (the flight model just clamps at
         # 10 m), so the same floor must be applied to the bandit here. Without
         # it BANDIT_CRASH could not happen and a self-play snapshot could fly
         # into the ground and keep fighting while the agent could not.
-        if s.get("alt_t",9000)<self.MIN_ALT:  self._outcome="BANDIT_CRASH"; return True
-        if s.get("range",0)>self.ESCAPE_RANGE: self._outcome="ESCAPE"; return True
-        return False
+        elif s.get("alt_t",9000)<self.MIN_ALT:  self._outcome="BANDIT_CRASH"
+        elif s.get("range",0)>self.ESCAPE_RANGE: self._outcome="ESCAPE"
+        else: return False
+        self._done=True; return True
 
     def _terminal_reward(self, outcome:str) -> float:
         base={"KILL":self.R_KILL,"SHOT_DOWN":self.R_KILLED,"MUTUAL_KILL":self.R_MUTUAL,
@@ -554,6 +602,9 @@ class BvrEnv(gym.Env):
     def _radar_update(self, dt:float=0.1) -> None:
         s=self._state
         if not s: return
+        # A destroyed bandit is frozen in place in the world; it must not be
+        # seen, so the track coasts and drops as it would on a real kill.
+        if not s.get("alive_t",1): return
         att   =(s.get("psi",0),s.get("theta",0),s.get("phi",0))
         omega = np.zeros(3) if self.RADAR_OMEGA_COMPENSATED else \
                 np.array([s.get("p",0),s.get("q",0),s.get("r_body",0)])

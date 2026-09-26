@@ -627,6 +627,70 @@ def test_team_losses():
     print("  2v1 losses .................. OK")
 
 
+def test_mutual_kill_1v1():
+    """A kill ends the fight only once no missile is left in flight at a live aircraft."""
+    import math
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, seed=0)
+    straight = HDG_OFFSETS_DEG.index(0)
+    outcomes = []
+    for ep in range(12):
+        env.reset(seed=ep)
+        w = env._world
+        w.acs[0].reset_state(0.0, 0.0, 9000.0, 0.0, 280.0, 0.6)
+        w.acs[1].reset_state(0.0, 30000.0, 9000.0, math.pi, 280.0, 0.6)
+        fired = [False, False]
+        while True:
+            r = float(np.linalg.norm(w.pos(1) - w.pos(2)))
+            if not fired[0] and r < 26000 - (ep % 5) * 1500:
+                w._launch(1, {"target": 2}); fired[0] = True
+            if not fired[1] and r < 30000:
+                w._launch(2, {"target": 1}); fired[1] = True
+            _, rew, term, trunc, info = env.step(np.array([straight, 2, 0, 0]))
+            if term or trunc:
+                break
+        o = info["terminal_outcome"]
+        outcomes.append(o)
+        if term:
+            assert not w.missiles_pending(), f"ep {ep}: {o} with a missile still in flight"
+        if o == "MUTUAL_KILL":
+            assert not any(w.alive)
+    assert "MUTUAL_KILL" in outcomes, outcomes
+    print(f"  mutual kill 1v1 ............. OK  ({outcomes.count('MUTUAL_KILL')}/12 mutual)")
+
+
+def test_team_missiles_resolve():
+    """2v1: the episode waits for missiles in flight after red dies or both blue are lost."""
+    import math
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = TeamBvrEnv(opponent_type=T.STRAIGHT, seed=3, doctrine="AGGRESSIVE")
+    outcomes = []
+    for ep in range(8):
+        e.reset()
+        w = e._world
+        w.acs[0].reset_state(-2000.0, 0.0, 9000.0, 0.0, 280.0, 0.6)
+        w.acs[1].reset_state(2000.0, 0.0, 9000.0, 0.0, 280.0, 0.6)
+        w.acs[2].reset_state(0.0, 32000.0, 9000.0, math.pi, 280.0, 0.6)
+        fired = set()
+        while True:
+            r = float(np.linalg.norm(w.pos(1) - w.pos(3)))
+            for owner, tgt, at in ((3, 1, 30000), (3, 2, 29000), (1, 3, 25000 - 1500 * (ep % 4))):
+                if (owner, tgt) not in fired and r < at:
+                    w._launch(owner, {"target": tgt}); fired.add((owner, tgt))
+            _, rew, term, trunc, infos = e.step([[0, 2, 0, 0], [0, 2, 0, 0]])
+            if term or trunc:
+                break
+        o = infos[0]["terminal_outcome"]
+        outcomes.append(o)
+        if term:
+            assert not w.missiles_pending(), f"ep {ep}: {o} with a missile still in flight"
+        if o == "MUTUAL_KILL":
+            assert not w.alive[2] and infos[0]["blue_losses"] >= 1
+    print(f"  2v1 missiles resolve ........ OK  ({', '.join(sorted(set(outcomes)))})")
+
+
 def test_team_vec_env():
     """2v1 as SB3 slots: two slots per fight, one mask row each, both end and reset together."""
     from bvr_team import TeamBvrEnv
@@ -683,6 +747,8 @@ if __name__ == "__main__":
         ("2v1 datalink",            test_team_datalink),
         ("2v1 losses",              test_team_losses),
         ("2v1 vec env",             test_team_vec_env),
+        ("mutual kill 1v1",         test_mutual_kill_1v1),
+        ("2v1 missiles resolve",    test_team_missiles_resolve),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

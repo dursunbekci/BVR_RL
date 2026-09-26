@@ -63,9 +63,15 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 #run-info .run-notes{margin-top:8px;border-top:1px solid var(--border);padding-top:6px}
 #run-info .run-notes div{padding:1px 0;color:var(--text);overflow-wrap:anywhere}
 #run-info .run-notes div.warn{color:var(--amber)}
-#code-warn{display:none;border:1px solid var(--red);background:#1a0808;color:#ffb3a8;
-           padding:8px 12px;font-size:12px;line-height:1.5}
-#code-warn b{color:#ffd4cc}
+#run-info .run-kv span.warn{color:var(--amber)}
+/* a chart card maximised over the page */
+.max-btn{margin-left:auto;background:none;border:1px solid var(--border);color:var(--text);
+         font-size:13px;line-height:1;padding:2px 6px;cursor:pointer;font-family:inherit}
+.max-btn:hover{color:var(--bright);border-color:var(--blue)}
+#max-backdrop{display:none;position:fixed;inset:0;background:#000b;z-index:140}
+.dash-card.maxed{position:fixed;inset:56px 28px 28px 28px;z-index:150;display:flex;flex-direction:column;
+                 padding:14px 20px;box-shadow:0 0 0 1px var(--blue)}
+.dash-card.maxed .ts-chart{flex:1;min-height:0;overflow:hidden}
 #lib-list{width:290px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
           padding:8px;background:var(--panel)}
 #lib-list h4{font-size:11px;letter-spacing:2px;color:#c79bff;margin:10px 0 4px}
@@ -716,7 +722,6 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
     </div>
   </div>
   <div id="train-dash">
-    <div id="code-warn"></div>
     <div class="dash-row">
       <div class="dash-card" style="flex:2">
         <div style="font-size:12px;letter-spacing:2px;color:var(--bright);font-weight:bold;margin-bottom:4px">CURRICULUM STAGE</div>
@@ -830,7 +835,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
     </div>
     <div class="dash-grid">
       <div class="dash-card wide" id="card-outcomes">
-        <div class="dash-head"><span class="dash-title">OUTCOMES</span><button class="help-btn" onclick="help(this,'OUTCOMES','How the last 50 finished episodes ended, plotted every 10 episodes.\n\n• WIN: my missile killed the bandit\n• LOSS: shot down\n• MUTUAL: both killed (in 2 v 1: red killed at the cost of a blue aircraft)\n• TIMEOUT: nobody died in 300 s\n\nThe dashed line is the 65% advance mark. A rising timeout line is the first sign of passivity.')">?</button></div>
+        <div class="dash-head"><span class="dash-title">OUTCOMES</span><button class="help-btn" onclick="help(this,'OUTCOMES','How the last 50 finished episodes ended, plotted every 10 episodes.\n\n• WIN: my missile killed the bandit\n• LOSS: shot down\n• MUTUAL: both killed, including by a missile that flies on after its shooter is killed (in 2 v 1: red killed at the cost of a blue aircraft)\n• TIMEOUT: nobody died in 300 s\n\nThe dashed line is the 65% advance mark. A rising timeout line is the first sign of passivity.')">?</button></div>
         <div class="dash-sub">share of the last 50 episodes · dashed: the 65% advance mark</div>
         <div class="ts-chart" id="ch-outcomes"></div>
       </div>
@@ -894,6 +899,8 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
     </div>
   </div>
 </div>
+
+<div id="max-backdrop"></div>
 
 <!-- MAIN -->
 <div id="main">
@@ -1904,10 +1911,10 @@ function renderRun() {
       ['PPO', `γ ${c.gamma} · lr ${c.lr} · batch ${c.batch_size}`],
     ];
     const code=RUN.code||CODE;
-    if(code) rows.push(['CODE', code.commit ? `${code.branch} @ ${code.commit}`
-      +(code.modified&&code.modified.length?` · ${code.modified.length} modified file${code.modified.length>1?'s':''}`:'')
-      : (code.error||'unknown')]);
-    html+='<div class="run-kv">'+rows.map(([k,v])=>`<span>${k}</span><span>${esc(v)}</span>`).join('')+'</div>';
+    if(code) rows.push(['CODE', code.commit ? `${code.branch} @ ${code.commit}` : (code.error||'unknown')]);
+    if(code && code.modified && code.modified.length)
+      rows.push(['MODIFIED', code.modified.join(', '), 'warn']);
+    html+='<div class="run-kv">'+rows.map(([k,v,c])=>`<span>${k}</span><span${c?` class="${c}"`:''}>${esc(v)}</span>`).join('')+'</div>';
   }
   if(notes && notes.length)
     html+='<div class="run-notes"><div style="color:var(--muted);font-size:11px;letter-spacing:1px">TRAINER AT STARTUP</div>'
@@ -1916,16 +1923,17 @@ function renderRun() {
     html+='<div class="run-notes"><div style="color:var(--muted)">Waiting for the trainer to start…</div></div>';
   box.innerHTML=html;
 }
+// Files that differ from the checked-out commit: said once in the training
+// log (and listed under CURRENT RUN), not as a banner that never goes away.
+let codeWarned='';
 function renderCodeWarn() {
-  const el=document.getElementById('code-warn'); if(!el) return;
   const mod=CODE && CODE.modified || [];
-  if(CODE && CODE.commit && mod.length) {
-    el.innerHTML=`<b>⚠ ${mod.length} file${mod.length>1?'s':''} differ from the checked-out commit `
-      +`${esc(CODE.branch)} @ ${esc(CODE.commit)}:</b> ${mod.map(esc).join(', ')}.<br>`
-      +`Training and evaluation run these edited files. If that is not intended, restore them `
-      +`with <code>git checkout -- &lt;file&gt;</code> and restart the GUI.`;
-    el.style.display='block';
-  } else el.style.display='none';
+  const key=CODE ? CODE.commit+':'+mod.join(',') : '';
+  if(!CODE || !CODE.commit || !mod.length || key===codeWarned) return;
+  codeWarned=key;
+  addLog(`⚠ ${mod.length} file${mod.length>1?'s':''} differ from ${CODE.branch} @ ${CODE.commit}: `
+    +`${mod.join(', ')}. Training and evaluation run these edited files; if that is not `
+    +`intended, restore them with git checkout -- <file> and restart the GUI.`, 'log-warn');
 }
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -2118,7 +2126,9 @@ function tsChart(box, cfg, hist){
   if(!ser.length || Math.max(...ser.map(s=>s.pts.length))<2){
     box.innerHTML='<div class="ts-empty">waiting for data: a point every 10 episodes</div>'; return;
   }
-  const W=Math.max(300, box.clientWidth), H=180, L=48, R=multi?84:16, T=10, B=24;
+  const big = !!box.closest('.maxed');
+  const W=Math.max(300, box.clientWidth), L=48, R=multi?84:16, T=10, B=24;
+  const H = big ? Math.max(240, box.clientHeight-(multi?24:0)-6) : 180;
   const pw=W-L-R, ph=H-T-B;
   const all=ser.flatMap(s=>s.pts);
   let x0=Math.min(...all.map(p=>p[0])), x1=Math.max(...all.map(p=>p[0]));
@@ -2127,7 +2137,7 @@ function tsChart(box, cfg, hist){
   let y1=cfg.y1??Math.max(...all.map(p=>p[1]))*1.1;
   if(cfg.y1!=null) y1=Math.max(cfg.y1, Math.max(...all.map(p=>p[1])));
   if(y1<=y0) y1=y0+1;
-  const yt=niceTicks(y0,y1,4), xt=niceTicks(x0,x1,5);
+  const yt=niceTicks(y0,y1,big?8:4), xt=niceTicks(x0,x1,big?10:5);
   y1=Math.max(y1, yt.ticks[yt.ticks.length-1]);
   const X=x=>L+(x-x0)/(x1-x0)*pw, Y=y=>T+ph-(y-y0)/(y1-y0)*ph;
   let g='';
@@ -2183,6 +2193,35 @@ function tsChart(box, cfg, hist){
   hit.addEventListener('mouseleave',()=>{hov.style.display='none'; tip.style.display='none';});
 }
 if(window.ResizeObserver) new ResizeObserver(()=>drawDash()).observe(document.getElementById('train-dash'));
+
+// Maximise: every chart card gets a button that lays it over the page at
+// full size, with finer axes; the button, Esc or a click outside restores it.
+function chartMax(card) {
+  const on = !card.classList.contains('maxed');
+  document.querySelectorAll('.dash-card.maxed').forEach(c=>{
+    c.classList.remove('maxed');
+    const b=c.querySelector('.max-btn'); b.textContent='⤢'; b.title='Maximise this chart';
+  });
+  if(on) {
+    card.classList.add('maxed');
+    const b=card.querySelector('.max-btn'); b.textContent='✕'; b.title='Restore (Esc)';
+  }
+  document.getElementById('max-backdrop').style.display = on ? 'block' : 'none';
+  drawDash();
+}
+document.querySelectorAll('#train-dash .dash-card').forEach(card=>{
+  if(!card.querySelector('.ts-chart')) return;
+  const b=document.createElement('button');
+  b.className='max-btn'; b.textContent='⤢'; b.title='Maximise this chart';
+  b.onclick=e=>{ e.stopPropagation(); chartMax(card); };
+  card.querySelector('.dash-head').appendChild(b);
+});
+document.getElementById('max-backdrop').onclick=()=>{
+  const c=document.querySelector('.dash-card.maxed'); if(c) chartMax(c);
+};
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ const c=document.querySelector('.dash-card.maxed'); if(c) chartMax(c); }
+});
 
 // ─── Mini chart ───────────────────────────────────────────────────
 function drawMini(id,data,lo,hi,col,thr) {

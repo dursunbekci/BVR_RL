@@ -151,6 +151,15 @@ class SimWorld:
             self.events.append({"type": "AC_REMOVED", "ac": i, "cause": cause,
                                 "t_sim": round(self.t_sim, 3)})
 
+    def missiles_pending(self) -> bool:
+        """A missile is still in flight at a live aircraft.
+
+        The fight is not over while one is: a shooter killed with its
+        missile already locked on can still take its killer with it.
+        """
+        return any(m.phase not in (MslPhase.HIT, MslPhase.MISS) and self.alive[m.target - 1]
+                   for m in self.missiles)
+
     # ── main step ───────────────────────────────────────────────────
     def step(self, cmd1: dict, cmd2: dict) -> dict:
         """
@@ -173,7 +182,12 @@ class SimWorld:
         # scripted shooters send none and guide on the target's truth.
         for m in self.missiles:
             cmd = cmds[m.owner - 1]
-            if "msl_guidance" in cmd:
+            if not self.alive[m.owner - 1]:
+                # A destroyed shooter supports nothing: its missiles fly on
+                # their own seeker if it has locked, and otherwise go dead
+                # after the missile's support timeout.
+                m.update_guidance({"valid": 0})
+            elif "msl_guidance" in cmd:
                 m.update_guidance(cmd["msl_guidance"])
             else:
                 t = self.acs[m.target - 1]
@@ -388,6 +402,7 @@ class SimWorld:
             "wpn_remaining":   self.wpn[me - 1],
             "wpn_remaining_t": self.wpn[other - 1],
             "wpn_ready": 1, "wpn_ready_t": 1,
+            "alive": int(self.alive[me - 1]), "alive_t": int(self.alive[other - 1]),
 
             # ── missiles ──────────────────────────────────────────────
             "missiles": msl_list,

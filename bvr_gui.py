@@ -706,6 +706,8 @@ class EvalRunner:
                 sobs = stacker.reset(obs) if stacker else None
                 frames = []
                 ep_r = 0.0
+                env.resolve_hook = _resolve_hook(
+                    self, frames, episode, lambda e: _build_frame(e._state, e, {"step": e._step_num}))
                 while not self._stop_evt.is_set():
                     # action
                     if model is not None:
@@ -757,6 +759,22 @@ class EvalRunner:
             HUB.set_status(evaluating=False, msg=f"Eval error: {e}")
 
 
+def _resolve_hook(runner, frames, episode, build):
+    """Show the seconds an env flies out within one step after its agents are
+    down (their missiles still in flight), paced like ordinary steps."""
+    def hook(env):
+        frame = build(env)
+        frame["ep"] = episode
+        frames.append(frame)
+        if len(frames) > RECORD_BUFFER_SIZE:
+            frames.pop(0)
+        HUB.push({"type": "telemetry", "data": frame})
+        with runner._speed_lock: spd = runner._speed
+        if not runner._stop_evt.is_set():
+            time.sleep(1.0 / spd)
+    return hook
+
+
 def _eval_team_loop(runner, env, model, privileged, stop_evt):
     """Evaluation episodes in 2v1: the checkpoint flies both blue aircraft."""
     episode = 0
@@ -766,6 +784,8 @@ def _eval_team_loop(runner, env, model, privileged, stop_evt):
         sobs = [st.reset(o) for st, o in zip(stackers, obs)] if stackers else None
         frames, ep_r = [], 0.0
         infos = [{}]
+        env.resolve_hook = _resolve_hook(runner, frames, episode,
+                                         lambda e: _build_team_frame(e, infos))
         while not stop_evt.is_set():
             masks = env.action_masks()
             if model is not None:

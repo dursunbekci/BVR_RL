@@ -26,7 +26,12 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
     rewards (so its value keeps learning what the team goes on to do).
 
 Episode ends: red destroyed or crashed, both blue aircraft lost, every live
-blue aircraft beyond escape range, or the step limit.
+blue aircraft beyond escape range, or the step limit. A kill, or the loss of
+both blue aircraft, ends it only once no missile is left in flight at a live
+aircraft: red's last missile can still take a blue aircraft with it, and a
+lost blue aircraft's locked-on missile can still kill red. While blue flies
+on after red's death, shaping stays at its value at the kill; when both blue
+are down, the rest is flown out within the step.
 
 Outcome labels reuse the 1v1 names, so trainer and GUI statistics work as
 before: KILL red killed with no blue loss · MUTUAL_KILL red killed at the
@@ -119,6 +124,7 @@ class TeamBvrEnv:
         self._opponent = None
         self._ready = False
         self._doctrine = "AGGRESSIVE"
+        self.resolve_hook = None                  # callable(env), each second flown out
 
     # ── episode ───────────────────────────────────────────────────────
     def reset(self, seed=None, options=None):
@@ -186,15 +192,20 @@ class TeamBvrEnv:
             fires.append(fire)
             shots_before.append(o._shots_fired)
 
-        flying = [o._alive for o in self._obs]
+        # After red's death blue flies on only to survive red's last missiles;
+        # the potential stays at its value at the kill (see the module notes).
+        flying = [o._alive and self._red_dead is None for o in self._obs]
         team_r = self._advance(1.0 / self.DECISION_HZ, cmds, fires)
 
         obs, rewards, infos = [], [], []
         terminated = self._outcome is not None
         truncated = (not terminated) and self._step_num >= self.MAX_STEPS
         if truncated:
-            self._outcome = "TIMEOUT"
-            team_r += self.R_TIMEOUT
+            # A result waiting only on missiles still in flight stands.
+            self._outcome = self._pending_outcome()
+            if self._outcome is None:
+                self._outcome = "TIMEOUT"
+                team_r += self.R_TIMEOUT
         for k, o in enumerate(self._obs):
             obs.append(self._agent_obs(k))
             if flying[k]:
@@ -272,12 +283,20 @@ class TeamBvrEnv:
         live = [o for o in self._obs if o._alive]
         self._opponent.rmax_t = self._obs[self._red_tgt - 1]._bandit_rmax() if live else 0.0
 
-        for f in range(n_frames):
+        f = 0
+        ff_limit = n_frames + int(BvrEnv.RESOLVE_MAX_S / sim_dt)
+        while f < n_frames or (self._outcome is None and not any(o._alive for o in self._obs)):
+            if f >= ff_limit:
+                self._outcome = self._pending_outcome()
+                break
+            if f >= n_frames and f % n_frames == 0 and self.resolve_hook is not None:
+                self.resolve_hook(self)
+            f += 1
             pkts = []
             for k, o in enumerate(self._obs):
                 if o._alive and cmds[k] is not None:
                     p = dict(cmds[k])
-                    p["fire"] = 1 if (fires[k] and f == 0) else 0
+                    p["fire"] = 1 if (fires[k] and f == 1) else 0
                     p["msl_guidance"] = o._guidance_packet()
                     p["target"] = self.RED
                 else:
@@ -349,17 +368,25 @@ class TeamBvrEnv:
             r += self.R_BANDIT_CRASH
 
         alive = [o for o in self._obs if o._alive]
-        if self._red_dead == "KILL":
-            self._outcome = "KILL" if not self._lost else "MUTUAL_KILL"
-        elif self._red_dead == "CRASH":
+        if self._red_dead == "CRASH":
             self._outcome = "BANDIT_CRASH"
-        elif not alive:
-            self._outcome = ("SHOT_DOWN" if any(c == "SHOT_DOWN" for _, c in self._lost)
-                             else "CRASH")
+        elif self._red_dead == "KILL" or not alive:
+            # Wait for missiles still in flight at a live aircraft.
+            if not w.missiles_pending():
+                self._outcome = self._pending_outcome()
         elif all(o._state.get("range", 0) > self.ESCAPE_RANGE for o in alive):
             self._outcome = "ESCAPE"
             r += self.R_ESCAPE
         return r
+
+    def _pending_outcome(self):
+        """The result the episode ends with once missiles in flight resolve."""
+        if self._red_dead == "KILL":
+            return "KILL" if not self._lost else "MUTUAL_KILL"
+        if not any(o._alive for o in self._obs):
+            return ("SHOT_DOWN" if any(c == "SHOT_DOWN" for _, c in self._lost)
+                    else "CRASH")
+        return None
 
     def _lose(self, i, cause):
         o = self._obs[i - 1]
