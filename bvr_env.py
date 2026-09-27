@@ -874,8 +874,16 @@ class BvrEnv(gym.Env):
         ps=0.0
         if om and om.get("needs_support",0) and ts==TrackState.TRACK:
             ps=self.W_SUPPORT*math.exp(-est["pos_sigma"]/600)
+        # Danger from the nearest inbound missile: near 0 while it is far or
+        # not closing, falling towards -W_DEFENCE as its time-to-go runs out,
+        # and back to 0 when it ends (a missile that hits drops out of the
+        # list on that step, so the outcome reward stands as it is). This was
+        # +W_DEFENCE*tanh(tgo/25): the same slope, but a distant missile then
+        # scored above no missile at all, paying ~+0.8 on the step the bandit
+        # fired and ~-0.8 on the step its missile ended far away.
         pd=0.0
-        if tm: pd=self.W_DEFENCE*math.tanh(float(tm.get("tgo_est",60))/25)
+        if tm and s.get("alive",1):
+            pd=-self.W_DEFENCE*(1.0-math.tanh(float(tm.get("tgo_est",60))/25))
         # Recorded from the very variables summed below, so the breakdown can
         # never drift from the potential it explains.
         self._phi_terms={"envelope":float(pe),"track":float(pt),

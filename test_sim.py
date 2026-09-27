@@ -320,6 +320,28 @@ def test_missile_tgo():
     print(f"  missile time-to-go .......... OK  ({prev:.1f} s left after 5 s)")
 
 
+def test_defence_potential():
+    """Defence shaping: 0 with no missile inbound, falls as one closes, 0 again once it ends."""
+    import math
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = BvrEnv(opponent_type=T.STRAIGHT, seed=1)
+    e.reset(seed=1)
+    def d(missiles, alive=1):
+        e._state["missiles"] = missiles
+        e._state["alive"] = alive
+        e._potential()
+        return e._phi_terms["defence"]
+    inbound = lambda tgo, state="MIDCOURSE": [{"owner": 2, "state": state, "tgo_est": tgo}]
+    assert d([]) == 0.0
+    assert abs(d(inbound(999.0))) < 1e-9                      # not closing: no danger
+    assert abs(d(inbound(25.0)) + 0.8 * (1 - math.tanh(1.0))) < 1e-9
+    assert d(inbound(5.0)) < d(inbound(25.0)) < d(inbound(60.0)) < 0
+    assert d(inbound(0.5, "HIT")) == 0.0                     # a missile that hit has ended
+    assert d(inbound(5.0), alive=0) == 0.0
+    print("  defence potential ........... OK")
+
+
 def test_world_support_timeout_via_env():
     """If AC1 turns cold (breaks lock) for 3 s, own missile must die."""
     from sim_world import SimWorld
@@ -756,6 +778,7 @@ if __name__ == "__main__":
         ("world step",              test_world_step),
         ("world fire & hit",        test_world_fire_and_hit),
         ("missile time-to-go",      test_missile_tgo),
+        ("defence potential",       test_defence_potential),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
         ("env full episode",        test_env_full_episode),
