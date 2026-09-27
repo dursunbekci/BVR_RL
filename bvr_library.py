@@ -380,6 +380,16 @@ def delete_item(kind: str, item_id: str) -> None:
 # half sine that fell back to zero there before jumping to the peak).
 _MODEL_REV = {"airframe": 2}
 
+# Changes to the simulation that are not library parameters but alter what a
+# model trained on: stored in each checkpoint's scenario record so a resume
+# can say it is a warm start. 1 = before these revisions were recorded.
+SIM_REV = 2
+_SIM_REV_NOTES = {
+    2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
+       "time-to-go inputs, the defence reward and the scripted opponents' "
+       "last-ditch defence all changed",
+}
+
 
 def fingerprint(item: dict) -> str:
     """Short hash of an item's parameter values: equal hashes, equal physics."""
@@ -520,7 +530,7 @@ def scenario_record(platform_id: str, opponent_platform_id: str,
     wingman's; "opponent_platform" is always the enemy's.
     """
     rec = {"format": fmt, "platform": platform_id, "opponent_platform": opponent_platform_id,
-           "fingerprints": {}, "items": {}}
+           "sim_rev": SIM_REV, "fingerprints": {}, "items": {}}
     sides = [("platform", platform_id), ("opponent_platform", opponent_platform_id)]
     if wingman_platform_id is not None:
         rec["wingman_platform"] = wingman_platform_id
@@ -542,8 +552,10 @@ def scenario_of(model) -> dict:
 
 
 def scenario_drift(rec: dict) -> list:
-    """Items whose parameters changed in the library since the checkpoint was saved."""
-    out = []
+    """What changed since the checkpoint was saved: the simulation, and
+    library items whose parameters were edited."""
+    out = [f"trained before the change: {_SIM_REV_NOTES[r]}; this run is a warm start"
+           for r in range(int(rec.get("sim_rev", 1)) + 1, SIM_REV + 1)]
     for side, fps in (rec.get("fingerprints") or {}).items():
         pid = rec.get(side)
         try:

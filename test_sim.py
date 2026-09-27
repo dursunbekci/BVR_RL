@@ -299,6 +299,27 @@ def test_world_fire_and_hit():
     print("  world fire & hit ............ OK")
 
 
+def test_missile_tgo():
+    """Time-to-go counts down while a missile closes (its sign was once reversed)."""
+    from missile_sim import AIM120
+    m = AIM120(1, 2, np.array([0., 0., 9000.]), np.array([0., 900., 0.]), 12000.0)
+    m.last_tgt_pos = np.array([0., 30000., 9000.])
+    m.last_tgt_vel = np.array([0., -250., 0.])
+    assert abs(m.tgo_est - 30000 / 1150) < 0.1, m.tgo_est
+    prev = m.tgo_est
+    for k in range(1, 6):                          # 5 s of supported flight
+        for _ in range(50):
+            t = m.t_flight
+            m.update_guidance({"valid": 1, "tgt_pos": [0., 30000. - 250. * t, 9000.],
+                               "tgt_vel": [0., -250., 0.]})
+            m.step(0.02, np.array([0., 30000. - 250. * t, 9000.]), np.array([0., -250., 0.]))
+        assert 0.5 < prev - m.tgo_est < 4.0, (k, prev, m.tgo_est)   # faster while boosting
+        prev = m.tgo_est
+    m.vel = -m.vel                                 # flying away: not closing
+    assert m.tgo_est == 999.0
+    print(f"  missile time-to-go .......... OK  ({prev:.1f} s left after 5 s)")
+
+
 def test_world_support_timeout_via_env():
     """If AC1 turns cold (breaks lock) for 3 s, own missile must die."""
     from sim_world import SimWorld
@@ -734,6 +755,7 @@ if __name__ == "__main__":
         ("missile kinematic miss",  test_missile_kinematic_miss),
         ("world step",              test_world_step),
         ("world fire & hit",        test_world_fire_and_hit),
+        ("missile time-to-go",      test_missile_tgo),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
         ("env full episode",        test_env_full_episode),

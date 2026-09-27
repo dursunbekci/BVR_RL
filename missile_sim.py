@@ -124,6 +124,11 @@ class AIM120:
         self.last_tgt_pos = pos.copy()
         self.last_tgt_vel = np.zeros(3, dtype=np.float64)
 
+        # The point and velocity guidance last aimed at (set every step);
+        # time-to-go is measured against the same aim.
+        self._aim_pos = None
+        self._aim_vel = None
+
         self.prev_range        = 1e12
         self._rng_to_tgt_cache = 0.0
         self.t_launch          = 0.0
@@ -202,6 +207,7 @@ class AIM120:
             aim_pos = self.last_tgt_pos + self.last_tgt_vel * self.t_since_update
             aim_vel = self.last_tgt_vel
 
+        self._aim_pos, self._aim_vel = aim_pos, aim_vel
         a_nav = self._pro_nav(aim_pos, aim_vel)
 
         # ── thrust ───────────────────────────────────────────────────
@@ -284,12 +290,24 @@ class AIM120:
     # ── properties ───────────────────────────────────────────────────
     @property
     def tgo_est(self) -> float:
-        aim = (self.last_tgt_pos + self.last_tgt_vel * self.t_since_update
-               if not self.seeker_active else self.last_tgt_pos)
+        """Seconds to reach the aim point at the current closing speed; 999
+        when the missile is not closing on it.
+
+        The aim is guidance's own (the datalinked estimate in midcourse, the
+        seeker's lock after pitbull). This used to take closing as
+        -dot(missile velocity, LOS) - the sign reversed and the target's
+        velocity left out - so it read 999 while the missile closed and gave
+        a number only when it was moving away.
+        """
+        if self._aim_pos is None:          # before the first step
+            aim = self.last_tgt_pos + self.last_tgt_vel * self.t_since_update
+            aim_vel = self.last_tgt_vel
+        else:
+            aim, aim_vel = self._aim_pos, self._aim_vel
         los = aim - self.pos
         rng = float(np.linalg.norm(los))
         los_hat = los / max(rng, 1.0)
-        closing = float(-np.dot(self.vel, los_hat))
+        closing = float(np.dot(self.vel - aim_vel, los_hat))
         return rng / closing if closing > 10.0 else 999.0
 
     @property
