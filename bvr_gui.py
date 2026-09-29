@@ -211,8 +211,12 @@ def _code_info() -> dict:
         if not commit:
             return {"commit": None, "error": "not a git checkout"}
         # Porcelain lines are "XY path"; the status letters may start with a space.
-        modified = [ln[3:] for ln in git("status", "--porcelain", "--untracked-files=no").splitlines()
-                    if ln[3:].endswith((".py", ".html", ".json"))]
+        # Only code and built-in library items count: files the program writes
+        # itself (metrics, logs, calibrated envelopes) would warn on every run.
+        modified = [p for p in (ln[3:] for ln in git("status", "--porcelain",
+                                                     "--untracked-files=no").splitlines())
+                    if p.endswith((".py", ".html"))
+                    or (p.startswith("library/builtin/") and p.endswith(".json"))]
         return {"commit": commit, "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
                 "date": git("log", "-1", "--format=%cd", "--date=short"),
                 "modified": modified}

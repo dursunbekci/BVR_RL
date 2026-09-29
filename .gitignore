@@ -9,3 +9,6 @@ models_bvr/selfplay_pool/
 
 # Cross-play evaluation output
 crossplay_results/
+
+# Live training metrics for the GUI, rewritten every 10 episodes
+bvr_metrics.json
