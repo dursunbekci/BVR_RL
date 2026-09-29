@@ -105,6 +105,10 @@ PPO_KWARGS = dict(
 # first and only reach for RecurrentPPO if it plateaus.
 N_STACK = 8
 
+# Defaults for the auto-curriculum's advance gate; --advance-win-rate and
+# --advance-min-episodes set them per run. An outmatched platform may never
+# reach 65% (a slower aircraft can't catch a faster one that runs), so a
+# heterogeneous matchup can need a lower mark.
 ADVANCE_WIN_RATE = 0.65
 ADVANCE_MIN_EPISODES = 60
 
@@ -119,7 +123,8 @@ class BvrCallback(BaseCallback):
     def __init__(self, vec_env, opponent_type, save_dir="models_bvr",
                  auto_curriculum=True, selfplay_pool=None, allow_selfplay=True,
                  no_selfplay_reason="the two sides fly different platforms, so self-play "
-                                    "does not apply", verbose=1):
+                                    "does not apply", advance_win_rate=ADVANCE_WIN_RATE,
+                 advance_min_episodes=ADVANCE_MIN_EPISODES, verbose=1):
         super().__init__(verbose)
         self.no_selfplay_reason = no_selfplay_reason
         # False when the two sides fly different platforms: a snapshot of the
@@ -132,6 +137,8 @@ class BvrCallback(BaseCallback):
         self.opponent_type = opponent_type
         self.save_dir = save_dir
         self.auto_curriculum = auto_curriculum
+        self.advance_win_rate = float(advance_win_rate)
+        self.advance_min_episodes = int(advance_min_episodes)
 
         self.outcomes = deque(maxlen=50)
         self.shots = deque(maxlen=50)
@@ -177,14 +184,14 @@ class BvrCallback(BaseCallback):
         return {"auto": bool(self.auto_curriculum), "stage": self.opponent_type.name,
                 "next": None if nxt == self.opponent_type else nxt.name,
                 "blocked": blocked, "stage_episodes": self.stage_episodes,
-                "min_episodes": ADVANCE_MIN_EPISODES, "win_rate": ADVANCE_WIN_RATE}
+                "min_episodes": self.advance_min_episodes, "win_rate": self.advance_win_rate}
 
     def describe_curriculum(self) -> str:
         c = self.curriculum_state()
         if c["blocked"]:
             return f"curriculum: stays on {c['stage']} ({c['blocked']})"
         return (f"curriculum: ON, {c['stage']} -> {c['next']} once the win rate over the last 50 "
-                f"episodes reaches {ADVANCE_WIN_RATE:.0%} after at least {ADVANCE_MIN_EPISODES} "
+                f"episodes reaches {self.advance_win_rate:.0%} after at least {self.advance_min_episodes} "
                 f"episodes at the stage")
 
     def _on_step(self) -> bool:
@@ -376,14 +383,14 @@ class BvrCallback(BaseCallback):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.model.save(path)
 
-        if self.stage_episodes >= ADVANCE_MIN_EPISODES and win_rate >= ADVANCE_WIN_RATE:
+        if self.stage_episodes >= self.advance_min_episodes and win_rate >= self.advance_win_rate:
             if self.auto_curriculum:
                 self._advance()
             elif self.ep_count - getattr(self, "_last_hold_note", -10**9) >= 200:
                 # Said again every 200 episodes: a one-off line scrolls out of
                 # the GUI's log long before anyone wonders why nothing moved.
                 self._last_hold_note = self.ep_count
-                print(f"[bvr] win rate {win_rate:.0%} is past the {ADVANCE_WIN_RATE:.0%} "
+                print(f"[bvr] win rate {win_rate:.0%} is past the {self.advance_win_rate:.0%} "
                       f"advance mark, but the auto-curriculum is OFF: staying on "
                       f"{self.opponent_type.name}")
 
@@ -455,6 +462,12 @@ def main():
     ap.add_argument("--resume", type=str, default=None)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-curriculum", action="store_true")
+    ap.add_argument("--advance-win-rate", type=float, default=ADVANCE_WIN_RATE,
+                    help="auto-curriculum: win rate over the last 50 episodes needed to "
+                         "move to the next opponent, 0-1 (default %(default)s)")
+    ap.add_argument("--advance-min-episodes", type=int, default=ADVANCE_MIN_EPISODES,
+                    help="auto-curriculum: episodes to play at a stage before it can "
+                         "advance (default %(default)s)")
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
     ap.add_argument("--save-dir", type=str, default="models_bvr")
@@ -480,6 +493,10 @@ def main():
                     help="'library' (default): each missile's calibrated table from "
                          "library/envelopes; or a path to one table used for every missile")
     args = ap.parse_args()
+    if not 0.0 < args.advance_win_rate <= 1.0:
+        ap.error("--advance-win-rate is a fraction: between 0 and 1 (e.g. 0.5 for 50%)")
+    if args.advance_min_episodes < 1:
+        ap.error("--advance-min-episodes must be at least 1")
 
     opponent = BvrOpponentType[args.opponent.upper()]
     if opponent not in CURRICULUM:
@@ -584,6 +601,8 @@ def main():
 
     cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
                      auto_curriculum=not args.no_curriculum,
+                     advance_win_rate=args.advance_win_rate,
+                     advance_min_episodes=args.advance_min_episodes,
                      allow_selfplay=not (heterogeneous or team),
                      **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 

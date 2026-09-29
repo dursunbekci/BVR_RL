@@ -670,7 +670,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>AUTO-CURRICULUM</span>
               <button class="help-btn" onclick="help(this,'AUTO-CURRICULUM',
-                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes is at least 65% and at least 60 episodes have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nIn SELF_PLAY the opponent is a frozen snapshot of the agent itself, observing through its own radar, with an ADAPTIVE shooter in a third of episodes. Snapshots are taken on entering the stage and every 250k steps, into models_bvr/selfplay_pool. The log splits the win rate by opponent kind.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
+                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes reaches ADVANCE AT (65% by default) and at least MIN EPISODES / STAGE (60 by default) have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nIn SELF_PLAY the opponent is a frozen snapshot of the agent itself, observing through its own radar, with an ADAPTIVE shooter in a third of episodes. Snapshots are taken on entering the stage and every 250k steps, into models_bvr/selfplay_pool. The log splits the win rate by opponent kind.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
             </div>
             <select id="cfg-curriculum">
               <option value="1" selected>ON (auto-advance)</option>
@@ -694,6 +694,35 @@ select option{background:#050810}
             <select id="cfg-resume">
               <option value="">— fresh start —</option>
             </select>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div class="field">
+            <div class="field-label">
+              <span>ADVANCE AT (WIN %)</span>
+              <button class="help-btn" onclick="help(this,'ADVANCE AT',
+                'The win rate over the last 50 episodes at which the auto-curriculum moves on to the next opponent. 65% by default.
+
+Set it per matchup. An outmatched platform may never reach 65%: a slower aircraft can\'t catch a faster opponent that runs, and a faster opponent\'s missiles out-range its own. For example, two UCAVs against an F-16 may need 40–50%.
+
+Too low and the agent moves on before it has learned the stage. Watch the win-rate trend: advance once it has levelled off.
+
+Ignored when AUTO-CURRICULUM is OFF.')">?</button>
+            </div>
+            <input type="number" id="cfg-adv-wr" value="65" min="5" max="100" step="5">
+          </div>
+          <div class="field">
+            <div class="field-label">
+              <span>MIN EPISODES / STAGE</span>
+              <button class="help-btn" onclick="help(this,'MIN EPISODES / STAGE',
+                'Episodes the agent must play against the current opponent before the curriculum may advance, even if the win rate is already past the mark. 60 by default.
+
+It stops a lucky streak from moving the agent on too early. Raise it if the win rate is noisy.
+
+Ignored when AUTO-CURRICULUM is OFF.')">?</button>
+            </div>
+            <input type="number" id="cfg-adv-min" value="60" min="10" max="5000" step="10">
           </div>
         </div>
 
@@ -742,14 +771,14 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 2px">
           <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">WIN RATE</span>
           <button class="help-btn" onclick="help(this,'WIN RATE',
-            'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick at 65% is the threshold for advancing to the next opponent stage.\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
+            'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick marks this run's threshold for advancing to the next opponent stage (65% unless set otherwise under ADVANCE AT).\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
           <span id="curr-note" style="font-size:11px;color:var(--amber)">advance at 65% →</span>
         </div>
         <div style="position:relative">
           <div class="prog-bar" style="height:14px">
             <div class="prog-fill" id="wr-bar" style="width:0%"></div>
           </div>
-          <div style="position:absolute;left:65%;top:-3px;width:2px;height:22px;
+          <div id="wr-tick" style="position:absolute;left:65%;top:-3px;width:2px;height:22px;
                       background:var(--yellow);opacity:0.7"></div>
           <div style="position:absolute;right:0;top:0;font-size:13px;color:var(--bright);font-weight:bold" id="wr-pct">—</div>
         </div>
@@ -836,7 +865,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
     <div class="dash-grid">
       <div class="dash-card wide" id="card-outcomes">
         <div class="dash-head"><span class="dash-title">OUTCOMES</span><button class="help-btn" onclick="help(this,'OUTCOMES','How the last 50 finished episodes ended, plotted every 10 episodes.\n\n• WIN: my missile killed the bandit\n• LOSS: shot down\n• MUTUAL: both killed, including by a missile that flies on after its shooter is killed (in 2 v 1: red killed at the cost of a blue aircraft)\n• TIMEOUT: nobody died in 300 s\n\nThe dashed line is the 65% advance mark. A rising timeout line is the first sign of passivity.')">?</button></div>
-        <div class="dash-sub">share of the last 50 episodes · dashed: the 65% advance mark</div>
+        <div class="dash-sub">share of the last 50 episodes · dashed: the <span id="adv-sub">65%</span> advance mark</div>
         <div class="ts-chart" id="ch-outcomes"></div>
       </div>
       <div class="dash-card" id="card-exch">
@@ -1458,11 +1487,12 @@ function engageCheck() {
   } else if (team) {
     w.textContent = opp === 'self_play'
       ? '⚠ 2 v 1 has no self-play stage yet; pick a scripted stage.'
-      : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.';
+      : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.'
+        + (a && b && a !== b ? ' Blue and red fly different platforms: if blue is outmatched it may never reach 65%; consider a lower ADVANCE AT.' : '');
   } else if (a && b && a !== b) {
     w.textContent = opp === 'self_play'
       ? '⚠ self-play needs both sides on the same platform; pick another stage.'
-      : 'Different platforms: self-play does not apply, so the curriculum ends at ADAPTIVE SHOOTER.';
+      : 'Different platforms: self-play does not apply, so the curriculum ends at ADAPTIVE SHOOTER. If one side is outmatched it may never reach 65%: consider a lower ADVANCE AT.';
   } else w.textContent = '';
 }
 
@@ -1905,7 +1935,8 @@ function renderRun() {
       ['FORMAT', team?'2 v 1':'1 v 1'],
       [team?'BLUE':'AGENT', team?`${c.platform||'F-16C'} + ${c.wingman_platform||c.platform||'F-16C'}`:(c.platform||'F-16C')],
       ['OPPONENT', `${c.opponent_platform||'F-16C'} · start at ${String(c.opponent||'straight').toUpperCase()}`],
-      ['CURRICULUM', c.curriculum===false?'off (stays on stage)':'auto-advance'],
+      ['CURRICULUM', c.curriculum===false?'off (stays on stage)'
+        :`auto-advance at ${Math.round((c.advance_win_rate??0.65)*100)}% after ${c.advance_min_episodes??60} episodes`],
       ['DOCTRINE', String(c.doctrine||'mixed').toUpperCase()],
       ['STEPS', `${fmt(c.steps||0)} on ${c.n_envs||1} env${(c.n_envs||1)>1?'s':''}`],
       ['PPO', `γ ${c.gamma} · lr ${c.lr} · batch ${c.batch_size}`],
@@ -1980,7 +2011,11 @@ function handleMetrics(d) {
   const wr=Math.min(d.win_rate,1);
   const bar=document.getElementById('wr-bar');
   bar.style.width=pct(wr);
-  bar.className='prog-fill'+(wr>=0.65?' ':(wr>=0.4?' warn':' bad'));
+  const adv=(d.curriculum && d.curriculum.win_rate) || 0.65;
+  bar.className='prog-fill'+(wr>=adv?' ':(wr>=adv*0.6?' warn':' bad'));
+  document.getElementById('wr-tick').style.left=(adv*100)+'%';
+  document.getElementById('adv-sub').textContent=Math.round(adv*100)+'%';
+  if(DASH[0].ref!==adv){ DASH[0].ref=adv; drawDash(); }
   document.getElementById('wr-pct').textContent=pct(wr);
 
   const sf=Math.min(stepsDone/Math.max(totalSteps,1),1);
@@ -2423,6 +2458,10 @@ document.getElementById('btn-train').onclick=()=>{
   const lr=parseFloat(document.getElementById('cfg-lr').value)||0.00025;
   const batch=parseInt(document.getElementById('cfg-batch').value)||256;
   const curr=document.getElementById('cfg-curriculum').value==='1';
+  const advPct=parseFloat(document.getElementById('cfg-adv-wr').value);
+  const advMin=parseInt(document.getElementById('cfg-adv-min').value);
+  if(curr && !(advPct>0 && advPct<=100)){ alert('ADVANCE AT must be a win rate between 1 and 100%.'); return; }
+  if(curr && !(advMin>=1)){ alert('MIN EPISODES / STAGE must be at least 1.'); return; }
   const resume=document.getElementById('cfg-resume').value.trim();
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   const doctrine=document.getElementById('cfg-doctrine').value;
@@ -2459,6 +2498,7 @@ document.getElementById('btn-train').onclick=()=>{
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
     batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine,
+    advance_win_rate:curr?advPct/100:undefined, advance_min_episodes:curr?advMin:undefined,
     platform:document.getElementById('cfg-platform').value||'F-16C',
     opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C',
     format:fmtSel, wingman_platform:(fmtSel==='2v1'&&wingSel)||undefined}});
