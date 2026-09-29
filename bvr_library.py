@@ -383,13 +383,16 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 3
+SIM_REV = 4
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
        "last-ditch defence all changed",
     3: "the defence shaping term became -0.8*(1-tanh(tgo/25)), 0 with no "
        "missile inbound (it was +0.8*tanh(tgo/25)), so the critic's values shift",
+    4: "without a track the heading choice is now an offset from the last known "
+       "bearing to the bandit, held, not from the aircraft's nose; four inputs "
+       "were added (the previous heading choice, the turn still to fly)",
 }
 
 

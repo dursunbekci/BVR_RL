@@ -471,6 +471,7 @@ def _observer_reset(o: BvrEnv) -> None:
     o._support_losses = 0; o._events_seen.clear(); o._launch_log = []
     o._state = {}; o._last_convert_t = -1e9
     o._prev_hdg_off = 0.0; o._bank_revs = 0; o._bank_sign = 0
+    o._hdg_ref = None
     o._alive = True; o._bandit_targets_me = False
     o._track.reset()
     if o._radar is not None:

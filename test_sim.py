@@ -342,6 +342,43 @@ def test_defence_potential():
     print("  defence potential ........... OK")
 
 
+def test_heading_reference():
+    """Without a track the heading reference is held; the last choice is an input."""
+    import math
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG, OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T
+    e = BvrEnv(opponent_type=T.STRAIGHT, seed=4)
+    e.reset(seed=4)
+    e._track.reset()                                  # no track estimate
+    e._hdg_ref = None
+    i30 = HDG_OFFSETS_DEG.index(30.0)
+    e._state["psi"] = 1.0
+    e._encode_cmd(i30, 2, 2, 0); first = e._cmd_hdg
+    e._state["psi"] = 1.3                             # the nose has moved on
+    e._encode_cmd(i30, 2, 2, 0)
+    assert abs(first - e._cmd_hdg) < 1e-9, "same choice, no track: same heading"
+    assert abs(first - (1.0 + math.radians(30))) < 1e-9
+    # With a track estimate the reference is the line to the bandit again.
+    for seed in range(20):                            # a start that forms a track
+        e.reset(seed=seed)
+        for _ in range(40):
+            e.step([0, 2, 2, 0])
+            if e._est()["valid"]:
+                break
+        if e._est()["valid"]:
+            break
+    assert e._est()["valid"]
+    d = e._est()["pos"] - e._own_pos_enu()
+    e._encode_cmd(0, 2, 2, 0)
+    assert abs(math.atan2(d[0], d[1]) % (2 * math.pi) - e._cmd_hdg) < 1e-6
+    # The previous choice is visible in the observation.
+    obs, *_ = e.step([i30, 2, 2, 0])
+    k = OBS_LABELS.index("hdg_prev_cos")
+    o = obs["obs"]
+    assert abs(o[k] - math.cos(math.radians(30))) < 1e-5 and abs(o[k + 1] - 0.5) < 1e-5
+    print("  heading reference ........... OK")
+
+
 def test_world_support_timeout_via_env():
     """If AC1 turns cold (breaks lock) for 3 s, own missile must die."""
     from sim_world import SimWorld
@@ -779,6 +816,7 @@ if __name__ == "__main__":
         ("world fire & hit",        test_world_fire_and_hit),
         ("missile time-to-go",      test_missile_tgo),
         ("defence potential",       test_defence_potential),
+        ("heading reference",       test_heading_reference),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
         ("env full episode",        test_env_full_episode),

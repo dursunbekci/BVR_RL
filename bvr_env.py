@@ -36,6 +36,12 @@ ALT_MIN_OP = 1_000.0
 ALT_MAX_OP = 14_000.0
 
 # ── action space ─────────────────────────────────────────────────────
+# Heading choices are offsets from a reference bearing: the line to the
+# bandit's estimated position while there is a track estimate, otherwise the
+# last such bearing, held (or the heading when the track was first missing).
+# A held reference makes "the same choice" mean "the same heading": it used to
+# be the aircraft's own nose, so +30 re-picked each second kept turning, and
+# the reference jumped each time the track came and went.
 HDG_OFFSETS_DEG = [0.0,30.0,-30.0,50.0,-50.0,90.0,-90.0,135.0,-135.0,180.0]
 ALT_DELTAS_M    = [-3000.0,-1200.0,0.0,+1200.0,+3000.0]
 # The four commanded speeds are per platform (SPEED_CMDS in the library);
@@ -77,6 +83,12 @@ WM_PRIV_LABELS = [
 WM_PRIV_LOW  = [0,0,-1,-1,0,0,0,0]
 WM_PRIV_HIGH = [1,RANGE_MAX,1,1,3,120,120,1]
 
+# The previous heading choice and the turn still to fly (commanded minus actual
+# heading). The heading-change cost is charged on the choice, so the policy must
+# see its last one to learn to hold it; without these it could not, and it
+# flipped between near-equal choices (wing-rocking).
+HDG_OBS_LABELS = ["hdg_prev_cos","hdg_prev_sin","hdg_turn_cos","hdg_turn_sin"]
+
 OBS_LABELS = [
     "own_mach","own_alt","own_gamma_fpa","own_phi_cos","own_phi_sin","own_nz",
     "own_energy","own_alpha","wpn_remaining","fuel_frac",
@@ -97,9 +109,12 @@ OBS_LABELS = [
     # wingman, so 1v1 fills them with "absent" and a 1v1 checkpoint, widened
     # with zero weights for them, flies exactly as before.
     *WM_OBS_LABELS,
+    # Appended after the wingman block, for the same reason.
+    *HDG_OBS_LABELS,
 ]
 OBS_DIM = len(OBS_LABELS)
-OBS_DIM_1V1 = OBS_DIM - len(WM_OBS_LABELS)
+# The input width of checkpoints from before the wingman block was added.
+OBS_DIM_1V1 = OBS_LABELS.index(WM_OBS_LABELS[0])
 
 OBS_PHYS_LOW = np.array([
     0.4,ALT_MIN_OP,-0.6,-1,-1,-4,0,-0.3,0,0,
@@ -108,6 +123,7 @@ OBS_PHYS_LOW = np.array([
     0,0,0,0,0,0,0,0,-1,-1,0,0,0,0,
     0,
     *WM_OBS_LOW,
+    -1,-1,-1,-1,
 ],dtype=np.float32)
 OBS_PHYS_HIGH = np.array([
     2,ALT_MAX_OP,0.6,1,1,9,30000,0.5,6,1,
@@ -116,6 +132,7 @@ OBS_PHYS_HIGH = np.array([
     6,90,90,1,1,5,1,120,1,1,1,90,1,120,
     SHOT_COST_MAX,
     *WM_OBS_HIGH,
+    1,1,1,1,
 ],dtype=np.float32)
 assert len(OBS_PHYS_LOW)==OBS_DIM==len(OBS_PHYS_HIGH)
 
@@ -179,7 +196,8 @@ class BvrEnv(gym.Env):
     RESOLVE_MAX_S=130.0
 
     # Cost of changing the heading choice, per 180° of change. Heading
-    # choices are offsets from the line to the bandit, re-picked every second;
+    # choices are offsets from a reference bearing (see HDG_OFFSETS_DEG),
+    # re-picked every second;
     # when two score alike (+30/-30) the policy flipped between them and the
     # aircraft rocked its wings once a second without turning. This makes
     # holding a choice the tie-break. A deliberate 135° defensive turn costs
@@ -255,6 +273,7 @@ class BvrEnv(gym.Env):
         self._doctrine="AGGRESSIVE"; self._shot_cost=0.0
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
+        self._hdg_ref=None
         self._phi_terms={k:0.0 for k in PHI_TERMS}
         self._prev_phi_terms=dict(self._phi_terms)
         # Team play (bvr_team): the wingman's observer, whose radar track is
@@ -285,6 +304,7 @@ class BvrEnv(gym.Env):
         self._state={}; self._last_convert_t=-1e9
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
+        self._hdg_ref=None
         self._track.reset()
         if self._radar is not None: self._radar.reset()
 
@@ -719,6 +739,12 @@ class BvrEnv(gym.Env):
             sup=max(sup,float(m.get("needs_support",0)))
         return n,(tgo or 0.0),sup
 
+    def _heading_obs(self) -> list:
+        """HDG_OBS_LABELS: the last heading choice and the turn still to fly."""
+        prev=self._prev_hdg_off*DEG2RAD
+        turn=_wrap_pi(self._cmd_hdg-self._state.get("psi",self._cmd_hdg))
+        return [math.cos(prev),math.sin(prev),math.cos(turn),math.sin(turn)]
+
     def _wingman_obs(self) -> list:
         """The wingman inputs (WM_OBS_LABELS): what the datalink tells us about him."""
         wm=self._wingman
@@ -824,6 +850,7 @@ class BvrEnv(gym.Env):
             min(self._t_sim-self._last_shot_t,120) if self._last_shot_t>-900 else 120,
             self._shot_cost,
             *self._wingman_obs(),
+            *self._heading_obs(),
         ],dtype=np.float32)
         obs=self._norm(obs,self._obs_lo,self._obs_hi)
         if not self._privileged: return obs
@@ -895,9 +922,11 @@ class BvrEnv(gym.Env):
     def _encode_cmd(self,ih,ia,isp,ifire) -> dict:
         s=self._state; est=self._est()
         if est["valid"]:
-            d=est["pos"]-self._own_pos_enu(); base=math.atan2(d[0],d[1])
-        else: base=s.get("psi",0)
-        self._cmd_hdg=_wrap_2pi(base+HDG_OFFSETS_DEG[ih]*DEG2RAD)
+            d=est["pos"]-self._own_pos_enu()
+            self._hdg_ref=math.atan2(d[0],d[1])
+        elif self._hdg_ref is None:
+            self._hdg_ref=s.get("psi",0)
+        self._cmd_hdg=_wrap_2pi(self._hdg_ref+HDG_OFFSETS_DEG[ih]*DEG2RAD)
         p=self._plat
         self._cmd_alt=float(np.clip(s.get("alt",9000)+ALT_DELTAS_M[ia],p.alt_min,p.alt_max))
         self._cmd_spd=float(p.speed_cmds[isp])
