@@ -379,6 +379,22 @@ def test_heading_reference():
     print("  heading reference ........... OK")
 
 
+def test_stern_starts():
+    """Stern starts (bandit running away) are skipped only when red is the faster side."""
+    from bvr_env import BvrEnv
+    from bvr_team import TeamBvrEnv
+    def scenarios(env, n=200):
+        return {env._random_ic()["scenario"] for _ in range(n)}
+    assert "stern_conversion" in scenarios(BvrEnv(platform="F-16C", opponent_platform="F-16C"))
+    assert "stern_conversion" in scenarios(BvrEnv(platform="F-16C", opponent_platform="GENERIC-UCAV"))
+    assert "stern_conversion" not in scenarios(BvrEnv(platform="GENERIC-UCAV", opponent_platform="F-16C"))
+    assert "stern_conversion" not in scenarios(
+        TeamBvrEnv(blue_platforms=("GENERIC-UCAV", "GENERIC-UCAV"), red_platform="F-16C"))
+    assert "stern_conversion" in scenarios(         # the F-16 wingman can catch red
+        TeamBvrEnv(blue_platforms=("GENERIC-UCAV", "F-16C"), red_platform="F-16C"))
+    print("  stern starts ................ OK")
+
+
 def test_world_support_timeout_via_env():
     """If AC1 turns cold (breaks lock) for 3 s, own missile must die."""
     from sim_world import SimWorld
@@ -817,6 +833,7 @@ if __name__ == "__main__":
         ("missile time-to-go",      test_missile_tgo),
         ("defence potential",       test_defence_potential),
         ("heading reference",       test_heading_reference),
+        ("stern starts",            test_stern_starts),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
         ("env full episode",        test_env_full_episode),

@@ -938,8 +938,21 @@ class BvrEnv(gym.Env):
     # ── IC generator ───────────────────────────────────────────────────
     _SCENARIOS=["head_on","offset_left","offset_right","beam","stern_conversion"]
 
-    def _random_ic(self) -> dict:
-        sc=str(self._rng.choice(self._SCENARIOS))
+    def stern_starts(self, blue_top_speed=None) -> bool:
+        """Whether stern-conversion starts are drawn.
+
+        They start the bandit 45-75 km away, flying away. Against a bandit
+        with a higher top speed than blue's, blue can never close, so the
+        episode can't be won; they are left out then. blue_top_speed is the
+        fastest blue aircraft's (2v1); by default this aircraft's.
+        """
+        blue=self._plat.speed_cmds[-1] if blue_top_speed is None else blue_top_speed
+        return self._opp_plat.speed_cmds[-1] <= blue
+
+    def _random_ic(self, blue_top_speed=None) -> dict:
+        scenarios=(self._SCENARIOS if self.stern_starts(blue_top_speed)
+                   else [c for c in self._SCENARIOS if c!="stern_conversion"])
+        sc=str(self._rng.choice(scenarios))
         rm=float(self._rng.uniform(70000,110000))
         br=float(self._rng.uniform(0,2*math.pi))
         a1a=float(self._rng.uniform(6000,11000))

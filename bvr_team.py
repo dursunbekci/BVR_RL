@@ -428,9 +428,13 @@ class TeamBvrEnv:
     # ── start geometry ────────────────────────────────────────────────
     FORMATIONS = ["abreast", "trail", "echelon"]
 
+    def blue_top_speed(self) -> float:
+        return max(o._plat.speed_cmds[-1] for o in self._obs)
+
     def _random_ic(self) -> dict:
         """The 1v1 start for the lead against red, plus a wingman in formation."""
-        lead = self._obs[0]._random_ic()
+        # Stern starts only if at least one blue aircraft can catch red.
+        lead = self._obs[0]._random_ic(blue_top_speed=self.blue_top_speed())
         rng = self._rng
         form = str(rng.choice(self.FORMATIONS))
         side = 1.0 if rng.random() < 0.5 else -1.0

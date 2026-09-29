@@ -539,6 +539,12 @@ def main():
         note(f"2v1: agents {args.platform} + {wingman} v opponent {args.opponent_platform}")
     else:
         note(f"platforms: agent {args.platform} v opponent {args.opponent_platform}")
+    blue_top = max(load_platform(p).speed_cmds[-1] for p in ([args.platform, wingman] if team
+                                                            else [args.platform]))
+    red_top = load_platform(args.opponent_platform).speed_cmds[-1]
+    if red_top > blue_top:
+        note(f"stern starts skipped: the opponent's top speed ({red_top:.0f} m/s) is above "
+             f"blue's ({blue_top:.0f} m/s), so blue could never catch it running away")
 
     # gamma MUST match the value PPO trains with (passed below via kwargs) —
     # potential-based shaping (bvr_env._potential / step()'s `gamma*phi -
