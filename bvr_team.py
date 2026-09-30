@@ -191,9 +191,7 @@ class TeamBvrEnv:
             if o._alive:
                 fire = bool(FIRE_OPTIONS[i_fire]) and o._can_fire()
                 cmds.append(o._encode_cmd(i_hdg, i_alt, i_spd, i_fire))
-                off = HDG_OFFSETS_DEG[i_hdg]
-                hdg_cost.append(o.W_HDG_CHANGE * abs(_wrap_deg(off - o._prev_hdg_off)) / 180.0)
-                o._prev_hdg_off = off
+                hdg_cost.append(o._heading_choice(HDG_OFFSETS_DEG[i_hdg]))
             else:
                 fire = False
                 cmds.append(None)
@@ -259,6 +257,8 @@ class TeamBvrEnv:
                 "support_losses": sum(o._support_losses for o in self._obs),
                 "launch_log": sorted(launch_log, key=lambda l: l["t_sim"]),
                 "bank_reversals": sum(o._bank_revs for o in self._obs),
+                "hdg_switches": sum(o._hdg_switches for o in self._obs),
+                "hdg_pairs": _merge_counts(o._hdg_pairs for o in self._obs),
                 "flight_time": sum(o._t_sim for o in self._obs),
                 "wpn_remaining": sum(self._world.wpn[:self.n_agents]),
                 "killer": self._killer})
@@ -501,6 +501,14 @@ class TeamBvrEnv:
         pass
 
 
+def _merge_counts(dicts) -> dict:
+    out = {}
+    for d in dicts:
+        for k, v in d.items():
+            out[k] = out.get(k, 0) + v
+    return out
+
+
 def _observer_reset(o: BvrEnv) -> None:
     """Start-of-episode state for a BvrEnv used as a team member's observer."""
     o._step_num = 0; o._t_sim = 0.0; o._ready = True; o._outcome = None
@@ -508,6 +516,7 @@ def _observer_reset(o: BvrEnv) -> None:
     o._support_losses = 0; o._events_seen.clear(); o._launch_log = []
     o._state = {}; o._last_convert_t = -1e9
     o._prev_hdg_off = 0.0; o._bank_revs = 0; o._bank_sign = 0
+    o._hdg_switches = 0; o._hdg_pairs = {}
     o._hdg_ref = None
     o._alive = True; o._bandit_targets_me = False
     o._track.reset()

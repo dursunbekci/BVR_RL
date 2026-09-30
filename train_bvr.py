@@ -35,6 +35,7 @@ TensorBoard:
     bvr/timeout_rate        watch this: a rising timeout rate means the
                             passivity collapse is starting
     bvr/bank_rev_per_min    wing-rocking: bank reversals per minute of flight
+    bvr/hdg_switch_per_min  heading-choice changes per minute of flight
     bvr/<DOCTRINE>_shots    shots per episode under each missile doctrine
     bvr/<DOCTRINE>_pk       (with --doctrine mixed, they should separate)
     bvr/blue_losses_per_ep  2v1: blue aircraft lost per episode (0-2). MUTUAL_KILL
@@ -125,6 +126,26 @@ ADVANCE_HOLD_CHECKS = 5
 SELFPLAY_SNAPSHOT_STEPS = 250_000
 
 
+def heading_switch_stats(eps, top=3):
+    """(changes per minute, [[pair, share], ...]) over (switches, seconds, pairs) episodes.
+
+    A pair counts both directions ("+30<>-30" is +30 to -30 and back), so a
+    policy rocking between two choices shows as one pair near 100%.
+    """
+    flown = sum(t for _, t, _ in eps)
+    if not eps or flown <= 0:
+        return None, []
+    total = sum(n for n, _, _ in eps)
+    pairs = {}
+    for _, _, d in eps:
+        for k, v in d.items():
+            a, b = k.split(">")
+            key = "<>".join(sorted((a, b), key=lambda x: float(x)))
+            pairs[key] = pairs.get(key, 0) + v
+    ranked = sorted(pairs.items(), key=lambda kv: -kv[1])[:top]
+    return 60.0 * total / flown, [[k, round(v / max(total, 1), 3)] for k, v in ranked]
+
+
 # ═════════════════════════════════════════════════════════════════════
 class BvrCallback(BaseCallback):
 
@@ -179,6 +200,8 @@ class BvrCallback(BaseCallback):
         self.doctrine_eps = deque(maxlen=150)
         # (bank reversals, seconds flown) per episode.
         self.bank = deque(maxlen=50)
+        # (heading-choice changes, seconds flown, {"prev>new": count}) per episode.
+        self.hdg = deque(maxlen=50)
         # 2v1: blue aircraft lost per episode.
         self.blue_losses = deque(maxlen=50)
         # Identifies this run in bvr_metrics.json, so its history is not
@@ -239,6 +262,9 @@ class BvrCallback(BaseCallback):
                                       int(info.get("shots_fired", 0))))
             self.bank.append((int(info.get("bank_reversals", 0)),
                               float(info.get("flight_time", 0.0))))
+            if "hdg_switches" in info:
+                self.hdg.append((int(info["hdg_switches"]), float(info.get("flight_time", 0.0)),
+                                 dict(info.get("hdg_pairs", {}))))
             if "blue_losses" in info:
                 self.blue_losses.append(int(info["blue_losses"]))
             for lg in info.get("launch_log", []):
@@ -306,6 +332,9 @@ class BvrCallback(BaseCallback):
         flown = sum(t for _, t in self.bank)
         bank_rpm = 60.0 * sum(r for r, _ in self.bank) / flown if flown > 0 else 0.0
         rec("bvr/bank_rev_per_min", bank_rpm)
+        hdg_rpm, hdg_top = heading_switch_stats(self.hdg)
+        if hdg_rpm is not None:
+            rec("bvr/hdg_switch_per_min", hdg_rpm)
         losses_ep = float(np.mean(self.blue_losses)) if self.blue_losses else None
         if losses_ep is not None:
             rec("bvr/blue_losses_per_ep", losses_ep)
@@ -334,6 +363,7 @@ class BvrCallback(BaseCallback):
                   f"to {timeouts/n:5.1%} crash {crashes/n:5.1%} bcrash {bandit_crashes/n:5.1%} | "
                   f"Pk {(kills+mutual)/total_shots:4.2f} | "
                   f"shots/ep {total_shots/n:4.2f} | rev/min {bank_rpm:4.1f}"
+                  f"{f' | hdg sw/min {hdg_rpm:4.1f}' if hdg_rpm is not None else ''}"
                   f"{f' | lost/ep {losses_ep:4.2f}' if losses_ep is not None else ''}{split}{dline}")
 
         # Write metrics for the GUI. Appended to a rolling history list so
@@ -386,6 +416,8 @@ class BvrCallback(BaseCallback):
                 "term_share":    {k: round(v/term_total, 4) if term_total > 0 else 0.0
                                   for k, v in term_mean.items()},
                 "bank_rev_per_min": round(bank_rpm, 2),
+                "hdg_switch_per_min": round(hdg_rpm, 2) if hdg_rpm is not None else None,
+                "hdg_top_pairs": hdg_top,
                 "blue_losses_per_ep": round(losses_ep, 3) if losses_ep is not None else None,
                 "doctrine":      doctrine,
                 "curriculum":    self.curriculum_state(),

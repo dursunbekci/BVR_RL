@@ -864,6 +864,29 @@ def test_fire_off_boresight():
     print("  fire off-boresight gate ..... OK")
 
 
+def test_heading_switches():
+    """Heading-choice changes are charged and counted, and the rocking pair is found."""
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG
+    from bvr_opponents import BvrOpponentType as T
+    from train_bvr import heading_switch_stats
+    env = BvrEnv(opponent_type=T.STRAIGHT, seed=4)
+    env.reset()
+    p30, m30 = HDG_OFFSETS_DEG.index(30.0), HDG_OFFSETS_DEG.index(-30.0)
+    costs = []
+    for k in range(40):
+        _, _, term, trunc, info = env.step([p30 if k % 2 == 0 else m30, 2, 2, 0])
+        costs.append(-info["cost_terms"]["heading"])
+        if term or trunc:
+            break
+    assert abs(costs[0] - env.W_HDG_CHANGE * 30 / 180) < 1e-9          # 0 -> +30
+    assert all(abs(c - env.W_HDG_CHANGE * 60 / 180) < 1e-9 for c in costs[1:])
+    assert env._hdg_switches == len(costs)
+    assert env._hdg_pairs == {"0>+30": 1, "+30>-30": 20, "-30>+30": 19}, env._hdg_pairs
+    rpm, top = heading_switch_stats([(env._hdg_switches, env._t_sim, env._hdg_pairs)])
+    assert 50 < rpm < 62 and top[0][0] == "-30<>+30" and top[0][1] > 0.95, (rpm, top)
+    print(f"  heading switches ............ OK  ({rpm:.0f}/min, {top[0][0]} {top[0][1]:.0%})")
+
+
 def test_mutual_kill_1v1():
     """A kill ends the fight only once no missile is left in flight at a live aircraft."""
     import math
@@ -991,6 +1014,7 @@ if __name__ == "__main__":
         ("DCS round trip",          test_dcs_round_trip),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
+        ("heading switches",        test_heading_switches),
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),

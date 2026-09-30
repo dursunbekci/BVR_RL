@@ -951,6 +951,7 @@ select option{background:#050810}
       <div class="dash-card" id="card-rev">
         <div class="dash-head"><span class="dash-title">BANK REVERSALS / MIN</span></div>
         <div class="dash-sub">wing-rocking check: a few a minute is normal</div>
+        <div class="dash-sub" id="rev-hdg"></div>
         <div class="ts-chart" id="ch-rev"></div>
       </div>
       <div class="dash-card" id="card-lost" style="display:none">
@@ -2150,6 +2151,12 @@ function handleMetrics(d) {
   document.getElementById('kv-tf').textContent  = pct(d.track_frac);
   if(d.bank_rev_per_min!=null)
     document.getElementById('kv-rev').textContent = d.bank_rev_per_min.toFixed(1);
+  // What the heading choice switches between (older trainers don't report it).
+  document.getElementById('rev-hdg').textContent = d.hdg_switch_per_min!=null
+    ? `heading choice changes ${d.hdg_switch_per_min.toFixed(1)}/min`
+      + (d.hdg_top_pairs&&d.hdg_top_pairs.length
+         ? ' · most often ' + d.hdg_top_pairs.map(([k,v])=>`${k.replace('<>','↔')}° ${Math.round(v*100)}%`).join(', ') : '')
+    : '';
   const docs=d.doctrine?Object.entries(d.doctrine):[];
   document.getElementById('kv-doc').innerHTML = docs.length>1
     ? `<div style="display:grid;grid-template-columns:auto auto auto auto;column-gap:8px">`

@@ -200,10 +200,13 @@ class BvrEnv(gym.Env):
     # re-picked every second;
     # when two score alike (+30/-30) the policy flipped between them and the
     # aircraft rocked its wings once a second without turning. This makes
-    # holding a choice the tie-break. A deliberate 135° defensive turn costs
-    # 0.011, negligible next to the defence term; flipping +30/-30 every
-    # second for 100 s costs 0.5.
-    W_HDG_CHANGE = 0.015
+    # holding a choice the tie-break. It was 0.015, and trained policies
+    # still switched about every 3.5 s (17-20 bank reversals a minute
+    # through a 3M-step self-play run): a +30/-30 flip cost 0.005, below the
+    # shaping terms it competes with (0.006-0.010 a step). At 0.04 that flip
+    # costs 0.013, about the largest shaping term; a deliberate 135°
+    # defensive turn costs 0.03, still negligible next to the defence term.
+    W_HDG_CHANGE = 0.04
     # A bank reversal is counted when bank passes this far to the other side.
     BANK_REV_DEG = 15.0
     # A missile may only be launched at a target within this angle of the
@@ -285,6 +288,7 @@ class BvrEnv(gym.Env):
         self._doctrine="AGGRESSIVE"; self._shot_cost=0.0
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
+        self._hdg_switches=0; self._hdg_pairs={}
         self._hdg_ref=None
         self._phi_terms={k:0.0 for k in PHI_TERMS}
         self._prev_phi_terms=dict(self._phi_terms)
@@ -316,6 +320,7 @@ class BvrEnv(gym.Env):
         self._state={}; self._last_convert_t=-1e9
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
+        self._hdg_switches=0; self._hdg_pairs={}
         self._hdg_ref=None
         self._track.reset()
         if self._radar is not None: self._radar.reset()
@@ -348,9 +353,7 @@ class BvrEnv(gym.Env):
         self._step_num += 1
         want_fire = bool(FIRE_OPTIONS[i_fire]) and self._can_fire()
         cmd = self._encode_cmd(i_hdg,i_alt,i_spd,i_fire)
-        off = HDG_OFFSETS_DEG[i_hdg]
-        hdg_cost = self.W_HDG_CHANGE*abs(_wrap_deg(off-self._prev_hdg_off))/180.0
-        self._prev_hdg_off = off
+        hdg_cost = self._heading_choice(HDG_OFFSETS_DEG[i_hdg])
         shots_before = self._shots_fired
         was_resolving = self._frozen_phi is not None
         self._advance(1.0/self.DECISION_HZ, cmd, fire=want_fire)
@@ -396,6 +399,7 @@ class BvrEnv(gym.Env):
                          "support_losses":self._support_losses,
                          "launch_log":list(self._launch_log),
                          "bank_reversals":self._bank_revs,
+                         "hdg_switches":self._hdg_switches,"hdg_pairs":dict(self._hdg_pairs),
                          "flight_time":self._t_sim,
                          "wpn_remaining":self._state.get("wpn_remaining",0)})
             self._ready=False
@@ -415,6 +419,18 @@ class BvrEnv(gym.Env):
         m_spd=np.ones(len(self._plat.speed_cmds),dtype=bool)
         m_fire=np.array([True,self._can_fire()],dtype=bool)
         return np.concatenate([m_hdg,m_alt,m_spd,m_fire])
+
+    def _heading_choice(self, off) -> float:
+        """Record this step's heading choice (an offset, deg); returns its change cost.
+        Counts the switches, and which choice was left for which, so the
+        trainer can say what a wing-rocking policy alternates between."""
+        prev=self._prev_hdg_off
+        if off!=prev:
+            self._hdg_switches+=1
+            key=f"{_fmt_off(prev)}>{_fmt_off(off)}"
+            self._hdg_pairs[key]=self._hdg_pairs.get(key,0)+1
+        self._prev_hdg_off=off
+        return self.W_HDG_CHANGE*abs(_wrap_deg(off-prev))/180.0
 
     def _off_boresight_deg(self, est) -> float:
         """Angle between the aircraft's nose and the line to the estimated target, deg."""
@@ -1004,6 +1020,7 @@ class BvrEnv(gym.Env):
 def _wrap_pi(a):  return (a+math.pi)%(2*math.pi)-math.pi
 def _wrap_2pi(a): return a%(2*math.pi)
 def _wrap_deg(a): return (a+180.0)%360.0-180.0
+def _fmt_off(a): return "0" if a==0 else f"{a:+.0f}"
 def _band(r,rn,rm):
     if r<=rn: return 1.0
     if r>=rm: return 0.0
