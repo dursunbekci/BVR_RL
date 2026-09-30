@@ -57,6 +57,7 @@ from bvr_opponents import BvrOpponent, BvrOpponentType
 from bvr_track_adapter import TrackState
 from bvr_library import DEFAULT_PLATFORM
 from sim_world import SimWorld
+from missile_sim import MslPhase
 
 BLUE, RED = 1, 2
 
@@ -74,7 +75,11 @@ class TeamBvrEnv:
 
     # Team events, paid to both agents when they happen.
     R_KILL = +1.0            # red destroyed
-    R_LOST = -0.7            # a blue aircraft shot down
+    # A blue aircraft shot down. At -0.7 a mutual kill (red killed, one blue
+    # lost) netted +0.3, so trading the aircraft red shot first for a kill by
+    # the other became the team's plan: 90% mutual kills against SHOOTER. At
+    # -1.0 that trade nets 0, still above a timeout, below a clean kill by 1.
+    R_LOST = -1.0
     R_CRASH = -1.0           # a blue aircraft flown into the ground
     R_BANDIT_CRASH = +0.4
     R_TIMEOUT = -0.5
@@ -157,7 +162,11 @@ class TeamBvrEnv:
         self._opponent.reset({**ic, "ac2_psi": ic["ac3_psi"], "ac2_alt": ic["ac3_alt"],
                               "ac2_spd": ic["ac3_spd"]})
         w.reset(ic, episode_id=self._episode_id)
-        self._red_tgt = 1
+        # Red opens on the nearer blue aircraft. It always opened on the lead,
+        # which fixed the roles: the lead drew the shot, the wingman killed.
+        red = w.pos(self.RED)
+        self._red_tgt = min((1, 2), key=lambda i: float(np.linalg.norm(w.pos(i) - red)))
+        self._red_other = None
         for k, o in enumerate(self._obs, start=1):
             o._cmd_hdg = float(ic[f"ac{k}_psi"]); o._cmd_alt = float(ic[f"ac{k}_alt"])
             o._cmd_spd = float(ic[f"ac{k}_spd"])
@@ -282,6 +291,7 @@ class TeamBvrEnv:
         self._retarget()
         live = [o for o in self._obs if o._alive]
         self._opponent.rmax_t = self._obs[self._red_tgt - 1]._bandit_rmax() if live else 0.0
+        self._red_other = self._other_info()
 
         f = 0
         ff_limit = n_frames + int(BvrEnv.RESOLVE_MAX_S / sim_dt)
@@ -305,13 +315,19 @@ class TeamBvrEnv:
                 pkts.append(p)
             if not self._obs[self._red_tgt - 1]._alive:
                 self._retarget()
+                self._red_other = self._other_info()
             red_view = w.telemetry(self._red_tgt, self.RED, view="team")
+            if self._red_other is not None:
+                red_view["other"] = self._red_other
             try:
                 opp = dict(self._opponent.act(red_view, self._t_sim))
             except Exception as e:
                 from bvr_env import OpponentError
                 raise OpponentError(self, e) from e
             opp["target"] = self._red_tgt
+            if opp.pop("target_other", 0) and self._red_other is not None:
+                opp["target"] = 3 - self._red_tgt
+                self._red_other = dict(self._red_other, targeted=True)
             pkts.append(opp)
 
             w.step_all(pkts)
@@ -406,6 +422,23 @@ class TeamBvrEnv:
         if best != cur and dist[best] < self.RETARGET_FRAC * dist[cur]:
             cur = best
         self._red_tgt = cur
+
+    def _other_info(self):
+        """The blue aircraft red is not engaging, as red sees it: the scripted
+        shooter's second shot reads this. None when there is no such aircraft.
+        Refreshed once per decision step, and when red changes target."""
+        w = self._world
+        k = 3 - self._red_tgt
+        o = self._obs[k - 1]
+        if not o._alive or not self._obs[self._red_tgt - 1]._alive:
+            return None
+        los = w.pos(k) - w.pos(self.RED)
+        v = w.acs[self.RED - 1].vel_enu
+        off = abs(_wrap_deg(math.degrees(math.atan2(los[0], los[1]) - math.atan2(v[0], v[1]))))
+        targeted = any(m.owner == self.RED and m.target == k
+                       and m.phase not in (MslPhase.HIT, MslPhase.MISS) for m in w.missiles)
+        return {"range": float(np.linalg.norm(los)), "rmax": float(o._bandit_rmax()),
+                "off_nose_deg": off, "targeted": targeted}
 
     # ── per-agent views ───────────────────────────────────────────────
     def _phi(self, k) -> float:

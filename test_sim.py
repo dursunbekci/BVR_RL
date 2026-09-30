@@ -723,6 +723,35 @@ def test_team_losses():
     print("  2v1 losses .................. OK")
 
 
+def test_team_red_targeting():
+    """2v1: red opens on the nearer blue aircraft, and SHOOTER also fires at the other one."""
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=3, doctrine="AGGRESSIVE")
+    assert e.R_LOST == -1.0
+    opened, both = set(), 0
+    for ep in range(8):
+        e.reset()
+        w = e._world
+        red = w.pos(e.RED)
+        d = [float(np.linalg.norm(w.pos(i) - red)) for i in (1, 2)]
+        assert e._red_tgt == 1 + int(d[1] < d[0]), (e._red_tgt, d)
+        opened.add(e._red_tgt)
+        targets, launch = set(), w._launch
+        def spy(owner, cmd, launch=launch, targets=targets):
+            if owner == e.RED:
+                targets.add(cmd.get("target"))
+            return launch(owner, cmd)
+        w._launch = spy
+        done = False
+        while not done:                                   # both fly at red, never fire
+            _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+        both += targets == {1, 2}
+    assert both >= 1, "red never fired at both blue aircraft"
+    print(f"  2v1 red targeting ........... OK  (opened on {sorted(opened)}, both shot at in {both}/8)")
+
+
 def test_mutual_kill_1v1():
     """A kill ends the fight only once no missile is left in flight at a live aircraft."""
     import math
@@ -846,6 +875,7 @@ if __name__ == "__main__":
         ("checkpoint widening",     test_compat_widening),
         ("2v1 datalink",            test_team_datalink),
         ("2v1 losses",              test_team_losses),
+        ("2v1 red targeting",       test_team_red_targeting),
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),

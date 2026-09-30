@@ -195,6 +195,12 @@ class ShooterOpponent(BvrOpponent):
     The CRANK→DRAG transition on `needs_support` is the behaviour the agent
     has to learn to exploit: the moment the bandit drags, its own track on
     us degrades, and that is the window to close.
+
+    2v1: the team env describes the blue aircraft red is not engaging in
+    state["other"]. While cranking, red also fires at that one when it is in
+    range and off the nose no further than the radar gimbal. Without this,
+    red fired only ever at its first target, and the second blue aircraft
+    closed on a red that never shot at it. 1v1 never sets "other".
     """
 
     # Fraction of true R-max at which it shoots. This was a fixed 55 km, set
@@ -205,6 +211,8 @@ class ShooterOpponent(BvrOpponent):
     CRANK_ANGLE = 50.0 * DEG2RAD
     REATTACK_RANGE = 40_000.0
     MIN_SHOT_INTERVAL = 12.0
+    # 2v1 second shot: the other blue aircraft must be within this of red's nose.
+    OTHER_SHOT_OFF_NOSE_DEG = 60.0
 
     def reset(self, ic):
         super().reset(ic)
@@ -256,6 +264,17 @@ class ShooterOpponent(BvrOpponent):
         else:
             self._fire_edge = False
 
+        # ── second shot at the other blue aircraft (2v1 only) ───────
+        other = state.get("other")
+        at_other = (fire == 0 and other is not None and self._phase == "CRANK" and wpn > 0
+                    and not other.get("targeted", False)
+                    and other.get("off_nose_deg", 180.0) <= self.OTHER_SHOT_OFF_NOSE_DEG
+                    and other.get("range", 1e9) <= self.SHOT_RMAX_FRAC * other.get("rmax", 0.0)
+                    and (t_sim - self._last_shot) > self.MIN_SHOT_INTERVAL)
+        if at_other:
+            fire = 1
+            self._last_shot = t_sim
+
         # ── phase logic ─────────────────────────────────────────────
         if self._phase == "CRANK":
             # Grace period: the missile does not appear in telemetry until the
@@ -267,7 +286,10 @@ class ShooterOpponent(BvrOpponent):
             if since_shot > 4.0 and not still_supporting:
                 self._phase = "DRAG"
             hdg = brg + self._crank_side * self.CRANK_ANGLE
-            return self._cmd(hdg, self._base_alt + 500.0, 340.0, fire)
+            cmd = self._cmd(hdg, self._base_alt + 500.0, 340.0, fire)
+            if at_other:
+                cmd["target_other"] = 1
+            return cmd
 
         if self._phase == "DRAG":
             if rng > self.REATTACK_RANGE + 20_000.0 and wpn > 0:
