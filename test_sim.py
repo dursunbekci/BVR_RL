@@ -831,6 +831,39 @@ def test_selfplay_mix():
     print(f"  self-play mix ............... OK  (scripted {scripted:.1%}, newest {newest:.1%})")
 
 
+def test_fire_off_boresight():
+    """The fire action is masked for a target more than 60 deg off the nose."""
+    import math
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+    env = BvrEnv(opponent_type=T.STRAIGHT, seed=0)
+    env.reset()
+    env._state.update({"wpn_remaining": 4, "psi": math.radians(30.0), "theta": 0.0})
+    env._last_shot_t = -999.0
+    env._trk_state = lambda: TrackState.TRACK
+    env._own_envelope = lambda est: (40_000.0, 15_000.0)
+    own = env._own_pos_enu()
+
+    def fire_ok(az_deg, el_deg=0.0, R=20_000.0):
+        a, e = math.radians(30.0 + az_deg), math.radians(el_deg)   # relative to the nose
+        pos = own + R * np.array([math.cos(e) * math.sin(a), math.cos(e) * math.cos(a), math.sin(e)])
+        est = {"valid": True, "pos": pos, "vel": np.zeros(3), "speed": 250.0, "age": 0.0,
+               "pos_sigma": 50.0, "vel_sigma": 5.0}
+        env._est = lambda: est
+        return env._can_fire(), bool(env.action_masks()[-1])
+
+    for az in (0, 30, -45, 59):
+        assert fire_ok(az) == (True, True), az
+    for az in (61, -75, 90, 180):
+        assert fire_ok(az) == (False, False), az
+    assert fire_ok(0, el_deg=55) == (True, True)
+    assert fire_ok(0, el_deg=65) == (False, False)
+    assert fire_ok(40, el_deg=40) == (True, True)            # 54 deg off the nose in all
+    assert fire_ok(50, el_deg=45) == (False, False)          # 63 deg off the nose in all
+    print("  fire off-boresight gate ..... OK")
+
+
 def test_mutual_kill_1v1():
     """A kill ends the fight only once no missile is left in flight at a live aircraft."""
     import math
@@ -957,6 +990,7 @@ if __name__ == "__main__":
         ("2v1 red targeting",       test_team_red_targeting),
         ("DCS round trip",          test_dcs_round_trip),
         ("self-play mix",           test_selfplay_mix),
+        ("fire off-boresight gate", test_fire_off_boresight),
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),

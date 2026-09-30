@@ -206,6 +206,15 @@ class BvrEnv(gym.Env):
     W_HDG_CHANGE = 0.015
     # A bank reversal is counted when bank passes this far to the other side.
     BANK_REV_DEG = 15.0
+    # A missile may only be launched at a target within this angle of the
+    # nose. It leaves the rail along the aircraft's axis and turns, and the
+    # turn costs it energy: with this missile model, head-on shots lose
+    # ~6% of R-max at 40 deg off the nose and 10-20% at 60 deg, and past 60 deg
+    # the minimum range jumps (at 90 deg a head-on shot only hits from about
+    # 12 to 30 km, a tail shot hardly at all). The radar's +/-60 deg field
+    # of view kept 1v1 shots inside this already; the gate also binds shots
+    # on a wingman's datalink track (2v1), which had no angle limit.
+    MAX_OFF_BORESIGHT_DEG = 60.0
 
     RADAR_OMEGA_COMPENSATED = False
     TRACK_CONVERT_HZ        = 10.0
@@ -407,12 +416,22 @@ class BvrEnv(gym.Env):
         m_fire=np.array([True,self._can_fire()],dtype=bool)
         return np.concatenate([m_hdg,m_alt,m_spd,m_fire])
 
+    def _off_boresight_deg(self, est) -> float:
+        """Angle between the aircraft's nose and the line to the estimated target, deg."""
+        if not est["valid"]: return 180.0
+        s=self._state; psi=s.get("psi",0.0); th=s.get("theta",0.0)
+        nose=np.array([math.cos(th)*math.sin(psi),math.cos(th)*math.cos(psi),math.sin(th)])
+        d=est["pos"]-self._own_pos_enu(); n=float(np.linalg.norm(d))
+        if n<1.0: return 0.0
+        return math.degrees(math.acos(float(np.clip(np.dot(nose,d)/n,-1.0,1.0))))
+
     def _can_fire(self) -> bool:
         if self._state.get("wpn_remaining",0)<=0: return False
         if self._trk_state()!=TrackState.TRACK:   return False
         if (self._t_sim-self._last_shot_t)<3.0:   return False
         est=self._est()
         if not est["valid"]: return False
+        if self._off_boresight_deg(est)>self.MAX_OFF_BORESIGHT_DEG: return False
         r=self._est_range(est); r_max,_=self._own_envelope(est)
         # BUG FIX: this used to read `r<=1.15*r_max` — a shot up to 15% BEYOND
         # the missile's own computed kinematic reach. That is not a margin,
@@ -498,6 +517,7 @@ class BvrEnv(gym.Env):
                 "range_est":round(r,1),"range_true":round(self._state.get("range",-1),1),
                 "r_over_rmax":round(r/max(r_max,1),3),"r_over_rnez":round(r/max(r_nez,1),3),
                 "aspect_est":round(self._est_aspect(est),1),
+                "off_boresight":round(self._off_boresight_deg(est),1),
                 "own_mach":round(self._state.get("mach",0),3),
                 "own_alt":round(self._state.get("alt",0),0),
                 "track_age":round(est["age"],2),"pos_sigma":round(est["pos_sigma"],1)})

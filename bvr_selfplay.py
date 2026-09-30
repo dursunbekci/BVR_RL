@@ -13,7 +13,8 @@ scripted opponent in disguise:
   * AC2's missiles are guided by AC2's own track (the world only falls back
     to truth guidance for scripted opponents), so the 3-second support rule
     binds both sides.
-  * Fire is gated by the same _can_fire() rule the agent's mask uses.
+  * Fire is gated by the same _can_fire() rule the agent's mask uses
+    (firm track, inside R-max, within 60 deg of the nose, 3 s between shots).
   * The snapshot draws its own missile doctrine each episode, independent of
     the agent's, and sees it through the same doctrine input.
 

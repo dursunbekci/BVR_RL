@@ -383,7 +383,7 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 5
+SIM_REV = 6
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -396,6 +396,9 @@ _SIM_REV_NOTES = {
     5: "2v1: red opens on the nearer blue aircraft (it always opened on the lead), "
        "SHOOTER and ADAPTIVE also fire at the other blue aircraft while cranking, "
        "and a lost blue aircraft costs -1.0 (was -0.7)",
+    6: "a missile can only be fired at a target within 60 deg of the nose "
+       "(the fire action is masked beyond it); in 1v1 the radar field of view "
+       "mostly kept shots inside this already, in 2v1 datalink shots had no limit",
 }
 
 
