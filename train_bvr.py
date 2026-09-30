@@ -25,7 +25,8 @@ TensorBoard:
     bvr/win_rate            KILL fraction over last 50 TERMINAL episodes
     bvr/loss_rate           SHOT_DOWN fraction
     bvr/mutual_rate         MUTUAL_KILL fraction
-    bvr/exchange_ratio      kills / losses
+    bvr/exchange_ratio      enemy aircraft destroyed / own aircraft lost:
+                            (kills + mutual) / (losses + mutual), losses floored at 1
     bvr/realized_pk         kills / shots fired
     bvr/shots_per_episode
     bvr/mean_launch_range   km
@@ -255,7 +256,11 @@ class BvrCallback(BaseCallback):
         rec("bvr/escape_rate", self.outcomes.count("ESCAPE") / n)
         rec("bvr/crash_rate", crashes / n)
         rec("bvr/bandit_crash_rate", bandit_crashes / n)
-        rec("bvr/exchange_ratio", kills / max(losses + mutual, 1))
+        # A mutual kill is one enemy destroyed and one own aircraft lost, so it
+        # counts on both sides. With no losses in the window this is the
+        # number of enemies destroyed.
+        exchange = (kills + mutual) / max(losses + mutual, 1)
+        rec("bvr/exchange_ratio", exchange)
         rec("bvr/realized_pk", (kills + mutual) / total_shots)
         rec("bvr/shots_per_episode", total_shots / n)
         if self.launch_rngs:
@@ -350,7 +355,7 @@ class BvrCallback(BaseCallback):
                 "escape_rate":   round(self.outcomes.count("ESCAPE")/n, 3),
                 "crash_rate":    round(crashes/n, 3),
                 "bandit_crash_rate": round(bandit_crashes/n, 3),
-                "exchange_ratio": round(kills/max(losses+mutual,1), 2),
+                "exchange_ratio": round(exchange, 2),
                 "realized_pk":   round((kills+mutual)/total_shots, 3),
                 "shots_per_ep":  round(total_shots/n, 2),
                 "mean_launch_km": round(float(np.mean(self.launch_rngs))/1000,2) if self.launch_rngs else 0,

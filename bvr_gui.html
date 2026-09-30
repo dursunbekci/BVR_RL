@@ -810,7 +810,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
           </div>
           <div class="kpi" id="kpi-ex">
             <button class="help-btn" onclick="help(this,'EXCHANGE RATIO',
-              'Kills ÷ (losses + mutual kills). How many enemies you kill per own aircraft lost.\n\n• >2.0 = good BVR agent\n• ~1.0 = trading evenly\n• <1.0 = losing more than winning\n\nTarget: >2.5 against SHOOTER to advance.')">?</button>
+              '(Kills + mutual kills) ÷ (losses + mutual kills), over the last 50 episodes: enemy aircraft destroyed per own aircraft lost. A mutual kill counts on both sides. With no losses it shows the number of enemies destroyed.\n\n• >2.0 = good BVR agent\n• ~1.0 = trading evenly\n• <1.0 = losing more than winning\n\nThe curriculum advances on win rate, not on this.')">?</button>
             <div class="kval" id="kv-ex">—</div>
             <div class="klabel">EXCHANGE RATIO</div>
           </div>
@@ -870,7 +870,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
       </div>
       <div class="dash-card" id="card-exch">
         <div class="dash-head"><span class="dash-title">EXCHANGE RATIO</span></div>
-        <div class="dash-sub">kills ÷ (losses + mutual kills)</div>
+        <div class="dash-sub">(kills + mutual kills) ÷ (losses + mutual kills)</div>
         <div class="ts-chart" id="ch-exch"></div>
       </div>
       <div class="dash-card" id="card-pk">
