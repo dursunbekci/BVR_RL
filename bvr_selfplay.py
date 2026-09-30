@@ -23,7 +23,9 @@ both sides turning cold at long range. Otherwise a snapshot from the pool:
 the newest with probability NEWEST_FRAC, else one drawn uniformly, so the
 agent keeps beating its older selves while facing its current one.
 
-The trainer owns the pool (snapshot()); environments only read it.
+The trainer owns the pool (snapshot()); environments only read it. Each
+training run starts with an empty pool (clear_pool()), so a run only ever
+meets snapshots of its own policy, never those of an earlier run.
 """
 
 import os
@@ -90,6 +92,18 @@ class FrameStacker:
 def pool_snapshots(pool_dir: str) -> list:
     """Snapshot paths, oldest first (names embed the save time)."""
     return sorted(glob.glob(os.path.join(pool_dir, "sp_*.zip")))
+
+
+def clear_pool(pool_dir: str) -> int:
+    """Delete every snapshot in the pool; returns how many were deleted."""
+    n = 0
+    for path in pool_snapshots(pool_dir):
+        try:
+            os.remove(path)
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 def snapshot(model, pool_dir: str) -> str:

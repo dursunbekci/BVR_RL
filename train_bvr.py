@@ -66,7 +66,7 @@ from bvr_library import (DEFAULT_PLATFORM, LibraryError, load_platform, scenario
                          scenario_of, scenario_drift)
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
-from bvr_selfplay import snapshot as selfplay_snapshot
+from bvr_selfplay import snapshot as selfplay_snapshot, clear_pool as clear_selfplay_pool
 from bvr_team import TeamBvrEnv
 from bvr_team_vec import TeamVecEnv
 
@@ -580,6 +580,13 @@ def main():
     # PPO_KWARGS["gamma"] here, the module DEFAULT, so a --gamma override on
     # the CLI silently desynced the two and broke that guarantee.
     selfplay_pool = os.path.join(args.save_dir, "selfplay_pool")
+    # Every run starts with an empty pool: snapshots left by an earlier run
+    # would otherwise be drawn as opponents until pruned. Cleared before the
+    # envs start, which read the pool on reset.
+    n_old = clear_selfplay_pool(selfplay_pool)
+    if n_old:
+        note(f"self-play pool cleared: {n_old} snapshot{'s' if n_old != 1 else ''} "
+             f"from an earlier run deleted")
     if team:
         fns = [make_team_env(i, opponent, args.seed, privileged, envelope_table, args.gamma,
                              args.doctrine.upper(), (args.platform, wingman), args.opponent_platform)
