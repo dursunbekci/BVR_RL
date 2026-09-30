@@ -12,3 +12,6 @@ crossplay_results/
 
 # Live training metrics for the GUI, rewritten every 10 episodes
 bvr_metrics.json
+
+# DCS input check output (dcs_obs_check.py)
+dcs_check/

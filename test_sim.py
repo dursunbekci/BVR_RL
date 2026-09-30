@@ -752,6 +752,54 @@ def test_team_red_targeting():
     print(f"  2v1 red targeting ........... OK  (opened on {sorted(opened)}, both shot at in {both}/8)")
 
 
+def test_dcs_round_trip():
+    """A simulator episode written in the DCS logger's format replays to the same inputs."""
+    import os, tempfile
+    from bvr_env import BvrEnv, OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T
+    from dcs_world import write_sim_recording, DcsReplayEnv, capture_raw_obs
+
+    def policy(env):
+        fire = 0
+        if env._can_fire():
+            est = env._est()
+            fire = int(env._est_range(est) <= 0.75 * env._own_envelope(est)[0])
+        return [0, 2, 3, fire]
+
+    sim = BvrEnv(opponent_type=T.SHOOTER, seed=3, doctrine="AGGRESSIVE")
+    sim._radar.rng = np.random.default_rng(99)          # same radar noise in both runs
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "rt.jsonl")
+        out = write_sim_recording(sim, policy, path)
+        rep = DcsReplayEnv(path, doctrine="AGGRESSIVE")
+        rep._radar.rng = np.random.default_rng(99)
+        raw = capture_raw_obs(rep)
+        rep.reset()
+        rows = [raw["obs"].copy()]
+        for a, _, _ in out[1:]:
+            _, _, term, trunc, info = rep.step(a)
+            rows.append(raw["obs"].copy())
+            if term or trunc:
+                break
+    assert len(rows) == len(out), (len(rows), len(out))
+    assert info.get("terminal_outcome") == out[-1][2].get("terminal_outcome")
+    S = np.array([o for _, o, _ in out])[1:]            # step 0: the track is 0.5 s old
+    R = np.array(rows)[1:]
+    # Estimated, not recorded: seeker hand-off (a mean, not the sim's draw)
+    # and load factor (a finite difference, not the commanded value).
+    loose = {"own_msl_support", "own_msl_active", "rwr_seeker_active", "own_nz",
+             "own_msl_stale"}
+    for j, lab in enumerate(OBS_LABELS):
+        diff = np.abs(S[:, j] - R[:, j])
+        tol = 0.02 * max(np.ptp(S[:, j]), 1e-3) + 1e-3
+        if lab == "own_nz":
+            tol = 0.35        # g: the simulator reports the commanded load factor
+        share = float(np.mean(diff <= tol))
+        assert share >= (0.8 if lab in loose else 0.97), (lab, share, float(diff.max()))
+    print(f"  DCS round trip .............. OK  ({len(rows) - 1} decisions, "
+          f"{info.get('terminal_outcome')})")
+
+
 def test_mutual_kill_1v1():
     """A kill ends the fight only once no missile is left in flight at a live aircraft."""
     import math
@@ -876,6 +924,7 @@ if __name__ == "__main__":
         ("2v1 datalink",            test_team_datalink),
         ("2v1 losses",              test_team_losses),
         ("2v1 red targeting",       test_team_red_targeting),
+        ("DCS round trip",          test_dcs_round_trip),
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),
