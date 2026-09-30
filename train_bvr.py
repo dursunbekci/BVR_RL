@@ -112,6 +112,12 @@ N_STACK = 8
 # heterogeneous matchup can need a lower mark.
 ADVANCE_WIN_RATE = 0.65
 ADVANCE_MIN_EPISODES = 60
+# The win rate must stay at the mark for this many checks in a row (one check
+# every 10 episodes) before the stage advances. With a single check, an agent
+# whose true win rate is 55% passed a 65% mark within 1000 episodes 97% of the
+# time, on a lucky 50-episode window; with 5 checks, 29%. A real 65% agent
+# still passes, about 40 episodes later. --advance-hold-checks sets it per run.
+ADVANCE_HOLD_CHECKS = 5
 
 # While in SELF_PLAY, add the current policy to the opponent pool this often,
 # so the agent keeps meeting versions of itself only a little behind it.
@@ -125,7 +131,8 @@ class BvrCallback(BaseCallback):
                  auto_curriculum=True, selfplay_pool=None, allow_selfplay=True,
                  no_selfplay_reason="the two sides fly different platforms, so self-play "
                                     "does not apply", advance_win_rate=ADVANCE_WIN_RATE,
-                 advance_min_episodes=ADVANCE_MIN_EPISODES, verbose=1):
+                 advance_min_episodes=ADVANCE_MIN_EPISODES,
+                 advance_hold_checks=ADVANCE_HOLD_CHECKS, verbose=1):
         super().__init__(verbose)
         self.no_selfplay_reason = no_selfplay_reason
         # False when the two sides fly different platforms: a snapshot of the
@@ -140,6 +147,8 @@ class BvrCallback(BaseCallback):
         self.auto_curriculum = auto_curriculum
         self.advance_win_rate = float(advance_win_rate)
         self.advance_min_episodes = int(advance_min_episodes)
+        self.advance_hold_checks = int(advance_hold_checks)
+        self.hold_run = 0          # checks in a row at or past the mark
 
         self.outcomes = deque(maxlen=50)
         self.shots = deque(maxlen=50)
@@ -185,15 +194,17 @@ class BvrCallback(BaseCallback):
         return {"auto": bool(self.auto_curriculum), "stage": self.opponent_type.name,
                 "next": None if nxt == self.opponent_type else nxt.name,
                 "blocked": blocked, "stage_episodes": self.stage_episodes,
-                "min_episodes": self.advance_min_episodes, "win_rate": self.advance_win_rate}
+                "min_episodes": self.advance_min_episodes, "win_rate": self.advance_win_rate,
+                "hold_checks": self.advance_hold_checks, "hold_run": self.hold_run}
 
     def describe_curriculum(self) -> str:
         c = self.curriculum_state()
         if c["blocked"]:
             return f"curriculum: stays on {c['stage']} ({c['blocked']})"
         return (f"curriculum: ON, {c['stage']} -> {c['next']} once the win rate over the last 50 "
-                f"episodes reaches {self.advance_win_rate:.0%} after at least {self.advance_min_episodes} "
-                f"episodes at the stage")
+                f"episodes stays at or above {self.advance_win_rate:.0%} for "
+                f"{self.advance_hold_checks} checks in a row (one every 10 episodes), after at "
+                f"least {self.advance_min_episodes} episodes at the stage")
 
     def _on_step(self) -> bool:
         if (self.opponent_type == BvrOpponentType.SELF_PLAY
@@ -246,6 +257,11 @@ class BvrCallback(BaseCallback):
         bandit_crashes = self.outcomes.count("BANDIT_CRASH")
 
         win_rate = kills / n
+        # A single window past the mark is not enough: each check is a fresh
+        # chance for a lucky 50 episodes, so the mark must hold for several.
+        # Counted here, before the metrics are written, so the GUI shows it.
+        at_mark = self.stage_episodes >= self.advance_min_episodes and win_rate >= self.advance_win_rate
+        self.hold_run = self.hold_run + 1 if at_mark else 0
         total_shots = max(sum(self.shots), 1)
 
         rec = self.logger.record
@@ -388,7 +404,7 @@ class BvrCallback(BaseCallback):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.model.save(path)
 
-        if self.stage_episodes >= self.advance_min_episodes and win_rate >= self.advance_win_rate:
+        if at_mark and self.hold_run >= self.advance_hold_checks:
             if self.auto_curriculum:
                 self._advance()
             elif self.ep_count - getattr(self, "_last_hold_note", -10**9) >= 200:
@@ -426,6 +442,7 @@ class BvrCallback(BaseCallback):
         self.doctrine_eps.clear()
         self.blue_losses.clear()
         self.stage_episodes = 0
+        self.hold_run = 0
         self.best_win = -1.0
 
 
@@ -473,6 +490,9 @@ def main():
     ap.add_argument("--advance-min-episodes", type=int, default=ADVANCE_MIN_EPISODES,
                     help="auto-curriculum: episodes to play at a stage before it can "
                          "advance (default %(default)s)")
+    ap.add_argument("--advance-hold-checks", type=int, default=ADVANCE_HOLD_CHECKS,
+                    help="auto-curriculum: checks in a row (one every 10 episodes) the win rate "
+                         "must stay at the mark before advancing (default %(default)s)")
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
     ap.add_argument("--save-dir", type=str, default="models_bvr")
@@ -502,6 +522,8 @@ def main():
         ap.error("--advance-win-rate is a fraction: between 0 and 1 (e.g. 0.5 for 50%)")
     if args.advance_min_episodes < 1:
         ap.error("--advance-min-episodes must be at least 1")
+    if args.advance_hold_checks < 1:
+        ap.error("--advance-hold-checks must be at least 1")
 
     opponent = BvrOpponentType[args.opponent.upper()]
     if opponent not in CURRICULUM:
@@ -614,6 +636,7 @@ def main():
                      auto_curriculum=not args.no_curriculum,
                      advance_win_rate=args.advance_win_rate,
                      advance_min_episodes=args.advance_min_episodes,
+                     advance_hold_checks=args.advance_hold_checks,
                      allow_selfplay=not (heterogeneous or team),
                      **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
