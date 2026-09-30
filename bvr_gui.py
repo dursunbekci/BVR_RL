@@ -651,7 +651,8 @@ class EvalRunner:
                                         f" (one policy flies both blue aircraft)"})
         HUB.set_status(evaluating=True,
                        msg=f"Eval 2v1 vs {opponent.name}, {env._doctrine_cfg} doctrine")
-        _eval_team_loop(self, env, model, privileged, self._stop_evt)
+        _eval_team_loop(self, env, model, privileged, self._stop_evt,
+                        n_max=int(config.get("n_episodes") or 0))
 
     def _run(self, config: dict):
         try:
@@ -717,7 +718,8 @@ class EvalRunner:
             HUB.set_status(evaluating=True,
                            msg=f"Eval vs {opponent_name}, {env._doctrine_cfg} doctrine")
             episode = 0
-            while not self._stop_evt.is_set():
+            n_max = int(config.get("n_episodes") or 0)     # 0: until stopped
+            while not self._stop_evt.is_set() and (n_max <= 0 or episode < n_max):
                 obs, info = env.reset()
                 sobs = stacker.reset(obs) if stacker else None
                 frames = []
@@ -764,11 +766,14 @@ class EvalRunner:
                         "support_losses": step_info.get("support_losses", 0),
                         "doctrine": step_info.get("doctrine", ""),
                         "bank_rev_per_min": round(60.0 * step_info.get("bank_reversals", 0)
-                                                  / max(step_info.get("flight_time", 0.0), 1.0), 1)}
+                                                  / max(step_info.get("flight_time", 0.0), 1.0), 1),
+                        **_episode_facts(info.get("ic"), step_info, n_max)}
                 HUB.set_replay(list(frames), meta)
                 HUB.push({"type":"episode_end","meta":meta})
                 episode += 1
             env.close()
+            if n_max > 0 and episode >= n_max and not self._stop_evt.is_set():
+                _eval_finished(episode)
         except Exception as e:
             import traceback
             HUB.push({"type":"log","src":"eval","msg":f"Eval error: {e}\n{traceback.format_exc()}"})
@@ -791,10 +796,26 @@ def _resolve_hook(runner, frames, episode, build):
     return hook
 
 
-def _eval_team_loop(runner, env, model, privileged, stop_evt):
-    """Evaluation episodes in 2v1: the checkpoint flies both blue aircraft."""
+def _episode_facts(ic: dict, fin: dict, n_max: int) -> dict:
+    """What WATCH's statistics panel groups episodes by, and their shots."""
+    return {"scenario": (ic or {}).get("scenario", ""),
+            "start_range": round(float((ic or {}).get("start_range", 0.0)), 1),
+            "flight_time": round(float(fin.get("flight_time", 0.0)), 1),
+            "r_over_rmax": [l.get("r_over_rmax") for l in fin.get("launch_log", [])
+                            if l.get("r_over_rmax") is not None],
+            "n_max": int(n_max)}
+
+
+def _eval_finished(episodes: int):
+    HUB.push({"type": "log", "src": "eval", "msg": f"Eval finished: {episodes} episodes played"})
+    HUB.set_status(evaluating=False, msg=f"Eval finished: {episodes} episodes")
+
+
+def _eval_team_loop(runner, env, model, privileged, stop_evt, n_max=0):
+    """Evaluation episodes in 2v1: the checkpoint flies both blue aircraft.
+    n_max > 0 stops after that many episodes."""
     episode = 0
-    while not stop_evt.is_set():
+    while not stop_evt.is_set() and (n_max <= 0 or episode < n_max):
         obs, info = env.reset()
         stackers = [FrameStacker(N_STACK) for _ in obs] if model is not None else None
         sobs = [st.reset(o) for st, o in zip(stackers, obs)] if stackers else None
@@ -836,11 +857,15 @@ def _eval_team_loop(runner, env, model, privileged, stop_evt):
                 "support_losses": fin.get("support_losses", 0),
                 "doctrine": fin.get("doctrine", ""), "blue_losses": fin.get("blue_losses", 0),
                 "bank_rev_per_min": round(60.0 * fin.get("bank_reversals", 0)
-                                          / max(fin.get("flight_time", 0.0), 1.0), 1)}
+                                          / max(fin.get("flight_time", 0.0), 1.0), 1),
+                "formation": (info.get("ic") or {}).get("formation", ""),
+                **_episode_facts(info.get("ic"), fin, n_max)}
         HUB.set_replay(list(frames), meta)
         HUB.push({"type": "episode_end", "meta": meta})
         episode += 1
     env.close()
+    if n_max > 0 and episode >= n_max and not stop_evt.is_set():
+        _eval_finished(episode)
 
 
 def _pos(la, lo, alt):

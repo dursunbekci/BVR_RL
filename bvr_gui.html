@@ -206,6 +206,22 @@ canvas{display:block;flex:1}
 #xp-tab-prog:empty{display:none}
 #xp-table td.diag{outline:1px dashed #ffffff80;outline-offset:-3px}
 #sec-hud   .sec-head{color:#ff6666;border-left-color:#ff6666;border-bottom-color:#300000;background:#130000}
+#sec-wstats .sec-head{color:#c79bff;border-left-color:#c79bff;border-bottom-color:#241536;background:#0d0716}
+.ws-top{font-size:12px;color:var(--text);margin-bottom:6px}
+.ws-top b{color:var(--bright)}
+.ws-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.ws-chip{font-size:11px;padding:2px 6px;border:1px solid var(--border);color:var(--text)}
+.ws-chip b{color:var(--bright)}
+.ws-kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}
+.ws-kpi{background:var(--card);border:1px solid var(--border);padding:4px 6px}
+.ws-kpi .v{font-size:14px;color:var(--bright)}
+.ws-kpi .l{font-size:10px;letter-spacing:1px;color:var(--muted)}
+.ws-tbl{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:8px;border:1px solid var(--border)}
+.ws-tbl th{text-align:right;font-weight:normal;font-size:10px;letter-spacing:1px;color:var(--muted);
+           padding:3px 5px;background:#0a1626;border-bottom:1px solid var(--border)}
+.ws-tbl th:first-child,.ws-tbl td:first-child{text-align:left}
+.ws-tbl td{text-align:right;padding:3px 5px;border-bottom:1px solid #0c1a2a;font-variant-numeric:tabular-nums}
+.ws-cap{font-size:10px;letter-spacing:2px;color:var(--muted);margin:2px 0 3px}
 .sec-body{padding:10px 12px}
 .sec-body.collapsed{display:none}
 
@@ -1057,6 +1073,22 @@ select option{background:#050810}
 
         <div class="field">
           <div class="field-label">
+            <span>EPISODES</span>
+            <button class="help-btn" onclick="help(this,'EPISODES',
+              'How many episodes to play before stopping by itself. Until stopped keeps going until you press STOP EVAL.\n\nThe WATCH STATISTICS panel below sums up the episodes of the current session. For hundreds of episodes use CROSS-PLAY instead: it runs without drawing, in parallel, far faster.')">?</button>
+          </div>
+          <select id="eval-episodes">
+            <option value="0">until stopped</option>
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
             <span>MISSILE DOCTRINE</span>
             <button class="help-btn" onclick="help(this,'MISSILE DOCTRINE (eval)',
               'The missile doctrine sets a reward cost for every missile fired, charged at launch. A shot is only worth taking when it raises the chance of a kill by more than about cost ÷ 1.5.\n\n• AGGRESSIVE — cost 0. Fires whenever in range, usually emptying the rack.\n• BALANCED — cost 0.10. Fires when a shot adds more than ~7% kill chance.\n• CONSERVATIVE — cost 0.30. Fires when a shot adds more than ~20%: closer, higher-Pk shots, and waits to see if the first missile hits.\n\nThe policy sees the doctrine as an input, so one model can fly all three\n\nOnly models trained with the doctrine input (MIXED or a fixed doctrine, after this feature was added) respond to it. An older checkpoint loads fine but flies the same under every doctrine.')">?</button>
@@ -1103,6 +1135,18 @@ select option{background:#050810}
         <div style="font-size:11px;color:var(--muted);margin-top:8px">
           After an episode, click 📋 Shot Trace in the log bar to review every missile launch.
         </div>
+      </div>
+    </div>
+
+    <!-- WATCH STATISTICS -->
+    <div class="section" id="sec-wstats">
+      <div class="sec-head" onclick="toggle(this)">📊 WATCH STATISTICS<span>▲</span></div>
+      <div class="sec-body">
+        <div style="display:flex;justify-content:flex-end;margin:-4px 0 2px">
+          <button class="help-btn" onclick="help(this,'WATCH STATISTICS',
+            'A summary of the episodes played since you last pressed START EVAL. Episodes stopped part-way are left out.\n\nWIN RATE shows a 95% range: with few episodes it is wide, so do not read much into 10 episodes.\n\nWATCH always takes the policy\'s single most likely action, while training samples its actions, so these numbers can differ from the training dashboard (usually higher).\n\nBY START GEOMETRY and BY START RANGE show where it wins and loses. LOSS is shot down, MUT is a mutual kill, OTHER is escape or crash.')">?</button>
+        </div>
+        <div id="ws-body"><div style="color:var(--muted);font-size:12px">Start an eval to collect statistics.</div></div>
       </div>
     </div>
 
@@ -2377,7 +2421,64 @@ function handleFrame(f) {
     `T+${f.t.toFixed(1)}s  ${U.dist(f.rng)}  ${U.spd(f.clos)}`;
 }
 
+// ── WATCH statistics: the episodes of the current eval session ──
+const WS = {eps: [], label: '', nmax: 0};
+const WS_SCEN = {head_on: 'HEAD-ON', offset_left: 'OFFSET L', offset_right: 'OFFSET R',
+                 beam: 'BEAM', stern_conversion: 'STERN'};
+const WS_BANDS = [[0, 60, '< 60 km'], [60, 80, '60–80 km'], [80, 100, '80–100 km'], [100, 1e9, '≥ 100 km']];
+function wsReset(label, nmax) { WS.eps = []; WS.label = label; WS.nmax = nmax; wsRender(); }
+function wsWilson(k, n) {
+  if (!n) return [0, 0];
+  const z = 1.96, p = k / n, d = 1 + z * z / n;
+  const c = (p + z * z / (2 * n)) / d, h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+  return [Math.max(0, c - h), Math.min(1, c + h)];
+}
+function wsRows(groups) {
+  const pc = (a, n) => n ? Math.round(100 * a / n) + '%' : '—';
+  return groups.filter(g => g.eps.length).map(g => {
+    const n = g.eps.length, c = o => g.eps.filter(e => e.outcome === o).length;
+    const other = n - c('KILL') - c('MUTUAL_KILL') - c('SHOT_DOWN') - c('TIMEOUT');
+    return `<tr><td>${g.name}</td><td>${n}</td><td>${pc(c('KILL'), n)}</td><td>${pc(c('MUTUAL_KILL'), n)}</td>`
+         + `<td>${pc(c('SHOT_DOWN'), n)}</td><td>${pc(c('TIMEOUT'), n)}</td><td>${pc(other, n)}</td></tr>`;
+  }).join('');
+}
+function wsRender() {
+  const el = document.getElementById('ws-body'); if (!el) return;
+  const E = WS.eps, n = E.length;
+  if (!n) { el.innerHTML = `<div style="color:var(--muted);font-size:12px">${WS.label ? 'Waiting for the first episode to finish…' : 'Start an eval to collect statistics.'}</div>`; return; }
+  const c = o => E.filter(e => e.outcome === o).length;
+  const K = c('KILL'), M = c('MUTUAL_KILL'), L = c('SHOT_DOWN');
+  const team = E.some(e => e.blue_losses != null);
+  const lost = team ? E.reduce((a, e) => a + (e.blue_losses || 0), 0) : L + M;
+  const shots = E.reduce((a, e) => a + (e.shots || 0), 0);
+  const rr = E.flatMap(e => e.r_over_rmax || []);
+  const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+  const [lo, hi] = wsWilson(K, n);
+  const order = ['KILL', 'MUTUAL_KILL', 'SHOT_DOWN', 'TIMEOUT', 'ESCAPE', 'CRASH', 'BANDIT_CRASH'];
+  const chips = order.filter(o => c(o)).map(o =>
+    `<span class="ws-chip">${o.replace('_', ' ')} <b>${c(o)}</b> · ${Math.round(100 * c(o) / n)}%</span>`).join('');
+  const kpi = (v, l) => `<div class="ws-kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  const head = '<tr><th>START</th><th>N</th><th>WIN</th><th>MUT</th><th>LOSS</th><th>T/O</th><th>OTHER</th></tr>';
+  const byScen = Object.keys(WS_SCEN).map(k => ({name: WS_SCEN[k], eps: E.filter(e => e.scenario === k)}));
+  const byRange = WS_BANDS.map(([a, b, name]) => ({name, eps: E.filter(e => e.start_range / 1000 >= a && e.start_range / 1000 < b)}));
+  el.innerHTML =
+      `<div class="ws-top"><b>${n}</b> episode${n > 1 ? 's' : ''}${WS.nmax ? ` of ${WS.nmax}` : ''} · ${WS.label}</div>`
+    + `<div class="ws-top">WIN RATE <b>${Math.round(100 * K / n)}%</b> <span style="color:var(--muted)">(95% range ${Math.round(100 * lo)}–${Math.round(100 * hi)}%)</span></div>`
+    + `<div class="ws-chips">${chips}</div>`
+    + `<div class="ws-kpis">`
+    + kpi(((K + M) / Math.max(lost, 1)).toFixed(2), team ? 'EXCHANGE (per blue lost)' : 'EXCHANGE RATIO')
+    + kpi(shots ? ((K + M) / shots).toFixed(2) : '—', 'REALISED Pk')
+    + kpi((shots / n).toFixed(1), 'SHOTS / EPISODE')
+    + kpi(rr.length ? mean(rr).toFixed(2) : '—', 'MEAN r / Rmax AT SHOT')
+    + kpi(Math.round(mean(E.map(e => e.flight_time || 0))) + ' s', 'MEAN LENGTH')
+    + (team ? kpi((lost / n).toFixed(2), 'BLUE LOST / EPISODE') : kpi(c('TIMEOUT') ? Math.round(100 * c('TIMEOUT') / n) + '%' : '0%', 'TIMEOUT RATE'))
+    + `</div>`
+    + `<div class="ws-cap">BY START GEOMETRY</div><table class="ws-tbl">${head}${wsRows(byScen)}</table>`
+    + `<div class="ws-cap">BY START RANGE</div><table class="ws-tbl">${head}${wsRows(byRange)}</table>`;
+}
+
 function onEpEnd(meta) {
+  if (meta && meta.outcome && meta.outcome !== '?') { WS.eps.push(meta); wsRender(); }
   tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k];
   t3ClearTrails();
@@ -2596,8 +2697,11 @@ document.getElementById('btn-eval').onclick=()=>{
   tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k]; lastFrame=null;
   t3ClearTrails();
-  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok', 'watch');
-  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,
+  const nEp=parseInt(document.getElementById('eval-episodes').value)||0;
+  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`
+         +(nEp?`  episodes=${nEp}`:''), 'log-ok', 'watch');
+  wsReset(`${ckpt||'random policy'} v ${opp.replace('_SHOOTER','')} · ${doctrine}`, nEp);
+  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,n_episodes:nEp,
     opponent_platform:document.getElementById('eval-opp-platform').value||undefined,
     format:document.getElementById('eval-format').value||undefined}});
   send({cmd:'set_eval_speed',speed});
