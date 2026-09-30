@@ -498,6 +498,12 @@ class TrainingManager:
             cmd += ["--advance-min-episodes", str(int(config["advance_min_episodes"]))]
         if config.get("advance_hold_checks") is not None:
             cmd += ["--advance-hold-checks", str(int(config["advance_hold_checks"]))]
+        for key, flag, cast in (("sp_scripted_frac", "--sp-scripted-frac", float),
+                                ("sp_newest_frac", "--sp-newest-frac", float),
+                                ("sp_snapshot_steps", "--sp-snapshot-steps", int),
+                                ("sp_pool_size", "--sp-pool-size", int)):
+            if config.get(key) is not None:
+                cmd += [flag, str(cast(config[key]))]
         # CREATE_NEW_PROCESS_GROUP (Windows only) is what makes it possible to
         # send CTRL_BREAK to the trainer alone in stop() without also signalling
         # this server. On POSIX the default group is already fine.

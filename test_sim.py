@@ -800,6 +800,37 @@ def test_dcs_round_trip():
           f"{info.get('terminal_outcome')})")
 
 
+def test_selfplay_mix():
+    """Self-play opponent choice follows the scripted and newest shares; the pool keeps max_pool."""
+    import os, tempfile
+    from bvr_selfplay import pick_opponent, snapshot, pool_snapshots, clear_pool
+    rng = np.random.default_rng(0)
+    paths = [f"sp_{i}.zip" for i in range(4)]
+    n = 6000
+    picks = [pick_opponent(paths, rng, 0.25, 0.6) for _ in range(n)]
+    scripted = sum(p is None for p in picks) / n
+    newest = sum(p == paths[-1] for p in picks) / n
+    assert abs(scripted - 0.25) < 0.02, scripted
+    # newest: 0.75 * (0.6 + 0.4 / 4)
+    assert abs(newest - 0.75 * 0.7) < 0.02, newest
+    assert all(pick_opponent(paths, rng, 1.0, 0.5) is None for _ in range(50))
+    assert all(pick_opponent(paths, rng, 0.0, 1.0) == paths[-1] for _ in range(50))
+
+    class Model:
+        num_timesteps = 0
+        def save(self, path):
+            open(path + ".zip", "w").close()
+            Model.num_timesteps += 1000
+    with tempfile.TemporaryDirectory() as d:
+        pool = os.path.join(d, "pool")
+        for _ in range(5):
+            snapshot(Model(), pool, max_pool=3)
+        kept = pool_snapshots(pool)
+        assert len(kept) == 3 and kept[-1].endswith("0000004000.zip"), kept
+        assert clear_pool(pool) == 3 and not pool_snapshots(pool)
+    print(f"  self-play mix ............... OK  (scripted {scripted:.1%}, newest {newest:.1%})")
+
+
 def test_mutual_kill_1v1():
     """A kill ends the fight only once no missile is left in flight at a live aircraft."""
     import math
@@ -925,6 +956,7 @@ if __name__ == "__main__":
         ("2v1 losses",              test_team_losses),
         ("2v1 red targeting",       test_team_red_targeting),
         ("DCS round trip",          test_dcs_round_trip),
+        ("self-play mix",           test_selfplay_mix),
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),

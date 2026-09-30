@@ -214,6 +214,7 @@ class BvrEnv(gym.Env):
                  gamma_discount=0.997, seed=42, instance_id=0,
                  privileged_critic=True, envelope_table="library",
                  radar_model="sim", enable_viz=False, selfplay_pool=None,
+                 sp_scripted_frac=None, sp_newest_frac=None,
                  doctrine=DOCTRINE_MIXED, platform=DEFAULT_PLATFORM,
                  opponent_platform=DEFAULT_PLATFORM):
         super().__init__()
@@ -228,6 +229,8 @@ class BvrEnv(gym.Env):
         self._doctrine_cfg = doctrine
         # Directory of policy snapshots for the SELF_PLAY stage (bvr_selfplay).
         self._selfplay_pool = selfplay_pool
+        # SELF_PLAY opponent mix; None = bvr_selfplay's defaults.
+        self._sp_scripted_frac, self._sp_newest_frac = sp_scripted_frac, sp_newest_frac
         self._sp_observers = {}
         # Optional callable(env) -> opponent, overriding opponent_type for every
         # episode. The cross-play evaluator uses it to pit two chosen policies.

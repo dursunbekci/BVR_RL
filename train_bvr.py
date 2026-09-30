@@ -66,7 +66,8 @@ from bvr_library import (DEFAULT_PLATFORM, LibraryError, load_platform, scenario
                          scenario_of, scenario_drift)
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
-from bvr_selfplay import snapshot as selfplay_snapshot, clear_pool as clear_selfplay_pool
+from bvr_selfplay import (snapshot as selfplay_snapshot, clear_pool as clear_selfplay_pool,
+                          SCRIPTED_FRAC, NEWEST_FRAC, MAX_POOL)
 from bvr_team import TeamBvrEnv
 from bvr_team_vec import TeamVecEnv
 
@@ -132,7 +133,9 @@ class BvrCallback(BaseCallback):
                  no_selfplay_reason="the two sides fly different platforms, so self-play "
                                     "does not apply", advance_win_rate=ADVANCE_WIN_RATE,
                  advance_min_episodes=ADVANCE_MIN_EPISODES,
-                 advance_hold_checks=ADVANCE_HOLD_CHECKS, verbose=1):
+                 advance_hold_checks=ADVANCE_HOLD_CHECKS,
+                 selfplay_snapshot_steps=SELFPLAY_SNAPSHOT_STEPS,
+                 selfplay_pool_size=MAX_POOL, verbose=1):
         super().__init__(verbose)
         self.no_selfplay_reason = no_selfplay_reason
         # False when the two sides fly different platforms: a snapshot of the
@@ -165,6 +168,8 @@ class BvrCallback(BaseCallback):
         self.stage_episodes = 0
         self.best_win = -1.0
         self.selfplay_pool = selfplay_pool
+        self.selfplay_snapshot_steps = int(selfplay_snapshot_steps)
+        self.selfplay_pool_size = int(selfplay_pool_size)
         self.last_snapshot_step = 0
         # Opponent behind each of the last 50 outcomes, for the SELF_PLAY split
         # between policy snapshots and the scripted shooter in the mix.
@@ -208,7 +213,7 @@ class BvrCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if (self.opponent_type == BvrOpponentType.SELF_PLAY
-                and self.num_timesteps - self.last_snapshot_step >= SELFPLAY_SNAPSHOT_STEPS):
+                and self.num_timesteps - self.last_snapshot_step >= self.selfplay_snapshot_steps):
             self._snapshot()
         for info in self.locals.get("infos", []):
             if "track_state" in info:
@@ -447,14 +452,14 @@ class BvrCallback(BaseCallback):
 
 
     def _snapshot(self):
-        path = selfplay_snapshot(self.model, self.selfplay_pool)
+        path = selfplay_snapshot(self.model, self.selfplay_pool, self.selfplay_pool_size)
         self.last_snapshot_step = self.num_timesteps
         print(f"[bvr] self-play snapshot -> {path}")
 
 
 # ═════════════════════════════════════════════════════════════════════
 def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool,
-             doctrine, platform, opponent_platform):
+             doctrine, platform, opponent_platform, sp_scripted_frac=None, sp_newest_frac=None):
     def _init():
         return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
@@ -462,7 +467,8 @@ def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfpl
                       enable_viz=(viz and idx == 0),
                       envelope_table=envelope_table,
                       selfplay_pool=selfplay_pool, doctrine=doctrine,
-                      platform=platform, opponent_platform=opponent_platform)
+                      platform=platform, opponent_platform=opponent_platform,
+                      sp_scripted_frac=sp_scripted_frac, sp_newest_frac=sp_newest_frac)
     return _init
 
 
@@ -493,6 +499,17 @@ def main():
     ap.add_argument("--advance-hold-checks", type=int, default=ADVANCE_HOLD_CHECKS,
                     help="auto-curriculum: checks in a row (one every 10 episodes) the win rate "
                          "must stay at the mark before advancing (default %(default)s)")
+    ap.add_argument("--sp-scripted-frac", type=float, default=SCRIPTED_FRAC,
+                    help="self-play: share of episodes against the scripted ADAPTIVE_SHOOTER "
+                         "instead of a snapshot, 0-1 (default 1/3)")
+    ap.add_argument("--sp-newest-frac", type=float, default=NEWEST_FRAC,
+                    help="self-play: share of snapshot episodes against the newest snapshot; "
+                         "the rest draw uniformly from the pool, 0-1 (default %(default)s)")
+    ap.add_argument("--sp-snapshot-steps", type=int, default=SELFPLAY_SNAPSHOT_STEPS,
+                    help="self-play: steps between snapshots of the policy (default %(default)s)")
+    ap.add_argument("--sp-pool-size", type=int, default=MAX_POOL,
+                    help="self-play: snapshots kept; the oldest is deleted beyond this "
+                         "(default %(default)s)")
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
     ap.add_argument("--save-dir", type=str, default="models_bvr")
@@ -524,6 +541,14 @@ def main():
         ap.error("--advance-min-episodes must be at least 1")
     if args.advance_hold_checks < 1:
         ap.error("--advance-hold-checks must be at least 1")
+    for flag, v in (("--sp-scripted-frac", args.sp_scripted_frac),
+                    ("--sp-newest-frac", args.sp_newest_frac)):
+        if not 0.0 <= v <= 1.0:
+            ap.error(f"{flag} is a fraction: between 0 and 1 (e.g. 0.5 for 50%)")
+    if args.sp_snapshot_steps < 1000:
+        ap.error("--sp-snapshot-steps must be at least 1000")
+    if args.sp_pool_size < 1:
+        ap.error("--sp-pool-size must be at least 1")
 
     opponent = BvrOpponentType[args.opponent.upper()]
     if opponent not in CURRICULUM:
@@ -594,7 +619,8 @@ def main():
         vec = TeamVecEnv(fns, in_process=(args.n_envs == 1))
     else:
         fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
-                        selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform)
+                        selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform,
+                        args.sp_scripted_frac, args.sp_newest_frac)
                for i in range(args.n_envs)]
         vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
@@ -637,17 +663,25 @@ def main():
     if opponent == BvrOpponentType.SELF_PLAY:
         # learn() resets every env before any callback runs, and a SELF_PLAY
         # reset needs a snapshot in the pool — seed it with this policy now.
-        print(f"[bvr] self-play snapshot -> {selfplay_snapshot(model, selfplay_pool)}")
+        print(f"[bvr] self-play snapshot -> "
+              f"{selfplay_snapshot(model, selfplay_pool, args.sp_pool_size)}")
 
     cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
                      auto_curriculum=not args.no_curriculum,
                      advance_win_rate=args.advance_win_rate,
                      advance_min_episodes=args.advance_min_episodes,
                      advance_hold_checks=args.advance_hold_checks,
+                     selfplay_snapshot_steps=args.sp_snapshot_steps,
+                     selfplay_pool_size=args.sp_pool_size,
                      allow_selfplay=not (heterogeneous or team),
                      **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
     note(cb.describe_curriculum())
+    if not (heterogeneous or team) and (opponent == BvrOpponentType.SELF_PLAY
+                                        or not args.no_curriculum):
+        note(f"self-play settings: scripted ADAPTIVE_SHOOTER in {args.sp_scripted_frac:.0%} of "
+             f"episodes, newest snapshot in {args.sp_newest_frac:.0%} of the rest, a snapshot "
+             f"every {args.sp_snapshot_steps:,} steps, pool of {args.sp_pool_size}")
     cb.run_notes = run_notes
     # One machine-readable line for the GUI server, which shows these notes
     # at once rather than waiting for the first metrics write.

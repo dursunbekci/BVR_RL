@@ -22,6 +22,8 @@ which keeps a committed aggressor in the mix so self-play cannot settle into
 both sides turning cold at long range. Otherwise a snapshot from the pool:
 the newest with probability NEWEST_FRAC, else one drawn uniformly, so the
 agent keeps beating its older selves while facing its current one.
+The constants below are defaults; a run sets its own with train_bvr.py's
+--sp-scripted-frac / --sp-newest-frac (read from the env) and --sp-pool-size.
 
 The trainer owns the pool (snapshot()); environments only read it. Each
 training run starts with an empty pool (clear_pool()), so a run only ever
@@ -106,12 +108,12 @@ def clear_pool(pool_dir: str) -> int:
     return n
 
 
-def snapshot(model, pool_dir: str) -> str:
-    """Save the current policy into the pool and prune the oldest."""
+def snapshot(model, pool_dir: str, max_pool: int = MAX_POOL) -> str:
+    """Save the current policy into the pool and prune all but the newest max_pool."""
     os.makedirs(pool_dir, exist_ok=True)
     path = os.path.join(pool_dir, f"sp_{int(time.time())}_{int(model.num_timesteps):010d}")
     model.save(path)
-    for old in pool_snapshots(pool_dir)[:-MAX_POOL]:
+    for old in pool_snapshots(pool_dir)[:-max(int(max_pool), 1)]:
         try:
             os.remove(old)
         except OSError:
@@ -143,22 +145,31 @@ def load_policy(path: str):
     return entry
 
 
+def pick_opponent(paths, rng, scripted_frac=SCRIPTED_FRAC, newest_frac=NEWEST_FRAC):
+    """None for the scripted shooter, else the snapshot path to fly against."""
+    if rng.random() < scripted_frac:
+        return None
+    if not paths:
+        raise RuntimeError(
+            "SELF_PLAY needs at least one policy snapshot in the pool; "
+            "train_bvr.py writes one when the SELF_PLAY stage begins")
+    if rng.random() < newest_frac:
+        return paths[-1]
+    return paths[int(rng.integers(len(paths)))]
+
+
 def make_selfplay_opponent(env, pool_dir: str, rng):
     """Pick this episode's SELF_PLAY opponent for `env` (a BvrEnv)."""
     from bvr_opponents import BvrOpponent, BvrOpponentType
-    if rng.random() < SCRIPTED_FRAC:
+    sf = getattr(env, "_sp_scripted_frac", None)
+    nf = getattr(env, "_sp_newest_frac", None)
+    path = pick_opponent(pool_snapshots(pool_dir) if pool_dir else [], rng,
+                         SCRIPTED_FRAC if sf is None else sf,
+                         NEWEST_FRAC if nf is None else nf)
+    if path is None:
         opp = BvrOpponent.create(BvrOpponentType.ADAPTIVE_SHOOTER, rng=rng)
         opp.label = "ADAPTIVE_SHOOTER"
         return opp
-    paths = pool_snapshots(pool_dir) if pool_dir else []
-    if not paths:
-        raise RuntimeError(
-            f"SELF_PLAY needs at least one policy snapshot in {pool_dir!r}; "
-            "train_bvr.py writes one when the SELF_PLAY stage begins")
-    if rng.random() < NEWEST_FRAC:
-        path = paths[-1]
-    else:
-        path = paths[int(rng.integers(len(paths)))]
     model, privileged = load_policy(path)
     return PolicyOpponent(env, model, privileged,
                           label="policy:" + os.path.basename(path)[:-4])

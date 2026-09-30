@@ -86,6 +86,10 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 .badge.bi{color:var(--amber);border-color:var(--amber)}
 .badge.us{color:var(--green);border-color:var(--green)}
 .lib-grp{margin-top:12px}
+.sp-grp{margin-top:10px}
+.sp-grp>summary{font-size:11px;letter-spacing:2px;color:var(--muted);cursor:pointer;margin-bottom:6px}
+.sp-grp.off .row2{opacity:.4}
+#cfg-sp-note{font-size:11px;color:var(--muted);margin-bottom:6px}
 .lib-grp>summary{font-size:12px;letter-spacing:2px;color:#c79bff;cursor:pointer;font-weight:bold;margin-bottom:4px}
 .lib-tbl{border-collapse:collapse;width:100%;font-size:13px;border:1px solid var(--border)}
 .lib-tbl th{text-align:left;font-weight:normal;font-size:11px;letter-spacing:1px;color:var(--muted);
@@ -609,7 +613,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>TRAINING STEPS</span>
               <button class="help-btn" onclick="help(this,'TRAINING STEPS',
-                'Total policy decisions to train on. More steps = better policy, but takes longer.\n\nSingle env, at the reference 43× realtime:\n• 500 000 → ~3 hours\n• 2 000 000 → ~13 hours\n• 5 000 000 → ~32 hours\n\nParallel envs cut this, but by less than the env count — the estimate below already accounts for that. One \"step\" = one 1-second decision per environment.')">?</button>
+                'Total policy decisions to train on. More steps = better policy, but takes longer.\n\nSingle env, at the reference 43× realtime:\n• 500 000 → ~3 hours\n• 2 000 000 → ~13 hours\n• 5 000 000 → ~32 hours\n\nParallel envs cut this, but by less than the env count — the estimate below already accounts for that. One &quot;step&quot; = one 1-second decision per environment.')">?</button>
             </div>
             <input type="number" id="cfg-steps" value="2000000" min="100000" step="100000" oninput="updateETA()">
             <div id="steps-eta" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
@@ -672,7 +676,7 @@ select option{background:#050810}
               <button class="help-btn" onclick="help(this,'AUTO-CURRICULUM',
                 'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes has stayed at or above ADVANCE AT (65% by default) for HOLD FOR checks in a row (5 by default, one check every 10 episodes), and at least MIN EPISODES / STAGE (60 by default) have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nIn SELF_PLAY the opponent is a frozen snapshot of the agent itself, observing through its own radar, with an ADAPTIVE shooter in a third of episodes. Snapshots are taken on entering the stage and every 250k steps, into models_bvr/selfplay_pool, which is emptied at the start of every training run. The log splits the win rate by opponent kind.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
             </div>
-            <select id="cfg-curriculum">
+            <select id="cfg-curriculum" onchange="spCheck()">
               <option value="1" selected>ON (auto-advance)</option>
               <option value="0">OFF (stay on stage)</option>
             </select>
@@ -681,7 +685,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>MODEL NAME</span>
               <button class="help-btn" onclick="help(this,'MODEL NAME',
-                'Name for the model file this run saves.\n\nThe final policy is written to:\n  models_bvr/<name>.zip\n\nLeave as "latest" to keep overwriting the default checkpoint, or give each run its own name (e.g. shooter_v2) to keep multiple trained models side by side.\n\nThis file — and the archive/best_* / archive/pre_* snapshots the curriculum saves along the way — is what shows up in RESUME FROM and CHECKPOINT TO LOAD once training finishes.')">?</button>
+                'Name for the model file this run saves.\n\nThe final policy is written to:\n  models_bvr/<name>.zip\n\nLeave as &quot;latest&quot; to keep overwriting the default checkpoint, or give each run its own name (e.g. shooter_v2) to keep multiple trained models side by side.\n\nThis file — and the archive/best_* / archive/pre_* snapshots the curriculum saves along the way — is what shows up in RESUME FROM and CHECKPOINT TO LOAD once training finishes.')">?</button>
             </div>
             <input type="text" id="cfg-runname" placeholder="latest" value="latest">
           </div>
@@ -689,7 +693,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>RESUME FROM</span>
               <button class="help-btn" onclick="help(this,'RESUME CHECKPOINT',
-                'Continue training from a saved model instead of starting fresh.\n\nLeave at "fresh start" to begin from a random policy.\n\nThe list is read live from your models_bvr/ folder — top-level saves (e.g. latest.zip) and archive/ snapshots (best_*, pre_*) both show up here.')">?</button>
+                'Continue training from a saved model instead of starting fresh.\n\nLeave at &quot;fresh start&quot; to begin from a random policy.\n\nThe list is read live from your models_bvr/ folder — top-level saves (e.g. latest.zip) and archive/ snapshots (best_*, pre_*) both show up here.')">?</button>
             </div>
             <select id="cfg-resume">
               <option value="">— fresh start —</option>
@@ -702,13 +706,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>ADVANCE AT (WIN %)</span>
               <button class="help-btn" onclick="help(this,'ADVANCE AT',
-                'The win rate over the last 50 episodes at which the auto-curriculum moves on to the next opponent. 65% by default.
-
-Set it per matchup. An outmatched platform may never reach 65%: a slower aircraft can\'t catch a faster opponent that runs, and a faster opponent\'s missiles out-range its own. For example, two UCAVs against an F-16 may need 40–50%.
-
-Too low and the agent moves on before it has learned the stage. Watch the win-rate trend: advance once it has levelled off.
-
-Ignored when AUTO-CURRICULUM is OFF.')">?</button>
+                'The win rate over the last 50 episodes at which the auto-curriculum moves on to the next opponent. 65% by default.\n\nSet it per matchup. An outmatched platform may never reach 65%: a slower aircraft can\'t catch a faster opponent that runs, and a faster opponent\'s missiles out-range its own. For example, two UCAVs against an F-16 may need 40–50%.\n\nToo low and the agent moves on before it has learned the stage. Watch the win-rate trend: advance once it has levelled off.\n\nIgnored when AUTO-CURRICULUM is OFF.')">?</button>
             </div>
             <input type="number" id="cfg-adv-wr" value="65" min="5" max="100" step="5">
           </div>
@@ -716,11 +714,7 @@ Ignored when AUTO-CURRICULUM is OFF.')">?</button>
             <div class="field-label">
               <span>MIN EPISODES / STAGE</span>
               <button class="help-btn" onclick="help(this,'MIN EPISODES / STAGE',
-                'Episodes the agent must play against the current opponent before the curriculum may advance, even if the win rate is already past the mark. 60 by default.
-
-The win rate is measured over the last 50 episodes, so this makes sure every one of them was flown against the current opponent, not partly against the easier one before it. HOLD FOR is what guards against a lucky streak.
-
-Ignored when AUTO-CURRICULUM is OFF.')">?</button>
+                'Episodes the agent must play against the current opponent before the curriculum may advance, even if the win rate is already past the mark. 60 by default.\n\nThe win rate is measured over the last 50 episodes, so this makes sure every one of them was flown against the current opponent, not partly against the easier one before it. HOLD FOR is what guards against a lucky streak.\n\nIgnored when AUTO-CURRICULUM is OFF.')">?</button>
             </div>
             <input type="number" id="cfg-adv-min" value="60" min="10" max="5000" step="10">
           </div>
@@ -728,15 +722,52 @@ Ignored when AUTO-CURRICULUM is OFF.')">?</button>
             <div class="field-label">
               <span>HOLD FOR (CHECKS)</span>
               <button class="help-btn" onclick="help(this,'HOLD FOR',
-                'How many checks in a row the win rate must stay at or above ADVANCE AT before the curriculum moves on. The win rate is checked every 10 episodes. 5 by default.
-
-Every check is a new chance for a lucky 50 episodes. With 1 check, an agent that really wins 55% of the time passes a 65% mark within 1000 episodes 97% of the time. With 5 checks, 29%. An agent that really wins 65% still passes, about 40 episodes later.
-
-Ignored when AUTO-CURRICULUM is OFF.')">?</button>
+                'How many checks in a row the win rate must stay at or above ADVANCE AT before the curriculum moves on. The win rate is checked every 10 episodes. 5 by default.\n\nEvery check is a new chance for a lucky 50 episodes. With 1 check, an agent that really wins 55% of the time passes a 65% mark within 1000 episodes 97% of the time. With 5 checks, 29%. An agent that really wins 65% still passes, about 40 episodes later.\n\nIgnored when AUTO-CURRICULUM is OFF.')">?</button>
             </div>
             <input type="number" id="cfg-adv-hold" value="5" min="1" max="50" step="1">
           </div>
         </div>
+
+        <details class="sp-grp" id="cfg-sp-box">
+          <summary>SELF-PLAY (ADVANCED)</summary>
+          <div id="cfg-sp-note"></div>
+          <div class="row2">
+            <div class="field">
+              <div class="field-label">
+                <span>SCRIPTED SHARE (%)</span>
+                <button class="help-btn" onclick="help(this,'SCRIPTED SHARE',
+                  'Share of SELF_PLAY episodes flown against the scripted ADAPTIVE SHOOTER instead of a snapshot of the agent. 33% by default.\n\nIt keeps a committed attacker in the mix: without one, self-play in BVR tends to settle into both sides turning away at long range.\n\nRaise it if win rate vs scripted falls while win rate vs policy rises (the agent is overfitting to its own style). Lower it if the scripted shooter is already beaten easily.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-scripted" value="33" min="0" max="100" step="1">
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>NEWEST SHARE (%)</span>
+                <button class="help-btn" onclick="help(this,'NEWEST SHARE',
+                  'Of the episodes against a snapshot, the share against the newest one. The rest draw a snapshot at random from the pool (which may also be the newest). 50% by default.\n\nLower it if the agent forgets how to beat older versions of itself. Raise it for opposition closer to its current strength.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-newest" value="50" min="0" max="100" step="5">
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <div class="field-label">
+                <span>SNAPSHOT EVERY (K STEPS)</span>
+                <button class="help-btn" onclick="help(this,'SNAPSHOT EVERY',
+                  'How often, in thousands of training steps, the current policy is saved into the self-play pool while in SELF_PLAY. 250 by default. A snapshot is also taken on entering the stage.\n\nShorter keeps opponents close to the current policy. Longer spreads the pool over more of its history.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-every" value="250" min="1" max="10000" step="50">
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>POOL SIZE</span>
+                <button class="help-btn" onclick="help(this,'POOL SIZE',
+                  'Snapshots kept in the self-play pool; beyond this the oldest is deleted. 12 by default: with a snapshot every 250k steps, about the last 3M steps of the policy.\n\nBigger keeps older opponents around longer, at the cost of disk space and loading time. The pool is emptied at the start of every training run.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-pool" value="12" min="1" max="100" step="1">
+            </div>
+          </div>
+        </details>
 
         <div class="btn-row">
           <button class="btn go"   id="btn-train" style="flex:1">▶ START TRAINING</button>
@@ -752,11 +783,7 @@ Ignored when AUTO-CURRICULUM is OFF.')">?</button>
         <div class="field-label" style="margin-bottom:4px">
           <span id="run-state">NO RUN YET</span>
           <button class="help-btn" onclick="help(this,'CURRENT RUN',
-            'The settings the running (or most recent) training run was started with, and what the trainer reported when it started: the platforms it loaded, the checkpoint it resumed from, any note that a resume is a warm start, and its curriculum plan.
-
-These stay here for the whole run instead of scrolling out of the log. They are the settings as launched: changing the configuration above does not affect a running trainer.
-
-CODE is the checked-out commit of the repository. Files marked as modified differ from that commit; they are what training actually runs, so check them if results look wrong.')">?</button>
+            'The settings the running (or most recent) training run was started with, and what the trainer reported when it started: the platforms it loaded, the checkpoint it resumed from, any note that a resume is a warm start, and its curriculum plan.\n\nThese stay here for the whole run instead of scrolling out of the log. They are the settings as launched: changing the configuration above does not affect a running trainer.\n\nCODE is the checked-out commit of the repository. Files marked as modified differ from that commit; they are what training actually runs, so check them if results look wrong.')">?</button>
         </div>
         <div id="run-info"><div style="color:var(--muted)">Start a run above; its settings and startup notes appear here.</div></div>
       </div>
@@ -783,7 +810,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 2px">
           <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">WIN RATE</span>
           <button class="help-btn" onclick="help(this,'WIN RATE',
-            'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick marks this run's threshold for advancing to the next opponent stage (65% unless set otherwise under ADVANCE AT).\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
+            'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick marks this run\'s threshold for advancing to the next opponent stage (65% unless set otherwise under ADVANCE AT).\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
           <span id="curr-note" style="font-size:11px;color:var(--amber)">advance at 65% →</span>
         </div>
         <div style="position:relative">
@@ -917,7 +944,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
       </div>
       <div class="dash-card">
         <div class="dash-head"><span class="dash-title">REWARD DRIVERS</span><button class="help-btn" onclick="help(this,'REWARD DRIVERS',
-              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — danger from the nearest inbound missile: 0 when none, falling towards −0.80 as its time-to-go runs out; turning away wins it back\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button></div>
+              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s\') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — danger from the nearest inbound missile: 0 when none, falling towards −0.80 as its time-to-go runs out; turning away wins it back\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button></div>
         <div class="dash-sub">share of the shaping reward by term, last ~5000 steps</div>
         <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
       </div>
@@ -1061,7 +1088,7 @@ CODE is the checked-out commit of the repository. Files marked as modified diffe
           <div class="field-label">
             <span>CHECKPOINT TO LOAD</span>
             <button class="help-btn" onclick="help(this,'CHECKPOINT TO LOAD',
-              'The saved model file to load for evaluation.\n\nThe list is read live from your models_bvr/ folder — the most recent save is pre-selected. Pick an archive/best_* or archive/pre_* snapshot to evaluate an earlier checkpoint instead.\n\nSelect "random / untrained policy" to run without a trained model.')">?</button>
+              'The saved model file to load for evaluation.\n\nThe list is read live from your models_bvr/ folder — the most recent save is pre-selected. Pick an archive/best_* or archive/pre_* snapshot to evaluate an earlier checkpoint instead.\n\nSelect &quot;random / untrained policy&quot; to run without a trained model.')">?</button>
           </div>
           <select id="eval-ckpt">
             <option value="">— random / untrained policy —</option>
@@ -1506,6 +1533,26 @@ function engageCheck() {
       ? '⚠ self-play needs both sides on the same platform; pick another stage.'
       : 'Different platforms: self-play does not apply, so the curriculum ends at ADAPTIVE SHOOTER. If one side is outmatched it may never reach 65%: consider a lower ADVANCE AT.';
   } else w.textContent = '';
+  spCheck();
+}
+
+// The SELF-PLAY section applies only when this run can reach the stage.
+function spCheck() {
+  const a = document.getElementById('cfg-platform').value, b = document.getElementById('cfg-opp-platform').value;
+  const opp = document.getElementById('cfg-opponent').value;
+  const team = document.getElementById('cfg-format').value === '2v1';
+  const curr = document.getElementById('cfg-curriculum').value === '1';
+  const why = team ? '2 v 1 has no self-play stage yet'
+    : (a && b && a !== b) ? 'the two sides fly different platforms'
+    : (!curr && opp !== 'self_play') ? 'the auto-curriculum is OFF and the run does not start at SELF_PLAY'
+    : '';
+  const box = document.getElementById('cfg-sp-box');
+  box.classList.toggle('off', !!why);
+  box.querySelectorAll('input').forEach(el => el.disabled = !!why);
+  document.getElementById('cfg-sp-note').textContent = why
+    ? `Not used in this run: ${why}.`
+    : 'Used once the run reaches SELF_PLAY.';
+  return !why;
 }
 
 async function openItem(kind, id) {
@@ -1949,6 +1996,8 @@ function renderRun() {
       ['OPPONENT', `${c.opponent_platform||'F-16C'} · start at ${String(c.opponent||'straight').toUpperCase()}`],
       ['CURRICULUM', c.curriculum===false?'off (stays on stage)'
         :`auto-advance at ${Math.round((c.advance_win_rate??0.65)*100)}%, held ${c.advance_hold_checks??5} checks, after ${c.advance_min_episodes??60} episodes`],
+      ...(c.sp_scripted_frac!==undefined ? [['SELF-PLAY',
+        `${Math.round(c.sp_scripted_frac*100)}% scripted · newest ${Math.round(c.sp_newest_frac*100)}% · snapshot every ${Math.round(c.sp_snapshot_steps/1000)}k steps · pool ${c.sp_pool_size}`]] : []),
       ['DOCTRINE', String(c.doctrine||'mixed').toUpperCase()],
       ['STEPS', `${fmt(c.steps||0)} on ${c.n_envs||1} env${(c.n_envs||1)>1?'s':''}`],
       ['PPO', `γ ${c.gamma} · lr ${c.lr} · batch ${c.batch_size}`],
@@ -2477,6 +2526,15 @@ document.getElementById('btn-train').onclick=()=>{
   if(curr && !(advPct>0 && advPct<=100)){ alert('ADVANCE AT must be a win rate between 1 and 100%.'); return; }
   if(curr && !(advMin>=1)){ alert('MIN EPISODES / STAGE must be at least 1.'); return; }
   if(curr && !(advHold>=1)){ alert('HOLD FOR must be at least 1 check.'); return; }
+  const spOn=spCheck();
+  const spScr=parseFloat(document.getElementById('cfg-sp-scripted').value);
+  const spNew=parseFloat(document.getElementById('cfg-sp-newest').value);
+  const spEvery=parseInt(document.getElementById('cfg-sp-every').value);
+  const spPool=parseInt(document.getElementById('cfg-sp-pool').value);
+  if(spOn && !(spScr>=0 && spScr<=100)){ alert('SCRIPTED SHARE must be between 0 and 100%.'); return; }
+  if(spOn && !(spNew>=0 && spNew<=100)){ alert('NEWEST SHARE must be between 0 and 100%.'); return; }
+  if(spOn && !(spEvery>=1)){ alert('SNAPSHOT EVERY must be at least 1 (thousand steps).'); return; }
+  if(spOn && !(spPool>=1)){ alert('POOL SIZE must be at least 1.'); return; }
   const resume=document.getElementById('cfg-resume').value.trim();
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   const doctrine=document.getElementById('cfg-doctrine').value;
@@ -2515,6 +2573,8 @@ document.getElementById('btn-train').onclick=()=>{
     batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine,
     advance_win_rate:curr?advPct/100:undefined, advance_min_episodes:curr?advMin:undefined,
     advance_hold_checks:curr?advHold:undefined,
+    sp_scripted_frac:spOn?spScr/100:undefined, sp_newest_frac:spOn?spNew/100:undefined,
+    sp_snapshot_steps:spOn?spEvery*1000:undefined, sp_pool_size:spOn?spPool:undefined,
     platform:document.getElementById('cfg-platform').value||'F-16C',
     opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C',
     format:fmtSel, wingman_platform:(fmtSel==='2v1'&&wingSel)||undefined}});
