@@ -15,3 +15,6 @@ bvr_metrics.json
 
 # DCS input check output (dcs_obs_check.py)
 dcs_check/
+
+# Intermediate page written by docs/guide/build.py
+docs/guide/guide.html
