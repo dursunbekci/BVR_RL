@@ -121,6 +121,9 @@ ADVANCE_MIN_EPISODES = 60
 # still passes, about 40 episodes later. --advance-hold-checks sets it per run.
 ADVANCE_HOLD_CHECKS = 5
 
+# Points kept in the GUI's chart history (one per 10 episodes, thinned evenly).
+HIST_MAX_POINTS = 600
+
 # While in SELF_PLAY, add the current policy to the opponent pool this often,
 # so the agent keeps meeting versions of itself only a little behind it.
 SELFPLAY_SNAPSHOT_STEPS = 250_000
@@ -207,6 +210,8 @@ class BvrCallback(BaseCallback):
         # Identifies this run in bvr_metrics.json, so its history is not
         # mixed with a previous run's.
         self.run_id = f"{int(time.time())}-{os.getpid()}"
+        # Chart history: one point per log, thinned evenly (see _log).
+        self.hist, self.hist_stride, self.n_logs = [], 1, 0
         os.makedirs(save_dir, exist_ok=True)
 
     def curriculum_state(self) -> dict:
@@ -371,16 +376,11 @@ class BvrCallback(BaseCallback):
         try:
             mpath = os.path.join(self.save_dir, "..", "bvr_metrics.json")
             mpath = os.path.normpath(mpath)
-            prev = {}
-            if os.path.exists(mpath):
-                try: prev = json.loads(open(mpath).read())
-                except Exception: pass
             # One point per log (every 10 episodes) for the GUI's training
-            # dashboard. History belongs to this run: an earlier run's points
-            # in the same file are dropped rather than drawn as if continued.
-            hist = prev.get("history", []) if prev.get("run") == self.run_id else []
+            # dashboard, kept in memory: the history belongs to this run, so
+            # an earlier run's points in the same file are never continued.
             r3 = lambda v: round(float(v), 3)
-            hist.append({
+            point = ({
                 "ep": self.ep_count, "steps": int(self.model.num_timesteps),
                 "win": r3(win_rate), "loss": r3(losses / n), "mut": r3(mutual / n),
                 "to": r3(timeouts / n),
@@ -391,10 +391,19 @@ class BvrCallback(BaseCallback):
                 "rev": round(bank_rpm, 2),
                 "lost": r3(losses_ep) if losses_ep is not None else None,
                 "stage": self.opponent_type.name})
-            # A long run keeps its whole shape: past 600 points, every other
-            # older point is dropped, so the chart always spans the run.
-            if len(hist) > 600:
-                hist = hist[:-100:2] + hist[-100:]
+            # A long run keeps its whole shape at even spacing: a point is
+            # kept every `hist_stride` logs, and past 600 points every other
+            # one is dropped and the stride doubles. (It used to halve only
+            # the older points, again and again, so the start of a long run
+            # shrank to a few points drawn as straight lines.) The latest
+            # point is always shown.
+            if self.n_logs % self.hist_stride == 0:
+                self.hist.append(point)
+                if len(self.hist) > HIST_MAX_POINTS:
+                    self.hist = self.hist[::2]
+                    self.hist_stride *= 2
+            self.n_logs += 1
+            hist = self.hist + ([point] if not self.hist or self.hist[-1] is not point else [])
             metrics = {
                 "run":           self.run_id,
                 "episode":       self.ep_count,

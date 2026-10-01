@@ -26,7 +26,11 @@ How games are played and scored
     loss = SHOT_DOWN or CRASH
     draw = MUTUAL_KILL, TIMEOUT, ESCAPE
 * Diagonal cells (a policy against itself) should sit near 0.5; the gap is
-  the AC1 seat's advantage, also reported as "seat bias".
+  the AC1 seat's advantage, also reported as "seat bias". Starts used to be
+  drawn from AC1's side only (AC1 nose-on, AC2 offset, beaming or running),
+  which gave AC1 a real head start: a seat bias of about +0.13. Half the
+  starts are now mirrored, so the bias should sit near 0. It never skews
+  the head-to-head scores or Elo, which play every pairing from both seats.
 * Both sides fly the same doctrine (--doctrine). Actions are the policy's
   most likely choice unless --stochastic.
 * Each checkpoint flies the platform it was trained on (the scenario stored

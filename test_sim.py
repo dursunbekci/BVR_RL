@@ -887,6 +887,32 @@ def test_heading_switches():
     print(f"  heading switches ............ OK  ({rpm:.0f}/min, {top[0][0]} {top[0][1]:.0%})")
 
 
+def test_mirrored_starts():
+    """Half the starts are mirrored: then AC2, not AC1, starts nose-on to the other."""
+    import math
+    from bvr_env import BvrEnv, REF_LAT, R_EARTH, DEG2RAD
+    from bvr_opponents import BvrOpponentType as T
+    e = BvrEnv(opponent_type=T.STRAIGHT, seed=2, platform="GENERIC-UCAV", opponent_platform="F-16C")
+    enu = lambda la, lo: np.array([(lo - 35.0) * DEG2RAD * R_EARTH * math.cos(REF_LAT * DEG2RAD),
+                                   (la - REF_LAT) * DEG2RAD * R_EARTH])
+    def off(psi, frm, to):
+        d = to - frm
+        return abs((math.degrees(math.atan2(d[0], d[1]) - psi) + 180) % 360 - 180)
+    n, mir = 600, 0
+    for _ in range(n):
+        ic = e._random_ic()
+        p1, p2 = enu(ic["ac1_lat"], ic["ac1_lon"]), enu(ic["ac2_lat"], ic["ac2_lon"])
+        assert abs(float(np.linalg.norm(p2 - p1)) - ic["start_range"]) < 1.0
+        if ic["mirrored"]:
+            mir += 1
+            assert off(ic["ac2_psi"], p2, p1) < 1e-6
+        else:
+            assert off(ic["ac1_psi"], p1, p2) < 1e-6
+        assert ic["ac1_spd"] < 210 and ic["ac2_spd"] > 240      # UCAV v F-16 speeds follow the seat
+    assert 0.42 < mir / n < 0.58, mir / n
+    print(f"  mirrored starts ............. OK  ({mir / n:.0%} mirrored)")
+
+
 def test_mutual_kill_1v1():
     """A kill ends the fight only once no missile is left in flight at a live aircraft."""
     import math
@@ -1015,6 +1041,7 @@ if __name__ == "__main__":
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
+        ("mirrored starts",         test_mirrored_starts),
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),

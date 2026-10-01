@@ -799,6 +799,7 @@ def _resolve_hook(runner, frames, episode, build):
 def _episode_facts(ic: dict, fin: dict, n_max: int) -> dict:
     """What WATCH's statistics panel groups episodes by, and their shots."""
     return {"scenario": (ic or {}).get("scenario", ""),
+            "mirrored": bool((ic or {}).get("mirrored", False)),
             "start_range": round(float((ic or {}).get("start_range", 0.0)), 1),
             "flight_time": round(float(fin.get("flight_time", 0.0)), 1),
             "r_over_rmax": [l.get("r_over_rmax") for l in fin.get("launch_log", [])

@@ -1145,7 +1145,7 @@ select option{background:#050810}
       <div class="sec-body">
         <div style="display:flex;justify-content:flex-end;margin:-4px 0 2px">
           <button class="help-btn" onclick="help(this,'WATCH STATISTICS',
-            'A summary of the episodes played since you last pressed START EVAL. Episodes stopped part-way are left out.\n\nWIN RATE shows a 95% range: with few episodes it is wide, so do not read much into 10 episodes.\n\nWATCH always takes the policy\'s single most likely action, while training samples its actions, so these numbers can differ from the training dashboard (usually higher).\n\nBY START GEOMETRY and BY START RANGE show where it wins and loses. LOSS is shot down, MUT is a mutual kill, OTHER is escape or crash.')">?</button>
+            'A summary of the episodes played since you last pressed START EVAL. Episodes stopped part-way are left out.\n\nWIN RATE shows a 95% range: with few episodes it is wide, so do not read much into 10 episodes.\n\nWATCH always takes the policy\'s single most likely action, while training samples its actions, so these numbers can differ from the training dashboard (usually higher).\n\nBY START GEOMETRY and BY START RANGE show where it wins and loses. ⇄ marks a mirrored start: the bandit has the start named (nose on while you are offset, you beaming, or you running with it behind). LOSS is shot down, MUT is a mutual kill, OTHER is escape or crash.')">?</button>
         </div>
         <div id="ws-body"><div style="color:var(--muted);font-size:12px">Start an eval to collect statistics.</div></div>
       </div>
@@ -1415,7 +1415,7 @@ async function xpLoadResults() {
   const sb = d.seat_bias || 0;
   el.innerHTML = `<table id="xp-table">${head}${body}</table>
     <div style="font-size:11px;margin:8px 0 4px;color:${Math.abs(sb) > 0.05 ? 'var(--amber)' : 'var(--text)'}">
-      Seat bias ${sb >= 0 ? '+' : ''}${sb.toFixed(3)}${Math.abs(sb) > 0.05 ? ' — larger than expected; add games or check the seats' : ' (fair)'}</div>
+      Seat bias ${sb >= 0 ? '+' : ''}${sb.toFixed(3)}: how far the AC1 seat scores above 0.5 on the same starts played both ways. It cancels in the head-to-head scores and Elo, since every pairing is played from both seats. ${Math.abs(sb) > 0.05 ? 'Starts are mirrored half the time, so a bias this large usually means few games per cell, or checkpoints that react differently to the first seconds of a start.' : '(fair)'}</div>
     <div style="font-size:12px;color:var(--bright);font-weight:bold;margin:8px 0 4px">ELO <span style="font-weight:normal;font-size:11px;color:var(--muted)">(mean 1000)</span></div>
     ${eloHtml}`;
 }
@@ -2466,7 +2466,9 @@ function wsRender() {
     `<span class="ws-chip">${o.replace('_', ' ')} <b>${c(o)}</b> · ${Math.round(100 * c(o) / n)}%</span>`).join('');
   const kpi = (v, l) => `<div class="ws-kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const head = '<tr><th>START</th><th>N</th><th>WIN</th><th>MUT</th><th>LOSS</th><th>T/O</th><th>OTHER</th></tr>';
-  const byScen = Object.keys(WS_SCEN).map(k => ({name: WS_SCEN[k], eps: E.filter(e => e.scenario === k)}));
+  const byScen = Object.keys(WS_SCEN).flatMap(k => [
+    {name: WS_SCEN[k], eps: E.filter(e => e.scenario === k && !e.mirrored)},
+    {name: WS_SCEN[k] + ' ⇄', eps: E.filter(e => e.scenario === k && e.mirrored)}]);
   const byRange = WS_BANDS.map(([a, b, name]) => ({name, eps: E.filter(e => e.start_range / 1000 >= a && e.start_range / 1000 < b)}));
   el.innerHTML =
       `<div class="ws-top"><b>${n}</b> episode${n > 1 ? 's' : ''}${WS.nmax ? ` of ${WS.nmax}` : ''} · ${WS.label}</div>`

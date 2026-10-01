@@ -976,6 +976,12 @@ class BvrEnv(gym.Env):
 
     # ── IC generator ───────────────────────────────────────────────────
     _SCENARIOS=["head_on","offset_left","offset_right","beam","stern_conversion"]
+    # The scenarios are drawn from AC1's side: AC1 always starts nose-on to
+    # AC2, while AC2 is offset, beaming or running away in four of the five.
+    # The agent flies AC1, so it always got the better start and never
+    # practised the worse one; a policy against itself scored 0.71 in the
+    # AC1 seat. This share of episodes swaps the two aircraft's starts.
+    MIRROR_START_FRAC=0.5
 
     def stern_starts(self, blue_top_speed=None) -> bool:
         """Whether stern-conversion starts are drawn.
@@ -999,8 +1005,8 @@ class BvrEnv(gym.Env):
         # Start speeds are drawn for an F-16 (250-320 m/s) and scaled by each
         # platform's fastest speed choice relative to the F-16's 400 m/s, so a
         # slower aircraft starts at a speed it can actually fly.
-        a1s=float(self._rng.uniform(250,320))*(self._plat.speed_cmds[-1]/400.0)
-        a2s=float(self._rng.uniform(250,320))*(self._opp_plat.speed_cmds[-1]/400.0)
+        a1s=float(self._rng.uniform(250,320))
+        a2s=float(self._rng.uniform(250,320))
         a1p=br
         if   sc=="head_on":      a2p=br+math.pi+float(self._rng.uniform(-0.15,0.15))
         elif sc=="offset_left":  a2p=br+math.pi+float(self._rng.uniform(0.25,0.70))
@@ -1008,10 +1014,15 @@ class BvrEnv(gym.Env):
         elif sc=="beam":         a2p=br+math.pi/2+float(self._rng.uniform(-0.30,0.30))
         else:                    a2p=br+float(self._rng.uniform(-0.30,0.30)); rm=float(self._rng.uniform(45000,75000))
         dl=rm*math.cos(br)/R_EARTH; dlo=rm*math.sin(br)/(R_EARTH*math.cos(REF_LAT*DEG2RAD))
-        return dict(scenario=sc,
-                    ac1_lat=REF_LAT,ac1_lon=REF_LON,ac1_alt=a1a,ac1_psi=_wrap_2pi(a1p),ac1_spd=a1s,
-                    ac2_lat=REF_LAT+math.degrees(dl),ac2_lon=REF_LON+math.degrees(dlo),
-                    ac2_alt=a2a,ac2_psi=_wrap_2pi(a2p),ac2_spd=a2s,
+        p1=(REF_LAT,REF_LON,a1a,a1p,a1s)
+        p2=(REF_LAT+math.degrees(dl),REF_LON+math.degrees(dlo),a2a,a2p,a2s)
+        mirrored=bool(self._rng.random()<self.MIRROR_START_FRAC)
+        if mirrored: p1,p2=p2,p1
+        # Speeds are drawn for an F-16 and scaled to the platform in each seat.
+        k1=self._plat.speed_cmds[-1]/400.0; k2=self._opp_plat.speed_cmds[-1]/400.0
+        return dict(scenario=sc,mirrored=mirrored,
+                    ac1_lat=p1[0],ac1_lon=p1[1],ac1_alt=p1[2],ac1_psi=_wrap_2pi(p1[3]),ac1_spd=p1[4]*k1,
+                    ac2_lat=p2[0],ac2_lon=p2[1],ac2_alt=p2[2],ac2_psi=_wrap_2pi(p2[3]),ac2_spd=p2[4]*k2,
                     wpn=self._plat.wpn_count,wpn_t=self._opp_plat.wpn_count,start_range=rm)
 
     def close(self): pass

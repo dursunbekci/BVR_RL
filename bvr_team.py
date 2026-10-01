@@ -482,7 +482,8 @@ class TeamBvrEnv:
         dy = fwd * math.cos(psi) - lat * math.sin(psi)       # north
         wing = self._obs[1]._plat
         ic = {
-            "scenario": lead["scenario"], "formation": form, "start_range": lead["start_range"],
+            "scenario": lead["scenario"], "mirrored": lead["mirrored"], "formation": form,
+            "start_range": lead["start_range"],
             "ac1_lat": lead["ac1_lat"], "ac1_lon": lead["ac1_lon"], "ac1_alt": lead["ac1_alt"],
             "ac1_psi": psi, "ac1_spd": lead["ac1_spd"],
             "ac2_lat": lead["ac1_lat"] + math.degrees(dy / R_EARTH),
