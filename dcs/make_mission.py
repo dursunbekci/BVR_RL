@@ -32,8 +32,41 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _skip_livery_scan():
+    """
+    pydcs reads the paint schemes of every aircraft in the DCS installation as
+    soon as it is imported. On Python 3.13 that scan fails (KeyError:
+    'country_list': pydcs relies on exec() writing into locals(), which 3.13
+    no longer allows). The mission needs no paint schemes (DCS uses each
+    type's default), so the scan is switched off: as soon as pydcs's scanner
+    module loads, its initialize() becomes a no-op.
+    """
+    import importlib.abc
+    import importlib.machinery
+    import sys
+
+    class SkipScan(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path, target=None):
+            if name != "dcs.liveries_scanner":
+                return None
+            spec = importlib.machinery.PathFinder.find_spec(name, path)
+            if spec is None or spec.loader is None:
+                return spec
+            load = spec.loader.exec_module
+
+            def exec_module(module):
+                load(module)
+                module.Liveries.initialize = staticmethod(lambda install="", saved_games="": None)
+            spec.loader.exec_module = exec_module
+            return spec
+
+    if "dcs.liveries_scanner" not in sys.modules:
+        sys.meta_path.insert(0, SkipScan())
+
+
 def build(args):
     logging.disable(logging.WARNING)           # pydcs's DCS-install search is noisy
+    _skip_livery_scan()
     try:
         from dcs.mission import Mission
         from dcs.terrain import Caucasus
