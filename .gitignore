@@ -16,8 +16,8 @@ bvr_metrics.json
 # DCS input check output (dcs_obs_check.py)
 dcs_check/
 
-# Intermediate page written by docs/guide/build.py
-docs/guide/guide.html
+# Intermediate pages written by docs/guide/build.py
+docs/guide/_*.html
 
 # DCS live runs (dcs_live.py) and generated missions
 dcs_runs/

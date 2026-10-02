@@ -25,7 +25,9 @@ aircraft and when to shoot.
 | `test_bridge.py` | Runs the bridge in Lua 5.1 against a mock of DCS's API |
 | `bvr_logger.lua` | Older step: records a mission to a file, no Python needed (see the end) |
 
-Everything below assumes Windows and no DCS on the computer yet.
+Everything below assumes Windows and no DCS on the computer yet. The same
+steps, with more explanation, are in the PDF guide
+`docs/BVR_RL_DCS_Guide.pdf`.
 
 ---
 
