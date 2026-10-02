@@ -64,6 +64,57 @@ def _skip_livery_scan():
         sys.meta_path.insert(0, SkipScan())
 
 
+def _no_payload_files():
+    """
+    Stop pydcs reading the payload files in the DCS installation. It fails on
+    files it can't parse (KeyError on ...\\UnitPayloads\\F-100D.lua with
+    current DCS), and the mission needs none of them: every weapon is loaded
+    explicitly (missiles() below).
+    """
+    from pathlib import Path
+    from dcs.payloads import PayloadDirectories
+    from dcs.unittype import FlyingType
+    PayloadDirectories.preferred = PayloadDirectories.fallback = None
+    PayloadDirectories.dcs, PayloadDirectories.mod = [], []
+    PayloadDirectories.user = Path(HERE) / "no_payload_files"
+    FlyingType._payload_cache = None
+
+
+# Medium-range air-to-air missiles, most wanted first: the first one a type can
+# carry is the one it gets. Single-missile pylon stations only (no racks).
+MISSILE_PREFS = ("AIM_120C", "AIM_120B", "R_77", "SD_10", "R_27ER", "AIM_7M", "AIM_7")
+
+
+def missiles(typ, n=4):
+    """[(pylon number, weapon)] for up to n of the best missile in MISSILE_PREFS.
+    The F-16C gets AIM-120Cs on stations 1, 2, 8 and 9, as before; other types
+    the outermost stations, alternating sides."""
+    stations = {}
+    for i in range(1, 25):
+        pyl = getattr(typ, f"Pylon{i}", None)
+        if pyl is None:
+            continue
+        names = [k for k in dir(pyl) if not k.startswith("_")]
+        for rank, pref in enumerate(MISSILE_PREFS):
+            hit = sorted(k for k in names if k.startswith(pref))
+            if hit:
+                stations[i] = (rank, getattr(pyl, hit[0]))
+                break
+    if not stations:
+        raise SystemExit(f"{typ.id}: no station takes a medium-range missile")
+    best = min(r for r, _ in stations.values())
+    usable = sorted(i for i, (r, _) in stations.items() if r == best)
+    if typ.id == "F-16C_50" and {1, 2, 8, 9} <= set(usable):
+        order = [1, 2, 8, 9]
+    else:
+        lo, hi, order = 0, len(usable) - 1, []
+        while lo <= hi:                          # outermost first, left and right in turn
+            order.append(usable[lo]); lo += 1
+            if lo <= hi:
+                order.append(usable[hi]); hi -= 1
+    return [(i, stations[i][1]) for i in sorted(order[:n])]
+
+
 def build(args):
     logging.disable(logging.WARNING)           # pydcs's DCS-install search is noisy
     _skip_livery_scan()
@@ -77,6 +128,7 @@ def build(args):
     except ImportError as e:
         raise SystemExit("pydcs is not installed: pip install pydcs") from e
     logging.disable(logging.NOTSET)
+    _no_payload_files()
 
     types = {"F-16C": planes.F_16C_50, "F-15C": planes.F_15C, "Su-27": planes.Su_27,
              "MiG-29S": planes.MiG_29S, "FA-18C": planes.FA_18C_hornet}
@@ -115,12 +167,8 @@ def build(args):
         u.name = f"{name}-1"
         u.heading = heading
         u.skill = Skill.Excellent
-        aam = [n for n in dir(typ.Pylon1) if "AIM_120C" in n] if hasattr(typ, "Pylon1") else []
-        if typ is planes.F_16C_50:
-            for i in (1, 2, 8, 9):
-                fg.load_pylon(getattr(getattr(typ, f"Pylon{i}"), aam[0]), i)
-        else:
-            fg.load_task_default_loadout(task.CAP)
+        for pylon, weapon in missiles(typ, 4):
+            fg.load_pylon(weapon, pylon)
         return fg
 
     hdg_blue = math.degrees(brg) % 360
