@@ -18,3 +18,7 @@ dcs_check/
 
 # Intermediate page written by docs/guide/build.py
 docs/guide/guide.html
+
+# DCS live runs (dcs_live.py) and generated missions
+dcs_runs/
+dcs/*.miz

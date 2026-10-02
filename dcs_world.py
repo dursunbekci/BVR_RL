@@ -38,6 +38,11 @@ lat/lon back into the same metres, so ranges and bearings are exact.
 write_sim_recording() writes a simulator episode in the logger's format, so
 the whole path can be checked without DCS: a replay of it must reproduce
 the simulator's inputs (test_sim.test_dcs_round_trip).
+
+Live (dcs_live.py): DcsLiveRecording grows as dcs/bvr_bridge.lua streams the
+same lines over UDP, and dcs_live.DcsLiveWorld steps through it as DCS flies.
+sim_frame / sim_events / sim_ammo turn a SimWorld into those lines
+(dcs/fake_dcs.py).
 """
 
 import json
@@ -84,7 +89,7 @@ class DcsRecording:
         else:
             with open(source, encoding="utf-8") as fh:
                 lines = fh.read().splitlines()
-        self.header, frames, self.events = {}, [], []
+        self._clear()
         for n, ln in enumerate(lines, start=1):
             if not ln.strip():
                 continue
@@ -95,25 +100,43 @@ class DcsRecording:
                 if n == len(lines):
                     break
                 raise ValueError(f"line {n}: {e}") from e
-            if "format" in d:
-                self.header = d
-            elif "ev" in d:
-                self.events.append(d)
-            elif "units" in d:
-                frames.append(d)
-        if self.header.get("format", FORMAT) != FORMAT:
-            raise ValueError(f"unknown recording format {self.header.get('format')!r}")
-        if not frames:
+            self._add(d)
+        if not self._frames:
             raise ValueError("the recording has no samples")
+        self._build()
+
+    def _clear(self):
+        self.header, self._frames, self.events = {}, [], []
+        self._x0 = self._z0 = None
+        self._t_first = None
+
+    def _add(self, d):
+        """Take one parsed line: the header, an event or a sample."""
+        if "format" in d:
+            if d["format"] != FORMAT:
+                raise ValueError(f"unknown recording format {d['format']!r}")
+            # The live bridge repeats its header; the first one stands.
+            self.header = self.header or d
+        elif "ev" in d:
+            self.events.append(d)
+        elif "units" in d:
+            self._frames.append(d)
+
+    def _build(self):
+        """Turn the lines taken so far into the arrays the queries read."""
+        frames = self._frames
         frames.sort(key=lambda fr: fr["t"])
         self.events.sort(key=lambda e: e["t"])
         self.rate = float(self.header.get("rate", 0.1))
-        self.t_start, self.t_end = float(frames[0]["t"]), float(frames[-1]["t"])
+        if self._t_first is None:
+            self._t_first = float(frames[0]["t"])
+        self.t_start, self.t_end = self._t_first, float(frames[-1]["t"])
 
         # Origin: the middle of the first sample's aircraft, horizontally.
-        first = frames[0]["units"]
-        self._x0 = float(np.mean([u["x"] for u in first])) if first else 0.0
-        self._z0 = float(np.mean([u["z"] for u in first])) if first else 0.0
+        if self._x0 is None:
+            first = frames[0]["units"]
+            self._x0 = float(np.mean([u["x"] for u in first])) if first else 0.0
+            self._z0 = float(np.mean([u["z"] for u in first])) if first else 0.0
 
         self.units = {}
         for fr in frames:
@@ -228,6 +251,42 @@ class DcsRecording:
         """Radar-guided AAMs in the unit's last ammo report at or before t; None if never reported."""
         rows = [n for (te, n) in self.ammo.get(name, []) if te <= t + 1e-9]
         return rows[-1] if rows else None
+
+
+class DcsLiveRecording(DcsRecording):
+    """A recording that grows while DCS runs (dcs_live.py): extend() it with
+    parsed lines as they arrive. Only the last WINDOW_S seconds of samples
+    are kept, which is all the queries need near the newest time; events
+    are all kept."""
+
+    WINDOW_S = 30.0
+
+    def __init__(self):
+        self._clear()
+        self.units, self.weapons, self.dead, self.ammo, self.hits = {}, {}, {}, {}, []
+        self.rate, self.t_start, self.t_end = 0.1, None, None
+
+    @property
+    def ready(self) -> bool:
+        return bool(self._frames)
+
+    def extend(self, objs, reader_t=None) -> None:
+        """Add parsed lines. reader_t: the earliest time still to be read; samples
+        are kept from WINDOW_S before it (or before the newest, without it)."""
+        n = len(self._frames)
+        for d in objs:
+            self._add(d)
+        if not self._frames:
+            return
+        if len(self._frames) > n:
+            newest = max(float(fr["t"]) for fr in self._frames[n:])
+            ref = newest if reader_t is None else min(newest, float(reader_t))
+            keep = ref - self.WINDOW_S
+            if float(self._frames[0]["t"]) < keep:
+                self._frames = [fr for fr in self._frames if float(fr["t"]) >= keep]
+        elif self.t_end is None:
+            return
+        self._build()
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -599,6 +658,58 @@ def capture_raw_obs(env) -> dict:
     return box
 
 
+def sim_frame(w, names, t, x0=-250_000.0, z0=620_000.0, coal=(COAL_BLUE, COAL_RED)) -> dict:
+    """A SimWorld's aircraft and missiles as one bvr_logger.lua sample at time t.
+    names[i-1] is aircraft i's DCS name; (x0, z0) puts the fight on the DCS map."""
+    units = []
+    for i, a in enumerate(w.acs, start=1):
+        if not w.alive[i - 1]:
+            continue
+        R = body_to_enu_matrix(a.chi, a.theta, a.phi)
+        f, up, v = R[:, 0], -R[:, 2], a.vel_enu
+        units.append({"name": names[i - 1], "coal": coal[i - 1], "type": "F-16C_50",
+                      "x": a.y + x0, "y": a.z, "z": a.x + z0,
+                      "vx": v[1], "vy": v[2], "vz": v[0],
+                      "fx": f[1], "fy": f[2], "fz": f[0],
+                      "ux": up[1], "uy": up[2], "uz": up[0],
+                      "fuel": a.fuel_frac})
+    wl = []
+    for m in w.missiles:
+        if m.phase.value in ("HIT", "MISS"):
+            continue
+        wl.append({"id": m.id, "type": "AIM_120C", "shooter": names[m.owner - 1],
+                   "target": names[m.target - 1],
+                   "x": m.pos[1] + x0, "y": m.pos[2], "z": m.pos[0] + z0,
+                   "vx": m.vel[1], "vy": m.vel[2], "vz": m.vel[0]})
+    return {"t": t, "units": units, "weapons": wl}
+
+
+def sim_ammo(w, names, i, t) -> dict:
+    return {"ev": "ammo", "t": t, "unit": names[i - 1], "items": [
+        {"type": "AIM_120C", "count": int(w.wpn[i - 1]), "aam": True, "guidance": 3}]}
+
+
+def sim_events(w, names, t) -> list:
+    """The bvr_logger.lua event lines for a SimWorld step's events."""
+    out = []
+    for ev in w.events:
+        k = ev.get("type")
+        if k == "MISSILE_LAUNCH":
+            m = next(m for m in w.missiles if m.id == ev["id"])
+            out.append({"ev": "shot", "t": t, "id": m.id, "shooter": names[m.owner - 1],
+                        "target": names[m.target - 1], "type": "AIM_120C"})
+            out.append(sim_ammo(w, names, m.owner, t))
+        elif k == "MISSILE_HIT":
+            out.append({"ev": "hit", "t": t, "id": ev["id"], "shooter": names[ev["owner"] - 1],
+                        "target": names[ev["target"] - 1], "type": "AIM_120C"})
+            out.append({"ev": "weapon_gone", "t": t, "id": ev["id"]})
+        elif k == "MISSILE_MISS":
+            out.append({"ev": "weapon_gone", "t": t, "id": ev["id"]})
+        elif k == "AC_DESTROYED":
+            out.append({"ev": "dead", "t": t, "unit": names[ev["ac"] - 1], "cause": "dead"})
+    return out
+
+
 def write_sim_recording(env, policy, path, x0=-250_000.0, z0=620_000.0, t_offset=3600.0,
                         names=("BLUE-1", "RED-1")):
     """
@@ -612,38 +723,13 @@ def write_sim_recording(env, policy, path, x0=-250_000.0, z0=620_000.0, t_offset
     w = env._world
     rate_frames = 5                                   # 0.1 s at 50 Hz
     lines = [json.dumps({"format": FORMAT, "rate": 0.1, "t0": t_offset, "theatre": "sim"})]
-    coal = {1: COAL_BLUE, 2: COAL_RED}
     frame = {"n": 0}
 
     def T():
         return round(w.t_sim + t_offset, 4)
 
-    def ammo(i):
-        lines.append(json.dumps({"ev": "ammo", "t": T(), "unit": names[i - 1], "items": [
-            {"type": "AIM_120C", "count": int(w.wpn[i - 1]), "aam": True, "guidance": 3}]}))
-
     def sample():
-        units = []
-        for i, a in enumerate(w.acs, start=1):
-            if not w.alive[i - 1]:
-                continue
-            R = body_to_enu_matrix(a.chi, a.theta, a.phi)
-            f, up, v = R[:, 0], -R[:, 2], a.vel_enu
-            units.append({"name": names[i - 1], "coal": coal[i], "type": "F-16C_50",
-                          "x": a.y + x0, "y": a.z, "z": a.x + z0,
-                          "vx": v[1], "vy": v[2], "vz": v[0],
-                          "fx": f[1], "fy": f[2], "fz": f[0],
-                          "ux": up[1], "uy": up[2], "uz": up[0],
-                          "fuel": a.fuel_frac})
-        wl = []
-        for m in w.missiles:
-            if m.phase.value in ("HIT", "MISS"):
-                continue
-            wl.append({"id": m.id, "type": "AIM_120C", "shooter": names[m.owner - 1],
-                       "target": names[m.target - 1],
-                       "x": m.pos[1] + x0, "y": m.pos[2], "z": m.pos[0] + z0,
-                       "vx": m.vel[1], "vy": m.vel[2], "vz": m.vel[0]})
-        lines.append(json.dumps({"t": T(), "units": units, "weapons": wl}))
+        lines.append(json.dumps(sim_frame(w, names, T(), x0, z0)))
 
     orig_reset, orig_step = w.reset, w.step
 
@@ -651,29 +737,12 @@ def write_sim_recording(env, policy, path, x0=-250_000.0, z0=620_000.0, t_offset
         orig_reset(ic, episode_id=episode_id)
         frame["n"] = 0
         for i in (1, 2):
-            ammo(i)
+            lines.append(json.dumps(sim_ammo(w, names, i, T())))
         sample()
 
     def step(c1, c2):
         tlm = orig_step(c1, c2)
-        for ev in w.events:
-            k = ev.get("type")
-            if k == "MISSILE_LAUNCH":
-                m = next(m for m in w.missiles if m.id == ev["id"])
-                lines.append(json.dumps({"ev": "shot", "t": T(), "id": m.id,
-                                         "shooter": names[m.owner - 1],
-                                         "target": names[m.target - 1], "type": "AIM_120C"}))
-                ammo(m.owner)
-            elif k == "MISSILE_HIT":
-                lines.append(json.dumps({"ev": "hit", "t": T(), "id": ev["id"],
-                                         "shooter": names[ev["owner"] - 1],
-                                         "target": names[ev["target"] - 1], "type": "AIM_120C"}))
-                lines.append(json.dumps({"ev": "weapon_gone", "t": T(), "id": ev["id"]}))
-            elif k == "MISSILE_MISS":
-                lines.append(json.dumps({"ev": "weapon_gone", "t": T(), "id": ev["id"]}))
-            elif k == "AC_DESTROYED":
-                lines.append(json.dumps({"ev": "dead", "t": T(), "unit": names[ev["ac"] - 1],
-                                         "cause": "dead"}))
+        lines.extend(json.dumps(e) for e in sim_events(w, names, T()))
         frame["n"] += 1
         if frame["n"] % rate_frames == 0:
             sample()

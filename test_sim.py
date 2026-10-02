@@ -777,6 +777,47 @@ def test_team_roles_far_target():
     print(f"  2v1 red opens on rear ........ OK  (first missile at it in {fired_at_far}/4)")
 
 
+def test_dcs_live_link():
+    """dcs_live.py flies a policy through the UDP link against dcs/fake_dcs.py."""
+    import os, sys, tempfile, threading
+    from types import SimpleNamespace
+    from gymnasium import spaces
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import dcs_live
+    from fake_dcs import FakeDcs
+    from bvr_env import BvrEnv, OBS_DIM, PRIV_DIM, HDG_OFFSETS_DEG
+
+    class Scripted:          # straight at the bandit, top speed, fire whenever allowed
+        observation_space = spaces.Dict({"obs": spaces.Box(-1, 1, (OBS_DIM,)),
+                                         "priv": spaces.Box(-1, 1, (PRIV_DIM,))})
+        def predict(self, obs, deterministic=True, action_masks=None):
+            return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 3, int(action_masks[-1])]), None
+
+    fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=250.0)
+    res = {}
+    th = threading.Thread(target=lambda: res.setdefault("out", fake.run()), daemon=True)
+    link = dcs_live.UdpLink()
+    th.start()
+    with tempfile.TemporaryDirectory() as d:
+        args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=250,
+                               doctrine="AGGRESSIVE")
+        scen = {"platform": "F-16C", "opponent_platform": "F-16C"}
+        rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
+        row, _ = dcs_live.run_episode(link, Scripted(), args, scen, rec, agent, red, 1,
+                                      log=lambda m: None)
+        th.join(timeout=120)
+        files = sorted(os.listdir(d))
+    link.close(); fake.close()
+    fires = [c for c in fake.commands if c[5]]
+    assert len(fake.commands) >= 30, f"only {len(fake.commands)} commands reached the fake"
+    assert fires and row["shots"] >= 1, (row, fires)
+    assert row["outcome"] in ("KILL", "TIMEOUT", "MUTUAL_KILL"), row
+    assert row["outcome"] != "KILL" or res.get("out") == "KILL", (row, res)
+    assert any(f.endswith(".jsonl") for f in files) and "results.csv" in files, files
+    print(f"  DCS live link ............... OK  ({len(fake.commands)} commands, "
+          f"{row['shots']} shots, {row['outcome']})")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -1064,6 +1105,7 @@ if __name__ == "__main__":
         ("2v1 red targeting",       test_team_red_targeting),
         ("2v1 red opens on rear",   test_team_roles_far_target),
         ("DCS round trip",          test_dcs_round_trip),
+        ("DCS live link",           test_dcs_live_link),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),

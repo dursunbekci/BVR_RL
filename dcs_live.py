@@ -1,0 +1,386 @@
+"""
+dcs_live.py  —  fly a trained 1v1 policy in DCS World
+=====================================================
+
+Talks to dcs/bvr_bridge.lua over UDP on this computer. Each second of mission
+time it builds the policy's observation from what DCS reports (with BVR_RL's
+own radar and track model running on DCS's true positions, as in training),
+asks the policy for an action and sends DCS the resulting heading, altitude,
+speed and fire command. See dcs/README.md for the whole setup.
+
+    python dcs_live.py models_bvr/latest.zip                 # fly
+    python dcs_live.py models_bvr/latest.zip --shadow        # only watch: the DCS AI flies
+    python dcs_live.py models_bvr/latest.zip --episodes 5    # restart the mission between them
+
+Start it before or after the mission; it waits for DCS. When an episode ends
+(a kill, a loss, the step limit) it gives the aircraft back to the DCS AI and
+waits for the mission to be restarted, until --episodes are done.
+
+Every episode leaves, in --out (default dcs_runs/):
+    <name>.jsonl         everything DCS sent, in bvr_logger.lua's format
+                         (dcs_obs_check.py reads it)
+    <name>_steps.csv     each decision: time, action, command sent, all inputs
+    results.csv          one row per episode
+"""
+
+import argparse
+import csv
+import json
+import math
+import os
+import socket
+import sys
+import time
+
+import numpy as np
+
+from bvr_env import BvrEnv, OBS_LABELS, HDG_OFFSETS_DEG, ALT_DELTAS_M, RAD2DEG
+from bvr_opponents import BvrOpponentType
+from dcs_world import (DcsLiveRecording, DcsReplayWorld, capture_raw_obs, FORMAT)
+
+PORT_FROM_DCS = 15301
+PORT_TO_DCS = 15302
+
+
+class UdpLink:
+    """The UDP pair to bvr_bridge.lua: JSON lines in, command lines out."""
+
+    def __init__(self, host="127.0.0.1", port_in=PORT_FROM_DCS, port_out=PORT_TO_DCS):
+        self.host, self.port_out = host, port_out
+        self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.rx.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)
+        try:
+            self.rx.bind((host, port_in))
+        except OSError as e:
+            raise SystemExit(f"cannot listen on UDP port {port_in} ({e}). Is another "
+                             f"dcs_live.py running?") from e
+        self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sink = None              # callable(raw line) for every datagram
+
+    def poll(self, timeout=0.2) -> list:
+        """Everything waiting (up to `timeout` s for the first datagram), parsed."""
+        out = []
+        self.rx.settimeout(timeout)
+        while True:
+            try:
+                data, _ = self.rx.recvfrom(65536)
+            except (socket.timeout, BlockingIOError):
+                break
+            except ConnectionResetError:          # Windows: an earlier send found no listener
+                continue
+            line = data.decode("utf-8", "replace").strip()
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+            if self.sink:
+                self.sink(line)
+            self.rx.settimeout(0.0)
+        return out
+
+    def send(self, text: str):
+        self.tx.sendto(text.encode("ascii"), (self.host, self.port_out))
+
+    def close(self):
+        self.rx.close(); self.tx.close()
+
+
+class DcsLiveWorld(DcsReplayWorld):
+    """DcsReplayWorld fed live: step() waits for DCS to reach the next frame's
+    time, and passes the policy's commands on to the bridge."""
+
+    RESEND_S = 1.0          # repeat the command this often (UDP can drop one)
+    BEHIND_WARN_S = 2.0     # warn when DCS's data is this far ahead of the policy
+
+    def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
+                 shadow=False, log=print):
+        super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
+        self.t_end = math.inf
+        self.link, self.shadow, self.log = link, bool(shadow), log
+        self.seq = 0
+        self.sent = None                     # (hdg deg, alt, spd) last sent
+        self.t_sent = -math.inf
+        self.fire_pending = None             # world time a fire request went out
+        self.fire_log = []                   # (t_sim, status)
+        self.mission_ended = False
+        self.last_cmd = None
+        self.t_behind_warned = -math.inf
+
+    @property
+    def finished(self) -> bool:
+        return self.mission_ended and self.t >= self.rec.t_end - 1e-9
+
+    def pump(self, until_t=None, timeout=0.2):
+        """Read DCS until it has data up to until_t (or whatever is waiting, without it)."""
+        if until_t is not None and self.rec.t_end >= until_t - 1e-9:
+            return
+        waited, notice = 0.0, 10.0
+        while True:
+            objs = self.link.poll(timeout if until_t is not None else 0.0)
+            if objs:
+                self._take(objs)
+                waited = 0.0
+            else:
+                waited += timeout
+            if until_t is None or self.rec.t_end >= until_t - 1e-9 or self.mission_ended:
+                return
+            if waited >= notice:
+                self.log(f"waiting for DCS (mission time {self.rec.t_end - self.t0:.1f} s): "
+                         f"is it paused?")
+                notice += 30.0
+
+    def _take(self, objs):
+        for d in objs:
+            if d.get("ev") == "fire":
+                st = d.get("status")
+                self.fire_log.append((round(float(d["t"]) - self.t0, 1), st))
+                if st in ("launched", "timeout", "refused"):
+                    self.fire_pending = None
+                if st != "launched" and st != "requested":
+                    self.log(f"  fire {st} at {float(d['t']) - self.t0:.1f} s"
+                             + (f": {d.get('reason')}" if d.get("reason") else ""))
+            elif d.get("ev") == "mission_end":
+                self.mission_ended = True
+        # Frames from before this episode (a restarted mission) are not ours.
+        objs = [d for d in objs if "units" not in d or float(d["t"]) >= self.t0 - 1.0]
+        self.rec.extend(objs, reader_t=self.t - 1.0)
+        behind = self.rec.t_end - self.t
+        if behind > self.BEHIND_WARN_S and self.t - self.t_behind_warned > 30.0:
+            self.t_behind_warned = self.t
+            self.log(f"  this computer is {behind:.1f} s of mission time behind DCS: the policy's "
+                     f"commands arrive late (lower DCS time acceleration)")
+
+    def send_command(self, cmd, fire):
+        hdg = (math.degrees(float(cmd["hdgCmd"])) % 360.0)
+        alt, spd = float(cmd["altTarget"]), float(cmd["V"])
+        self.last_cmd = (round(hdg, 2), round(alt, 1), round(spd, 1))
+        if self.shadow:
+            return
+        new = self.sent is None or self.last_cmd != self.sent
+        if not (new or fire or self.t - self.t_sent >= self.RESEND_S):
+            return
+        self.seq += 1
+        self.link.send(f"CMD {self.seq} {hdg:.2f} {alt:.1f} {spd:.1f} {1 if fire else 0}")
+        self.sent, self.t_sent = self.last_cmd, self.t
+        if fire:
+            self.fire_pending = self.t
+
+    def stop(self):
+        if not self.shadow:
+            for _ in range(3):
+                self.link.send("STOP")
+
+    def step(self, cmd1: dict, cmd2: dict) -> dict:
+        if cmd1:
+            self.send_command(cmd1, bool(cmd1.get("fire", 0)))
+        if self.fire_pending is not None and self.t - self.fire_pending > 20.0:
+            self.fire_pending = None            # the bridge never answered
+        t_new = self.t + self.SIM_DT
+        self.pump(until_t=t_new)
+        self.t = min(t_new, self.rec.t_end) if self.mission_ended else t_new
+        self.events = self._events_between(self._t_prev, self.t)
+        self._t_prev = self.t
+        return self.telemetry()
+
+
+class DcsLiveEnv(BvrEnv):
+    """BvrEnv whose world is DCS, live. The observation code runs unchanged."""
+
+    def __init__(self, world_factory, platform, opponent_platform, max_steps=None,
+                 privileged_critic=True, doctrine="BALANCED", seed=0):
+        super().__init__(opponent_type=BvrOpponentType.STRAIGHT, seed=seed, platform=platform,
+                         opponent_platform=opponent_platform, privileged_critic=privileged_critic,
+                         doctrine=doctrine)
+        if max_steps is not None:
+            self.MAX_STEPS = int(max_steps)
+        self._world = world_factory(self._plat, self._opp_plat)
+
+    def _random_ic(self, blue_top_speed=None) -> dict:
+        return self._world.initial_ic()
+
+    def _can_fire(self) -> bool:
+        # One shot at a time: the DCS AI takes a moment to launch, and the
+        # launch (not the request) is what starts the 3 s between shots.
+        if self._world.fire_pending is not None:
+            return False
+        return super()._can_fire()
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+        if not (terminated or truncated) and self._world.finished:
+            truncated = True
+            info["terminal_outcome"] = self._outcome or "MISSION_END"
+            self._ready = False
+        return obs, reward, terminated, truncated, info
+
+
+# ────────────────────────────────────────────────────────────────────
+def wait_for_fight(link, agent=None, red=None, after_t=None, log=print):
+    """Read DCS until a sample holds both aircraft. Returns (recording, agent, red).
+    after_t: the last mission time of the previous episode. Its mission keeps
+    sending after the episode; only a restarted one (time going back, or after
+    a mission end) starts the next episode."""
+    rec = DcsLiveRecording()
+    header, pending = None, []
+    need_restart = after_t is not None
+    t_wait, notice = time.time(), 0.0
+    while True:
+        objs = link.poll(0.5)
+        for d in objs:
+            if d.get("format") == FORMAT:
+                header = d
+            elif d.get("ev") == "mission_end":
+                need_restart, after_t, pending = False, None, []
+        if need_restart:
+            # Keep only what the restarted mission sent: earlier mission times.
+            objs = [d for d in objs if "t" in d and float(d["t"]) < after_t - 1.0]
+            if not any("units" in d for d in objs):
+                objs = []
+            else:
+                need_restart = False
+        if not need_restart and objs:
+            pending += [d for d in objs if "format" not in d]
+            if header is not None and any("units" in d for d in pending):
+                rec.extend([header] + pending)
+                pending = []
+                units = rec.units
+                a = agent or header.get("agent") or next(
+                    (n for n, u in units.items() if u["coal"] == 2), None)
+                r = red or header.get("red") or next(
+                    (n for n, u in units.items() if u["coal"] == 1), None)
+                if a in units and r in units:
+                    return rec, a, r
+        if time.time() - t_wait >= notice:
+            what = ("the mission to be restarted" if need_restart else
+                    "DCS (start the mission that runs bvr_bridge.lua)" if header is None else
+                    "both aircraft")
+            log(f"waiting for {what} ...")
+            notice += 30.0
+
+
+def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
+    from bvr_selfplay import FrameStacker, N_STACK
+    from gymnasium import spaces
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    name = f"live_{stamp}_ep{ep}" + ("_shadow" if args.shadow else "")
+    os.makedirs(args.out, exist_ok=True)
+    raw_fh = open(os.path.join(args.out, name + ".jsonl"), "w", encoding="utf-8")
+    raw_fh.write(json.dumps(rec.header) + "\n")
+    for e in rec.events:
+        raw_fh.write(json.dumps(e) + "\n")
+    for f in rec._frames:
+        raw_fh.write(json.dumps(f) + "\n")
+    link.sink = lambda line: raw_fh.write(line + "\n")
+
+    privileged = isinstance(model.observation_space, spaces.Dict)
+    env = DcsLiveEnv(lambda bp, rp: DcsLiveWorld(link, rec, agent, red, bp, rp,
+                                                 shadow=args.shadow, log=log),
+                     platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
+                     max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
+    world = env._world
+    raw = capture_raw_obs(env)
+    stacker = FrameStacker(N_STACK)
+    obs, info = env.reset()
+    sobs = stacker.reset(obs)
+    ic = info["ic"]
+    log(f"episode {ep}: {agent} v {red}, start range {ic['start_range'] / 1000:.1f} km"
+        + ("  [shadow: the DCS AI flies, the policy only watches]" if args.shadow else ""))
+
+    steps_fh = open(os.path.join(args.out, name + "_steps.csv"), "w", newline="")
+    wr = csv.writer(steps_fh)
+    wr.writerow(["t", "hdg_off", "alt_delta", "speed", "fire", "cmd_hdg_deg", "cmd_alt_m",
+                 "cmd_spd_mps", "track", "range_true_m", *OBS_LABELS])
+    info = {}
+    try:
+        while True:
+            mask = env.action_masks()
+            action, _ = model.predict(sobs, deterministic=True, action_masks=mask)
+            obs, _, term, trunc, info = env.step(action)
+            sobs = stacker.update(obs)
+            a = [int(x) for x in np.asarray(action).reshape(-1)]
+            c = world.last_cmd or ("", "", "")
+            wr.writerow([round(env._t_sim, 1), HDG_OFFSETS_DEG[a[0]], ALT_DELTAS_M[a[1]],
+                         env._plat.speed_cmds[a[2]], int(info.get("fired", False)), *c,
+                         info.get("track_state"), round(env._state.get("range", 0.0), 0),
+                         *[f"{x:.6g}" for x in raw["obs"]]])
+            if env._step_num % 10 == 0 or info.get("fired"):
+                log(f"  t={env._t_sim:5.0f}s  range {env._state.get('range', 0) / 1000:5.1f} km  "
+                    f"track {info.get('track_state')}  heading {HDG_OFFSETS_DEG[a[0]]:+4.0f}  "
+                    f"alt {ALT_DELTAS_M[a[1]]:+5.0f}  speed {env._plat.speed_cmds[a[2]]:.0f}"
+                    + ("  FIRE" if info.get("fired") else ""))
+            if term or trunc:
+                break
+    finally:
+        world.stop()
+        link.sink = None
+        raw_fh.close(); steps_fh.close()
+    outcome = info.get("terminal_outcome", "?")
+    row = {"episode": name, "mode": "shadow" if args.shadow else "live", "agent": agent,
+           "red": red, "outcome": outcome, "flight_time_s": round(env._t_sim, 1),
+           "start_range_km": round(ic["start_range"] / 1000, 1),
+           "shots": info.get("shots_fired", 0),
+           "fire_requests": sum(1 for _, s in world.fire_log if s == "requested"),
+           "fire_timeouts": sum(1 for _, s in world.fire_log if s in ("timeout", "refused"))}
+    path = os.path.join(args.out, "results.csv")
+    new = not os.path.exists(path)
+    with open(path, "a", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(row))
+        if new:
+            w.writeheader()
+        w.writerow(row)
+    log(f"episode {ep}: {outcome} after {env._t_sim:.0f} s, {row['shots']} shots "
+        f"({row['fire_timeouts']} fire requests not answered by a launch)")
+    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv")
+    return row, rec.t_end
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("checkpoint", help="a 1v1 checkpoint (.zip) trained by train_bvr.py")
+    ap.add_argument("--shadow", action="store_true",
+                    help="never send commands: the DCS AI flies, the policy only watches")
+    ap.add_argument("--episodes", type=int, default=1, help="episodes before quitting (default 1)")
+    ap.add_argument("--agent", help="DCS unit name the policy flies (default: from the bridge)")
+    ap.add_argument("--red", help="DCS unit name of the opponent (default: from the bridge)")
+    ap.add_argument("--opp-platform", help="library platform for red's envelopes "
+                                            "(default: the checkpoint's training opponent)")
+    ap.add_argument("--doctrine", default="BALANCED")
+    ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
+    ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)
+    ap.add_argument("--port-out", type=int, default=PORT_TO_DCS)
+    ap.add_argument("--out", default="dcs_runs", help="output directory")
+    args = ap.parse_args(argv)
+
+    from bvr_compat import load_model
+    from bvr_library import scenario_of
+    model = load_model(args.checkpoint, env=None, log=print)
+    scen = scenario_of(model)
+    if scen.get("format", "1v1") != "1v1":
+        raise SystemExit("this checkpoint was trained for 2v1; the DCS link is 1v1 only")
+    print(f"policy: {args.checkpoint} ({scen['platform']} v "
+          f"{args.opp_platform or scen['opponent_platform']}), {args.doctrine} doctrine")
+    link = UdpLink(port_in=args.port_in, port_out=args.port_out)
+    print(f"listening for DCS on UDP {args.port_in}, commands to {args.port_out}")
+    last_t, rows = None, []
+    try:
+        for ep in range(1, args.episodes + 1):
+            rec, agent, red = wait_for_fight(link, args.agent, args.red, after_t=last_t)
+            row, last_t = run_episode(link, model, args, scen, rec, agent, red, ep)
+            rows.append(row)
+            if ep < args.episodes:
+                print("restart the mission in DCS for the next episode (Ctrl+C to stop)")
+    except KeyboardInterrupt:
+        print("\nstopped")
+        link.send("STOP")
+    finally:
+        link.close()
+    if rows:
+        from collections import Counter
+        c = Counter(r["outcome"] for r in rows)
+        print("results: " + ", ".join(f"{k} {v}" for k, v in c.most_common()))
+    return rows
+
+
+if __name__ == "__main__":
+    main()
