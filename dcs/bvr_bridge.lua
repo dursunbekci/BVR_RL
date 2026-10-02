@@ -333,6 +333,11 @@ function handler:onEvent(e)
       pcall(function() wtype = e.weapon:getTypeName() end)
       send({ev = "hit", t = t, id = w and w.id or -1, shooter = name_of(e.initiator),
             target = name_of(e.target), type = wtype})
+    elseif E.S_EVENT_KILL and e.id == E.S_EVENT_KILL and e.target then
+      -- the moment DCS decides a unit is destroyed, with killer and weapon
+      local w = e.weapon and weapons[weapon_key(e.weapon)]
+      send({ev = "kill", t = t, unit = name_of(e.target), killer = name_of(e.initiator),
+            id = w and w.id or -1})
     elseif DEAD_EVENTS[e.id] and e.initiator then
       send({ev = "dead", t = t, unit = name_of(e.initiator), cause = DEAD_EVENTS[e.id]})
     elseif e.id == E.S_EVENT_MISSION_END then

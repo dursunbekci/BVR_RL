@@ -278,6 +278,17 @@ decide on. Several recordings can be given at once.
 
 Errors inside the bridge are written to `dcs.log` as `bvr_bridge ... error`.
 
+To see what DCS reported in a run (every shot, hit, kill and death, each
+aircraft's altitude range, and how each death was counted):
+
+```
+python dcs\inspect_run.py dcs_runs\live_<date>_ep1.jsonl
+```
+
+A missile hit counts as a kill from the moment of the hit, as in the
+simulator: DCS often reports the death only when the wreck reaches the
+ground, which used to read as a CRASH.
+
 ## How DCS differs from training
 
 The policy was trained in BVR_RL's simulator. In DCS, expect it to do

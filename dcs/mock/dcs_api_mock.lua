@@ -20,7 +20,8 @@ AI = {Option = {Air = {
          MISSILE_ATTACK = {MAX_RANGE = 0, NEZ_RANGE = 1, HALF_WAY_RMAX_NEZ = 2, TARGET_THREAT_EST = 3, RANDOM_RANGE = 4}}}}}
 local HANDLER
 world = {event = {S_EVENT_SHOT = 1, S_EVENT_HIT = 2, S_EVENT_CRASH = 5, S_EVENT_EJECTION = 6,
-                  S_EVENT_DEAD = 8, S_EVENT_PILOT_DEAD = 9, S_EVENT_MISSION_END = 12, S_EVENT_UNIT_LOST = 30},
+                  S_EVENT_DEAD = 8, S_EVENT_PILOT_DEAD = 9, S_EVENT_MISSION_END = 12, S_EVENT_KILL = 28,
+                  S_EVENT_UNIT_LOST = 30},
          addEventHandler = function(h) HANDLER = h end}
 
 local function mkctrl(who)
@@ -128,7 +129,8 @@ function RUN(dofile_path, until_t, on_tick)
       if r < 60 then
         HANDLER:onEvent({id = world.event.S_EVENT_HIT, initiator = blue, weapon = msl, target = red, time = T})
         msl.alive = false; red.alive = false
-        HANDLER:onEvent({id = world.event.S_EVENT_DEAD, initiator = red, time = T})
+        HANDLER:onEvent({id = world.event.S_EVENT_KILL, initiator = blue, target = red, weapon = msl, time = T})
+        HANDLER:onEvent({id = world.event.S_EVENT_DEAD, initiator = red, time = T + 30})
       end
     end
     local keep = {}

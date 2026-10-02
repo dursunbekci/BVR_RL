@@ -112,6 +112,11 @@ def test_bridge():
     rec = DcsRecording([json.dumps(d) for d in lines])
     assert rec.header.get("agent") == "Viper-1" and rec.header.get("red") == "Bandit-1"
     assert "Bandit-1" in rec.dead and len(rec.weapons) == 1
+    kills = [d for d in lines if d.get("ev") == "kill"]
+    assert kills and kills[0]["unit"] == "Bandit-1" and kills[0]["killer"] == "Viper-1" \
+        and kills[0]["id"] == 1, kills
+    how = rec.death_cause("Bandit-1")
+    assert how["weapon"] is not None and how["weapon"]["shooter"] == "Viper-1", how
     print(f"  bridge in Lua 5.1 ........... OK  ({len(lines)} lines sent, fire {fires})")
 
 
