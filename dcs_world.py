@@ -615,6 +615,11 @@ class DcsReplayEnv(BvrEnv):
     if the policy had flown the same path.
     """
 
+    # No altitude floor: in training, below 300 m counts as hitting the ground.
+    # In DCS an aircraft can fly lower (the AI dives to the sea to defend) and
+    # DCS itself reports a real crash, which counts as one.
+    MIN_ALT = -1e9
+
     INFER_HDG_S = 2.0      # heading choice: course this many seconds ahead
     INFER_ALT_S = 8.0      # altitude choice: height change over this many seconds
     INFER_SPD_S = 5.0      # speed choice: speed this many seconds ahead

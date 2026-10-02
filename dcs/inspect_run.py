@@ -68,8 +68,12 @@ def main(path):
 
     print("\nMISSILES")
     for d in sorted(rec.weapons.values(), key=lambda d: d["t_shot"] or 0):
-        end = ("hit " + str(d["hit_target"]) + " at " + rel(d["t_hit"]).strip()) if d["t_hit"] is not None \
-            else (f"gone at {rel(d['t_end']).strip()}" if d["t_end"] is not None else "?")
+        if d["t_hit"] is not None:
+            end = f"hit {d['hit_target']} at {rel(d['t_hit']).strip()}"
+        elif d["t_gone"] is not None:
+            end = f"ended at {rel(d['t_gone']).strip()} without a hit"
+        else:
+            end = "still flying when the recording ends"
         print(f"  {d['id']:3d}  {d['shooter']} -> {d['target']}  {d['type']}  "
               f"shot at {rel(d['t_shot']).strip() if d['t_shot'] is not None else '?'}  {end}")
 
@@ -88,9 +92,10 @@ def main(path):
                 for e in rec.events if e["ev"] in ("dead", "kill") and e.get("unit") == name]
         print(f"  {name:12s} out of the fight at {rel(how['t']).strip()} s ({how['cause']}): {verdict}")
         print(f"  {'':12s} DCS reported: {', '.join(said) if said else 'nothing (it left the samples)'}")
-    low = [n for n, d in rec.units.items() if d["pos"][:, 2].min() < 300.0]
+    low = [n for n, d in rec.units.items() if d["pos"][:, 2].min() < 1000.0]
     if low:
-        print(f"\n  below 300 m at some point (counted as a crash if alive then): {', '.join(low)}")
+        print(f"\n  below 1000 m at some point (under the training platforms' lowest altitude, "
+              f"so outside what the policy saw): {', '.join(low)}")
 
 
 if __name__ == "__main__":

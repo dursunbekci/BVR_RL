@@ -186,6 +186,11 @@ class DcsLiveWorld(DcsReplayWorld):
 class DcsLiveEnv(BvrEnv):
     """BvrEnv whose world is DCS, live. The observation code runs unchanged."""
 
+    # No altitude floor: in training, below 300 m counts as hitting the ground.
+    # In DCS an aircraft can fly lower (the AI dives to the sea to defend) and
+    # DCS itself reports a real crash, which counts as one.
+    MIN_ALT = -1e9
+
     def __init__(self, world_factory, platform, opponent_platform, max_steps=None,
                  privileged_critic=True, doctrine="BALANCED", seed=0):
         super().__init__(opponent_type=BvrOpponentType.STRAIGHT, seed=seed, platform=platform,
