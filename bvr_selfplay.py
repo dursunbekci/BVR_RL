@@ -13,7 +13,8 @@ scripted opponent in disguise:
   * AC2's missiles are guided by AC2's own track (the world only falls back
     to truth guidance for scripted opponents), so the 3-second support rule
     binds both sides.
-  * Fire is gated by the same _can_fire() rule the agent's mask uses.
+  * Fire is gated by the same _can_fire() rule the agent's mask uses
+    (firm track, inside R-max, within 60 deg of the nose, 3 s between shots).
   * The snapshot draws its own missile doctrine each episode, independent of
     the agent's, and sees it through the same doctrine input.
 
@@ -22,8 +23,12 @@ which keeps a committed aggressor in the mix so self-play cannot settle into
 both sides turning cold at long range. Otherwise a snapshot from the pool:
 the newest with probability NEWEST_FRAC, else one drawn uniformly, so the
 agent keeps beating its older selves while facing its current one.
+The constants below are defaults; a run sets its own with train_bvr.py's
+--sp-scripted-frac / --sp-newest-frac (read from the env) and --sp-pool-size.
 
-The trainer owns the pool (snapshot()); environments only read it.
+The trainer owns the pool (snapshot()); environments only read it. Each
+training run starts with an empty pool (clear_pool()), so a run only ever
+meets snapshots of its own policy, never those of an earlier run.
 """
 
 import os
@@ -92,12 +97,24 @@ def pool_snapshots(pool_dir: str) -> list:
     return sorted(glob.glob(os.path.join(pool_dir, "sp_*.zip")))
 
 
-def snapshot(model, pool_dir: str) -> str:
-    """Save the current policy into the pool and prune the oldest."""
+def clear_pool(pool_dir: str) -> int:
+    """Delete every snapshot in the pool; returns how many were deleted."""
+    n = 0
+    for path in pool_snapshots(pool_dir):
+        try:
+            os.remove(path)
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
+def snapshot(model, pool_dir: str, max_pool: int = MAX_POOL) -> str:
+    """Save the current policy into the pool and prune all but the newest max_pool."""
     os.makedirs(pool_dir, exist_ok=True)
     path = os.path.join(pool_dir, f"sp_{int(time.time())}_{int(model.num_timesteps):010d}")
     model.save(path)
-    for old in pool_snapshots(pool_dir)[:-MAX_POOL]:
+    for old in pool_snapshots(pool_dir)[:-max(int(max_pool), 1)]:
         try:
             os.remove(old)
         except OSError:
@@ -129,22 +146,31 @@ def load_policy(path: str):
     return entry
 
 
+def pick_opponent(paths, rng, scripted_frac=SCRIPTED_FRAC, newest_frac=NEWEST_FRAC):
+    """None for the scripted shooter, else the snapshot path to fly against."""
+    if rng.random() < scripted_frac:
+        return None
+    if not paths:
+        raise RuntimeError(
+            "SELF_PLAY needs at least one policy snapshot in the pool; "
+            "train_bvr.py writes one when the SELF_PLAY stage begins")
+    if rng.random() < newest_frac:
+        return paths[-1]
+    return paths[int(rng.integers(len(paths)))]
+
+
 def make_selfplay_opponent(env, pool_dir: str, rng):
     """Pick this episode's SELF_PLAY opponent for `env` (a BvrEnv)."""
     from bvr_opponents import BvrOpponent, BvrOpponentType
-    if rng.random() < SCRIPTED_FRAC:
+    sf = getattr(env, "_sp_scripted_frac", None)
+    nf = getattr(env, "_sp_newest_frac", None)
+    path = pick_opponent(pool_snapshots(pool_dir) if pool_dir else [], rng,
+                         SCRIPTED_FRAC if sf is None else sf,
+                         NEWEST_FRAC if nf is None else nf)
+    if path is None:
         opp = BvrOpponent.create(BvrOpponentType.ADAPTIVE_SHOOTER, rng=rng)
         opp.label = "ADAPTIVE_SHOOTER"
         return opp
-    paths = pool_snapshots(pool_dir) if pool_dir else []
-    if not paths:
-        raise RuntimeError(
-            f"SELF_PLAY needs at least one policy snapshot in {pool_dir!r}; "
-            "train_bvr.py writes one when the SELF_PLAY stage begins")
-    if rng.random() < NEWEST_FRAC:
-        path = paths[-1]
-    else:
-        path = paths[int(rng.integers(len(paths)))]
     model, privileged = load_policy(path)
     return PolicyOpponent(env, model, privileged,
                           label="policy:" + os.path.basename(path)[:-4])
@@ -179,6 +205,9 @@ class PolicyOpponent:
             o._doctrine_cfg = str(self._doctrine).upper()
         o._pick_doctrine()          # the snapshot fights under its own doctrine
         o._prev_hdg_off = 0.0
+        o._hdg_ref = None
+        # AC2's start heading, so the "turn still to fly" input starts at 0.
+        o._cmd_hdg = float(ic.get("ac2_psi", o._cmd_hdg))
         self._next_decision = -1.0
         self._started = False
         self._cmd = None

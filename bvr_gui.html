@@ -8,6 +8,8 @@
   --bg:#07090f; --panel:#0d1220; --border:#22344e; --text:#b8d4ee;
   --blue:#3a9fff; --red:#ff4444; --green:#2ae870; --amber:#ffbb22;
   --yellow:#ffee22; --teal:#22ffdd; --bright:#eef6ff; --dim:#3a5070;
+  /* secondary text: --dim is for borders and fills only (2.5:1 on the background, too faint to read) */
+  --muted:#9ab3cf;
   --card:#080f1a;
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Courier New',monospace}
@@ -23,8 +25,118 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
 .pill.training{background:#1a1000;color:var(--amber);border:1px solid var(--amber)}
 .pill.eval    {background:#001a0d;color:var(--green);border:1px solid var(--green)}
 
+/* VIEW TABS */
+.tab{background:none;border:1px solid var(--border);color:var(--text);padding:3px 12px;
+     font-size:12px;letter-spacing:2px;cursor:pointer;font-weight:bold}
+.tab.on{background:#0d2238;color:var(--bright);border-color:var(--blue)}
+
+/* LIBRARY VIEW */
+#library-view{display:none;flex:1;overflow:hidden}
+#train-view{display:flex;flex:1;overflow:hidden}
+#train-side{width:460px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);padding:4px;
+            scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+#train-dash{flex:1;min-width:0;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:12px;
+            scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+.dash-row{display:flex;gap:12px}
+.dash-card{background:var(--panel);border:1px solid var(--border);padding:10px 14px;min-width:0}
+.dash-head{display:flex;align-items:center;gap:6px}
+.dash-title{font-size:12px;letter-spacing:1.5px;color:var(--bright);font-weight:bold}
+.dash-sub{font-size:11px;color:var(--muted);margin:2px 0 6px}
+.dash-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:12px}
+.dash-grid .wide{grid-column:1 / -1}
+.ts-chart{position:relative;min-height:170px}
+.ts-chart svg{display:block;width:100%}
+.ts-chart .ts-empty{font-size:12px;color:var(--muted);padding:60px 0;text-align:center}
+.ts-chart .ch-legend{display:flex;gap:16px;font-size:12px;color:var(--text);margin-bottom:2px}
+.ts-chart .ch-legend i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.ts-chart .ch-tip{position:absolute;pointer-events:none;background:#0d1a2b;border:1px solid var(--border);
+          padding:4px 8px;font-size:12px;color:var(--text);white-space:nowrap;display:none;line-height:1.5;z-index:2}
+.ts-chart .ch-tip b{color:var(--bright);font-weight:normal}
+#train-log-lines{height:260px;overflow-y:auto;font-size:12px;line-height:1.5;
+                 scrollbar-width:thin;scrollbar-color:var(--border) var(--bg)}
+#train-log-card .badge{margin-left:0}
+#run-info{font-size:12px;line-height:1.5}
+#run-info .run-kv{display:grid;grid-template-columns:auto 1fr;column-gap:10px;row-gap:1px}
+#run-info .run-kv span:nth-child(odd){color:var(--muted);letter-spacing:1px;font-size:11px;padding-top:1px}
+#run-info .run-kv span:nth-child(even){color:var(--bright);overflow-wrap:anywhere}
+#run-info .run-notes{margin-top:8px;border-top:1px solid var(--border);padding-top:6px}
+#run-info .run-notes div{padding:1px 0;color:var(--text);overflow-wrap:anywhere}
+#run-info .run-notes div.warn{color:var(--amber)}
+#run-info .run-kv span.warn{color:var(--amber)}
+/* a chart card maximised over the page */
+.max-btn{margin-left:auto;background:none;border:1px solid var(--border);color:var(--text);
+         font-size:13px;line-height:1;padding:2px 6px;cursor:pointer;font-family:inherit}
+.max-btn:hover{color:var(--bright);border-color:var(--blue)}
+#max-backdrop{display:none;position:fixed;inset:0;background:#000b;z-index:140}
+.dash-card.maxed{position:fixed;inset:56px 28px 28px 28px;z-index:150;display:flex;flex-direction:column;
+                 padding:14px 20px;box-shadow:0 0 0 1px var(--blue)}
+.dash-card.maxed .ts-chart{flex:1;min-height:0;overflow:hidden}
+#lib-list{width:290px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
+          padding:8px;background:var(--panel)}
+#lib-list h4{font-size:11px;letter-spacing:2px;color:#c79bff;margin:10px 0 4px}
+.lib-item{padding:4px 6px;cursor:pointer;font-size:12px;border-left:3px solid transparent;
+          display:flex;gap:6px;align-items:center}
+.lib-item:hover{background:#0d1a2a}
+.lib-item.sel{background:#10233a;border-left-color:var(--blue);color:var(--bright)}
+.lib-item .b{font-size:11px;color:var(--muted)}
+#lib-detail{flex:1;overflow-y:auto;padding:12px 18px}
+#lib-detail h2{font-size:16px;color:var(--bright);margin-bottom:2px}
+.badge{font-size:11px;padding:1px 6px;border:1px solid;letter-spacing:1px;margin-left:6px}
+.badge.bi{color:var(--amber);border-color:var(--amber)}
+.badge.us{color:var(--green);border-color:var(--green)}
+.lib-grp{margin-top:12px}
+.sp-grp{margin-top:10px}
+.sp-grp>summary{font-size:11px;letter-spacing:2px;color:var(--muted);cursor:pointer;margin-bottom:6px}
+.sp-grp.off .row2{opacity:.4}
+#cfg-sp-note{font-size:11px;color:var(--muted);margin-bottom:6px}
+.lib-grp>summary{font-size:12px;letter-spacing:2px;color:#c79bff;cursor:pointer;font-weight:bold;margin-bottom:4px}
+.lib-tbl{border-collapse:collapse;width:100%;font-size:13px;border:1px solid var(--border)}
+.lib-tbl th{text-align:left;font-weight:normal;font-size:11px;letter-spacing:1px;color:var(--muted);
+            padding:4px 8px;background:#0a1626;border-bottom:1px solid var(--border)}
+.lib-tbl td{padding:5px 8px;border-bottom:1px solid #16263a;vertical-align:top}
+.lib-tbl tbody tr:nth-child(even) td{background:#0a111c}
+.lib-tbl tbody tr:hover td{background:#0e1b2c}
+.lib-tbl td.l{width:26%;color:var(--bright)}
+.lib-tbl td.v{width:18%}
+.lib-tbl td.u{width:9%;color:var(--text);font-size:12px}
+.lib-tbl td.r{width:12%;color:var(--text);font-size:12px;white-space:nowrap}
+.lib-tbl td.s{color:var(--muted);font-size:12px;line-height:1.4}
+.lib-help{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.35}
+#lib-dirty{color:var(--amber);font-size:12px;display:none}
+.u-hint{font-size:11px;color:var(--muted);margin-top:2px}
+.lib-chart{position:relative;max-width:640px;margin:6px 0 4px}
+.lib-chart svg{display:block;width:100%;height:auto}
+.lib-chart .ch-title{font-size:12px;color:var(--bright);margin-bottom:2px}
+.lib-chart .ch-sub{font-size:11px;color:var(--muted);margin-bottom:4px}
+.lib-chart .ch-legend{display:flex;gap:14px;font-size:11px;color:var(--text);margin-bottom:2px}
+.lib-chart .ch-legend i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.lib-chart .ch-tip{position:absolute;pointer-events:none;background:#0d1a2b;border:1px solid var(--border);
+          padding:4px 7px;font-size:11px;color:var(--text);white-space:nowrap;display:none;line-height:1.5}
+.lib-chart .ch-tip b{color:var(--bright);font-weight:normal}
+.lib-tbl td.chart-cell{background:none!important;padding:4px 8px 10px}
+.lib-tbl input,.lib-tbl select,.lib-tbl textarea{width:100%;background:var(--card);color:var(--bright);
+          border:1px solid var(--border);font-size:12px;padding:2px 4px}
+.lib-tbl input[readonly],.lib-tbl textarea[readonly]{border-color:transparent;background:none;color:var(--bright)}
+.lib-tbl .bad{border-color:var(--red)!important}
+#lib-errors{color:var(--red);font-size:12px;margin-top:6px}
+#lib-perf{margin-top:14px}
+.perf-head{font-size:13px;letter-spacing:2px;color:#c79bff;font-weight:bold;margin-bottom:6px}
+.perf-head span{font-weight:normal;letter-spacing:0;color:var(--muted);font-size:12px;margin-left:6px}
+.perf-warn{color:var(--amber);font-size:12px;margin-bottom:8px;line-height:1.5}
+.perf-ok{color:var(--green);font-size:12px;margin-bottom:8px}
+.perf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.perf-box{border:1px solid var(--border);background:var(--card);padding:8px 10px}
+.perf-title{font-size:12px;font-weight:bold;letter-spacing:1px;color:var(--bright)}
+.perf-sub{font-size:11px;color:var(--muted);margin:1px 0 6px}
+.perf-tbl{border-collapse:collapse;font-size:12px;width:100%}
+.perf-tbl th{color:var(--muted);font-weight:normal;text-align:left;padding:3px 8px 3px 0;
+             border-bottom:1px solid var(--border);font-size:11px}
+.perf-tbl td{padding:3px 8px 3px 0;border-bottom:1px solid #16263a;color:var(--bright);white-space:nowrap}
+.perf-tbl tr:last-child td{border-bottom:none}
+
 /* MAIN LAYOUT */
-#main{display:flex;flex:1;overflow:hidden}
+#main{display:none;flex:1;overflow:hidden}
 #left-col{display:flex;flex-direction:column;min-width:0;gap:0;padding:4px 2px 4px 4px}
 #right-col{overflow-y:auto;display:flex;flex-direction:column;
            gap:3px;padding:4px 4px 4px 2px;scrollbar-width:thin;
@@ -46,7 +158,7 @@ body{background:var(--bg);color:var(--text);display:flex;flex-direction:column;
     align-items:center;justify-content:space-between;flex-shrink:0;font-weight:bold;gap:10px}
 .ph-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .ph-toggle{cursor:pointer;background:none;border:1px solid var(--border);color:var(--blue);
-    font-size:10px;line-height:1;padding:3px 7px;border-radius:2px;flex-shrink:0;
+    font-size:11px;line-height:1;padding:3px 7px;border-radius:2px;flex-shrink:0;
     font-family:inherit;letter-spacing:0}
 .ph-toggle:hover{filter:brightness(1.4);border-color:var(--blue)}
 /* Collapsed panel keeps just its header bar. Sizing is NOT done with CSS
@@ -72,29 +184,44 @@ canvas{display:block;flex:1}
 #sec-train .sec-head{color:#60b8ff;border-left-color:#60b8ff;border-bottom-color:#1a3050;background:#020d1e}
 #sec-prog  .sec-head{color:#ffcc44;border-left-color:#ffcc44;border-bottom-color:#302000;background:#110c00}
 #sec-eval  .sec-head{color:#22ffdd;border-left-color:#22ffdd;border-bottom-color:#003028;background:#001810}
-#sec-xplay .sec-head{color:#c79bff;border-left-color:#c79bff;border-bottom-color:#241638;background:#0e0818}
-#xp-models{max-height:170px;overflow-y:auto;border:1px solid var(--border);background:var(--card);padding:4px 6px}
+#xp-models{max-height:260px;overflow-y:auto;border:1px solid var(--border);background:var(--card);padding:4px 6px}
 #xp-models label,.xp-chk label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text);padding:1px 0;cursor:pointer}
-#xp-models label span.m{color:var(--dim);margin-left:auto;white-space:nowrap}
+#xp-models label span.m{color:var(--muted);margin-left:auto;white-space:nowrap}
 .xp-chk{display:flex;flex-wrap:wrap;gap:4px 12px}
-#xp-table{border-collapse:collapse;font-size:10.5px;margin-top:6px}
+#xp-table{border-collapse:collapse;margin-top:8px}
 #xp-table th{color:var(--text);font-weight:normal;padding:2px 4px;text-align:center;max-width:78px;
              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #xp-table th.r{text-align:right;max-width:none}
 #xp-table td{padding:2px 3px;text-align:center;color:#fff;border:1px solid var(--panel);min-width:36px;line-height:1.15}
-#xp-table td span{font-size:9px}
-#xp-results.wide{position:fixed;inset:4% 6%;z-index:50;background:var(--panel);border:1px solid #c79bff;
-                 padding:14px 18px;overflow:auto;box-shadow:0 0 0 100vmax #000a}
-#xp-results.wide #xp-table{font-size:13px}
-#xp-results.wide #xp-table td{min-width:70px;padding:6px}
-#xp-results.wide #xp-table td span{font-size:11px}
-#xp-results.wide .xp-rowname{display:inline}
-#xp-results.wide .xp-elo-name{width:280px!important;font-size:12px}
-.xp-rowname{display:none}
-.xp-close{display:none}
-#xp-results.wide .xp-close{display:block}
+#xp-table td span{font-size:11px}
+#xplay-view{display:none;flex:1;overflow:hidden}
+#xp-side{width:400px;flex-shrink:0;overflow-y:auto;border-right:2px solid var(--border);
+         padding:10px 12px;background:var(--panel)}
+.xp-side-title{font-size:13px;letter-spacing:2px;color:#c79bff;font-weight:bold;margin-bottom:8px}
+#xp-main{flex:1;overflow:auto;padding:12px 18px}
+#xp-table{font-size:13px}
+#xp-table td{min-width:70px;padding:6px}
+.xp-elo-name{width:280px;font-size:12px}
+#xp-tab-prog{color:var(--amber);letter-spacing:0;margin-left:6px}
+#xp-tab-prog:empty{display:none}
 #xp-table td.diag{outline:1px dashed #ffffff80;outline-offset:-3px}
 #sec-hud   .sec-head{color:#ff6666;border-left-color:#ff6666;border-bottom-color:#300000;background:#130000}
+#sec-wstats .sec-head{color:#c79bff;border-left-color:#c79bff;border-bottom-color:#241536;background:#0d0716}
+.ws-top{font-size:12px;color:var(--text);margin-bottom:6px}
+.ws-top b{color:var(--bright)}
+.ws-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.ws-chip{font-size:11px;padding:2px 6px;border:1px solid var(--border);color:var(--text)}
+.ws-chip b{color:var(--bright)}
+.ws-kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}
+.ws-kpi{background:var(--card);border:1px solid var(--border);padding:4px 6px}
+.ws-kpi .v{font-size:14px;color:var(--bright)}
+.ws-kpi .l{font-size:10px;letter-spacing:1px;color:var(--muted)}
+.ws-tbl{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:8px;border:1px solid var(--border)}
+.ws-tbl th{text-align:right;font-weight:normal;font-size:10px;letter-spacing:1px;color:var(--muted);
+           padding:3px 5px;background:#0a1626;border-bottom:1px solid var(--border)}
+.ws-tbl th:first-child,.ws-tbl td:first-child{text-align:left}
+.ws-tbl td{text-align:right;padding:3px 5px;border-bottom:1px solid #0c1a2a;font-variant-numeric:tabular-nums}
+.ws-cap{font-size:10px;letter-spacing:2px;color:var(--muted);margin:2px 0 3px}
 .sec-body{padding:10px 12px}
 .sec-body.collapsed{display:none}
 
@@ -111,7 +238,7 @@ select option{background:#050810}
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 
 /* HELP BUTTON */
-.help-btn{width:18px;height:18px;border-radius:50%;border:1px solid var(--dim);
+.help-btn{width:18px;height:18px;border-radius:50%;border:1px solid var(--muted);
           background:var(--card);color:var(--text);cursor:pointer;font-size:11px;
           display:flex;align-items:center;justify-content:center;flex-shrink:0;
           font-family:'Courier New',monospace;transition:all .15s}
@@ -154,8 +281,8 @@ select option{background:#050810}
 
 /* CURRICULUM */
 .curr-track{display:flex;align-items:center;gap:0;margin:6px 0;flex-wrap:wrap;gap:2px}
-.curr-stage{font-size:10px;letter-spacing:1px;padding:4px 7px;border:1px solid var(--border);
-            color:var(--dim);background:var(--card);white-space:nowrap;border-radius:1px}
+.curr-stage{font-size:11px;letter-spacing:1px;padding:4px 7px;border:1px solid var(--border);
+            color:var(--muted);background:var(--card);white-space:nowrap;border-radius:1px}
 .curr-stage.done  {color:var(--green);border-color:var(--green);background:#001a08}
 .curr-stage.active{color:var(--amber);border-color:var(--amber);background:#1a1000;
                    animation:pulse 2s infinite}
@@ -217,9 +344,8 @@ select option{background:#050810}
 /* control chips */
 #t3-topleft{position:absolute;left:8px;top:8px;display:flex;flex-direction:column;gap:5px}
 .t3grp{display:flex;align-items:center;gap:4px;pointer-events:auto}
-.t3lab{font-size:9px;letter-spacing:1.5px;color:#7fa8d4;width:52px;flex-shrink:0;
-       text-shadow:0 1px 3px #000}
-.t3chip{font-family:inherit;font-size:10px;font-weight:bold;letter-spacing:1px;
+.t3lab{font-size:11px;letter-spacing:1.5px;color:#eef6ff;font-weight:bold;width:58px;flex-shrink:0;background:rgba(6,10,18,.72);padding:2px 5px;border-radius:2px;text-align:center}
+.t3chip{font-family:inherit;font-size:11px;font-weight:bold;letter-spacing:1px;
         padding:3px 8px;cursor:pointer;border-radius:2px;
         background:rgba(8,14,26,.72);color:#9dc4e8;border:1px solid rgba(120,165,215,.35)}
 .t3chip:hover{background:rgba(20,38,66,.9);color:#eef6ff}
@@ -227,13 +353,14 @@ select option{background:#050810}
            box-shadow:0 0 8px rgba(58,159,255,.45)}
 .t3chip.blue.on{background:rgba(20,80,140,.9);border-color:#37c8ff;box-shadow:0 0 8px rgba(55,200,255,.5)}
 .t3chip.red.on {background:rgba(120,28,34,.9);border-color:#ff4d54;box-shadow:0 0 8px rgba(255,77,84,.5)}
+.t3chip.wing.on{background:rgba(70,50,140,.9);border-color:#a98bff;box-shadow:0 0 8px rgba(169,139,255,.5)}
 
 /* legend */
 #t3-legend{position:absolute;right:8px;bottom:8px;width:296px;pointer-events:auto;
            background:rgba(6,10,18,.85);border:1px solid rgba(120,165,215,.3);
-           border-radius:2px;padding:8px 10px;font-size:10px;line-height:1.55;color:#b8d4ee}
+           border-radius:2px;padding:8px 10px;font-size:11px;line-height:1.55;color:#b8d4ee}
 #t3-legend.hide{display:none}
-.t3lgh{font-size:9px;letter-spacing:2px;color:#5fb0ff;margin-bottom:5px;font-weight:bold;
+.t3lgh{font-size:11px;letter-spacing:2px;color:#5fb0ff;margin-bottom:5px;font-weight:bold;
        cursor:pointer}
 .t3lgr{display:flex;align-items:flex-start;gap:6px}
 .t3lgr i{width:11px;height:3px;border-radius:1px;flex-shrink:0;display:inline-block;margin-top:6px}
@@ -241,7 +368,7 @@ select option{background:#050810}
 .t3lgr.ck:hover{background:rgba(60,110,170,.18);color:#eef6ff}
 .t3lgr.ck input{flex-shrink:0;width:12px;height:12px;margin-top:4px;cursor:pointer;accent-color:#3a9fff}
 #t3-legend-pill{position:absolute;right:8px;bottom:8px;display:none;pointer-events:auto;
-       font-family:inherit;font-size:10px;font-weight:bold;letter-spacing:1px;padding:4px 10px;
+       font-family:inherit;font-size:11px;font-weight:bold;letter-spacing:1px;padding:4px 10px;
        cursor:pointer;border-radius:2px;background:rgba(8,14,26,.8);color:#9dc4e8;
        border:1px solid rgba(120,165,215,.35)}
 #t3-legend-pill.show{display:block}
@@ -255,20 +382,21 @@ select option{background:#050810}
        padding:3px 7px;border-radius:2px;background:rgba(6,10,18,.8);
        border-left:2px solid #888;color:#eef6ff;pointer-events:none;
        transition:opacity .12s;will-change:transform;text-shadow:0 1px 2px #000}
-.t3lbl .sub{color:#ffe9a8;font-size:10.5px;font-weight:bold}
+.t3lbl .sub{color:#ffe9a8;font-size:11px;font-weight:bold}
 .t3lbl.blue{border-left-color:#37c8ff}
 .t3lbl.red {border-left-color:#ff4d54}
+.t3lbl.wing{border-left-color:#a98bff}
 .t3lbl.mid {border-left-color:transparent;background:rgba(6,10,18,.62);
             color:#cfe2ef;transform-origin:center;font-weight:bold;letter-spacing:.5px}
-.t3lbl.grn {border-left-color:#39ff9e;color:#39ff9e;font-size:10.5px;font-weight:bold;padding:2px 5px}
-.t3lbl.amb {border-left-color:#ffb020;color:#ffb020;font-size:10.5px;font-weight:bold;padding:2px 5px}
-.t3lbl.red2{border-left-color:#ff4d54;color:#ff8a8f;font-size:10.5px;font-weight:bold;padding:2px 5px}
+.t3lbl.grn {border-left-color:#39ff9e;color:#39ff9e;font-size:11px;font-weight:bold;padding:2px 5px}
+.t3lbl.amb {border-left-color:#ffb020;color:#ffb020;font-size:11px;font-weight:bold;padding:2px 5px}
+.t3lbl.red2{border-left-color:#ff4d54;color:#ff8a8f;font-size:11px;font-weight:bold;padding:2px 5px}
 .t3lbl.hot {background:rgba(0,60,55,.85);border-left-color:#22ffdd;color:#22ffdd;
             animation:t3pulse .7s ease-in-out infinite}
 @keyframes t3pulse{0%,100%{opacity:1}50%{opacity:.45}}
 
 /* scale bar + compass + threat strip + banner */
-#t3-scale{position:absolute;left:10px;bottom:10px;color:#cfe2ef;font-size:10px;
+#t3-scale{position:absolute;left:10px;bottom:10px;color:#cfe2ef;font-size:11px;
           text-shadow:0 1px 3px #000}
 #t3-scale .t3bar{height:4px;border:1px solid #cfe2ef;border-top:none;margin-bottom:2px}
 #t3-compass{position:absolute;right:10px;top:10px;width:44px;height:44px;opacity:.9}
@@ -304,57 +432,137 @@ select option{background:#050810}
 <!-- TOP BAR -->
 <div id="topbar">
   <h1>BVR RL — TRAINING CONSOLE</h1>
+  <button class="tab on" id="tab-train" onclick="showView('train')">TRAINING</button>
+  <button class="tab" id="tab-watch" onclick="showView('watch')">WATCH</button>
+  <button class="tab" id="tab-xplay" onclick="showView('xplay')">CROSS-PLAY<span id="xp-tab-prog"></span></button>
+  <button class="tab" id="tab-library" onclick="showView('library')">LIBRARY</button>
+  <button class="tab" id="units-btn" onclick="toggleUnits()" title="Show lengths and speeds in metric (m, km, m/s) or aviation units (ft, nm, kt). Stored values stay metric.">m · m/s</button>
   <span class="pill idle" id="state-pill">IDLE</span>
   <span id="ws-dot" style="color:var(--red);font-size:16px" title="WebSocket">●</span>
 </div>
 
-<!-- MAIN -->
-<div id="main">
-
-  <!-- LEFT: canvases -->
-  <div id="left-col">
-    <div class="panel" id="panel-tac" style="flex:3">
-      <div class="ph">
-        <span>TACTICAL VIEW</span>
-        <span class="ph-right">
-          <span id="tac-info" style="font-size:11px;color:var(--text)"></span>
-          <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
-        </span>
-      </div>
-      <div id="cv-tac" style="position:relative;overflow:hidden"></div>
-    </div>
-    <div class="vsplit" data-above="panel-tac" data-below="panel-alt" title="Drag to resize"></div>
-    <div class="panel" id="panel-alt" style="flex:1">
-      <div class="ph">
-        <span>ALTITUDE PROFILE</span>
-        <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
-      </div>
-      <canvas id="cv-alt"></canvas>
-    </div>
-    <div class="vsplit" data-above="panel-alt" data-below="log-bar" title="Drag to resize"></div>
-
-    <!-- LOG -->
-    <div class="panel" id="log-bar">
-      <div id="log-header">
-        <span>LOG</span>
-        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
-        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
-        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
-        <button class="btn" id="btn-decisions"
-          style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
-        <button class="ph-toggle" style="margin-left:auto" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
-      </div>
-      <div id="log-lines">
-        <div class="log-info">Waiting for training to start...</div>
-      </div>
+<!-- LIBRARY -->
+<div id="library-view">
+  <div id="lib-list"><div style="font-size:11px;color:var(--muted)">loading…</div></div>
+  <div id="lib-detail">
+    <div style="font-size:13px;line-height:1.7;max-width:720px">
+      <h2>Parameter library</h2>
+      Every number the simulation uses for an aircraft, its radar and its missile lives here.
+      <b>Built-in</b> items (🔒) come from open-source data and cannot be edited:
+      select one and press <b>Copy</b> to make an editable version.<br>
+      A <b>platform</b> combines an airframe, a radar and a missile with a weapon count, a radar
+      cross-section and the four speeds the agent can command. Choose platforms for a run in
+      Training Configuration → ENGAGEMENT.<br>
+      Airframes and platforms have a <b>Performance card</b>: the flight model flown through test
+      manoeuvres, so a wrong number shows up before training. A new or edited missile must be
+      <b>calibrated</b> before training: its launch envelope is measured by flying it.
     </div>
   </div>
+</div>
 
-  <div class="hsplit" title="Drag to resize"></div>
+<!-- CROSS-PLAY -->
+<div id="xplay-view">
+  <div id="xp-side">
+    <div class="xp-side-title">⚔ CROSS-PLAY EVALUATION</div>
 
-  <!-- RIGHT: controls -->
-  <div id="right-col">
+        <div style="font-size:12px;color:var(--text);margin-bottom:10px;line-height:1.5">
+          Round-robin between saved checkpoints: every one against every other and itself, in both seats.
+          Shows whether later checkpoints really beat earlier ones.
+        </div>
 
+        <div class="field">
+          <div class="field-label">
+            <span>CHECKPOINTS</span>
+            <button class="help-btn" onclick="help(this,'CHECKPOINTS',
+              'Checkpoints to include. Each plays every other and itself, in both seats (AC1 row, AC2 column), with its own radar on each side and no truth.\n\nGames grow with the square of the count: 6 checkpoints and 2 scripted opponents at 40 games is 1,920 games. Older checkpoints (before the doctrine input) are widened automatically.')">?</button>
+            <span style="margin-left:auto;font-size:11px">
+              <a href="#" style="color:var(--blue)" onclick="xpSelect('all');return false">all</a> ·
+              <a href="#" style="color:var(--blue)" onclick="xpSelect('archive');return false">archive</a> ·
+              <a href="#" style="color:var(--blue)" onclick="xpSelect('none');return false">none</a>
+            </span>
+          </div>
+          <div id="xp-models"><div style="font-size:11px;color:var(--muted)">loading…</div></div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span>SCRIPTED COLUMNS</span>
+            <button class="help-btn" onclick="help(this,'SCRIPTED COLUMNS',
+              'Scripted opponents added as extra columns. They can only fly AC2, so they get a column but no row.\n\nThey anchor the Elo scale to fixed references: a checkpoint that beats every older checkpoint but not SHOOTER has learned to beat itself, not to fight.')">?</button>
+          </div>
+          <div class="xp-chk" id="xp-scripted">
+            <label><input type="checkbox" value="straight">STRAIGHT</label>
+            <label><input type="checkbox" value="evasive">EVASIVE</label>
+            <label><input type="checkbox" value="notcher">NOTCHER</label>
+            <label><input type="checkbox" value="shooter" checked>SHOOTER</label>
+            <label><input type="checkbox" value="adaptive_shooter" checked>ADAPTIVE</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label"><span>SCRIPTED COLUMNS FLY</span>
+            <button class="help-btn" onclick="help(this,'SCRIPTED PLATFORM',
+              'Each checkpoint flies its own training platform in every game. The scripted columns fly this platform, or by default the opponent platform each row checkpoint was trained against.')">?</button></div>
+          <select id="xp-scripted-platform"><option value="">— each checkpoint's training opponent —</option></select>
+        </div>
+
+        <div class="row3">
+          <div class="field">
+            <div class="field-label"><span>GAMES / CELL</span>
+              <button class="help-btn" onclick="help(this,'GAMES PER CELL',
+                'Games per cell: how many engagements each ordered pairing plays. The ± shown in each cell is the 95% margin on its score.\n\n• 20 — quick look, about ±0.20\n• 40 — default, about ±0.12–0.15\n• 60–100 — to separate close versions\n\nEvery pairing replays the same start geometries (game i starts identically everywhere), so cells differ by policy, not luck.')">?</button></div>
+            <select id="xp-episodes" onchange="xpEstimate()">
+              <option value="20">20</option><option value="40" selected>40</option>
+              <option value="60">60</option><option value="100">100</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label"><span>WORKERS</span>
+              <button class="help-btn" onclick="help(this,'WORKERS',
+                'Parallel worker processes. Each plays whole games; use a little below your physical core count.\n\nCross-play competes with training for the same cores: running both at once slows both.')">?</button></div>
+            <select id="xp-workers" onchange="xpEstimate()">
+              <option>4</option><option>8</option><option>12</option><option>16</option>
+              <option selected>20</option><option>24</option><option>32</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label"><span>DOCTRINE</span></div>
+            <select id="xp-doctrine">
+              <option value="aggressive">AGGRESSIVE</option>
+              <option value="balanced" selected>BALANCED</option>
+              <option value="conservative">CONSERVATIVE</option>
+            </select>
+          </div>
+        </div>
+        <div id="xp-estimate" style="font-size:11px;color:var(--amber);margin:-4px 0 8px"></div>
+
+        <div class="btn-row">
+          <button class="btn go"   id="btn-xplay" style="flex:1">▶ RUN CROSS-PLAY</button>
+          <button class="btn stop" id="btn-stop-xplay" style="display:none;flex:1">■ STOP</button>
+        </div>
+        <div id="xp-progress" style="display:none;margin-top:8px">
+          <div style="height:8px;background:var(--card);border:1px solid var(--border)">
+            <div id="xp-bar" style="height:100%;width:0%;background:#c79bff"></div></div>
+          <div id="xp-progress-txt" style="font-size:11px;color:var(--text);margin-top:3px"></div>
+        </div>
+
+  </div>
+  <div id="xp-main">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;letter-spacing:2px;color:#c79bff;font-weight:bold">RESULTS</span>
+          <button class="help-btn" onclick="help(this,'CROSS-PLAY RESULTS',
+            'Each cell is the ROW checkpoint\'s score flying AC1 against the COLUMN player flying AC2: win 1, draw 0.5, loss 0.\n\nWin = kill or the enemy crashes. Loss = shot down or own crash. Draw = mutual kill, timeout or escape.\n\nHow to read it:\n• The dashed diagonal (a policy against itself) should be near 0.50.\n• Seat bias is the AC1 seat\'s advantage on mirrored matchups; near 0 means the seats are fair.\n• A later checkpoint is better only if its Elo gap is larger than the ± margins.\n• Hover a cell for wins-draws-losses and shots per game.')">?</button>
+          <span id="xp-meta" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+        </div>
+        <div id="xp-results">
+          <div style="font-size:11px;color:var(--muted)">no cross-play run yet</div>
+        </div>
+  </div>
+</div>
+
+<!-- TRAINING: configuration and the metrics dashboard (no 3D) -->
+<div id="train-view">
+  <div id="train-side">
     <!-- TRAINING CONFIGURATION -->
     <div class="section" id="sec-train">
       <div class="sec-head" onclick="toggle(this)">⚙ TRAINING CONFIGURATION<span>▲</span></div>
@@ -362,11 +570,37 @@ select option{background:#050810}
 
         <div class="field">
           <div class="field-label">
+            <span>ENGAGEMENT</span>
+            <button class="help-btn" onclick="help(this,'ENGAGEMENT',
+              'Who flies what.\n\n• FORMAT: 1 v 1, or 2 v 1: two blue aircraft flown by one shared policy against one red.\n• AGENT FLIES (LEAD FLIES in 2 v 1): the platform the learning agent flies.\n• WINGMAN FLIES (2 v 1): the second blue aircraft; by default the same as the lead.\n• OPPONENT FLIES: the platform the scripted opponent flies.\n\nIn 2 v 1 each blue aircraft flies on its own radar, and on its wingman\'s track over a datalink when its own radar has none: one aircraft can fire and turn away while the other keeps the missile supported. A kill or a loss counts for both. A 1 v 1 checkpoint can be resumed as 2 v 1: it starts by flying each aircraft as it flew alone.\n\nPlatforms are defined in the LIBRARY tab (top bar), where you can copy a built-in and change its parameters.\n\nSelf-play applies only to 1 v 1 with the same platform on both sides; otherwise the curriculum stops at ADAPTIVE SHOOTER. Each saved checkpoint records the format, every platform and every parameter.')">?</button>
+          </div>
+          <div class="row3">
+            <select id="cfg-format" title="Format" onchange="engageCheck()">
+              <option value="1v1" selected>1 v 1</option>
+              <option value="2v1">2 v 1</option>
+            </select>
+            <select id="cfg-platform" title="Agent flies" onchange="engageCheck()"></select>
+            <select id="cfg-opp-platform" title="Opponent flies" onchange="engageCheck()"></select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
+            <span>FORMAT</span><span id="cfg-plat-lbl">AGENT FLIES</span><span>OPPONENT FLIES</span></div>
+          <div id="cfg-wing-row" style="display:none;margin-top:6px">
+            <div class="row3"><span></span>
+              <select id="cfg-wing-platform" title="Wingman flies"><option value="">as lead</option></select>
+              <span></span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
+              <span></span><span>WINGMAN FLIES</span><span></span></div>
+          </div>
+          <div id="cfg-engage-warn" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
             <span>OPPONENT STAGE</span>
             <button class="help-btn" onclick="help(this,'OPPONENT STAGE',
               'The AI enemy your agent will fight.\n\n• STRAIGHT — flies straight, does not shoot. Learn search, track, and kill.\n• EVASIVE — manoeuvres and turns. Learn to hold radar track.\n• NOTCHER — beams to break your radar lock. Unarmed.\n• SHOOTER — armed. Commits, fires, cranks, then drags to safety. The benchmark.\n• ADAPTIVE SHOOTER — same as SHOOTER but with randomised tactics. Harder to exploit.\n\nAlways start with STRAIGHT. Advance when win rate holds above 65%.')">?</button>
           </div>
-          <select id="cfg-opponent">
+          <select id="cfg-opponent" onchange="engageCheck()">
             <option value="straight" selected>STRAIGHT</option>
             <option value="evasive">EVASIVE</option>
             <option value="notcher">NOTCHER</option>
@@ -395,7 +629,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>TRAINING STEPS</span>
               <button class="help-btn" onclick="help(this,'TRAINING STEPS',
-                'Total policy decisions to train on. More steps = better policy, but takes longer.\n\nSingle env, at the reference 43× realtime:\n• 500 000 → ~3 hours\n• 2 000 000 → ~13 hours\n• 5 000 000 → ~32 hours\n\nParallel envs cut this, but by less than the env count — the estimate below already accounts for that. One \"step\" = one 1-second decision per environment.')">?</button>
+                'Total policy decisions to train on. More steps = better policy, but takes longer.\n\nSingle env, at the reference 43× realtime:\n• 500 000 → ~3 hours\n• 2 000 000 → ~13 hours\n• 5 000 000 → ~32 hours\n\nParallel envs cut this, but by less than the env count — the estimate below already accounts for that. One &quot;step&quot; = one 1-second decision per environment.')">?</button>
             </div>
             <input type="number" id="cfg-steps" value="2000000" min="100000" step="100000" oninput="updateETA()">
             <div id="steps-eta" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
@@ -456,9 +690,9 @@ select option{background:#050810}
             <div class="field-label">
               <span>AUTO-CURRICULUM</span>
               <button class="help-btn" onclick="help(this,'AUTO-CURRICULUM',
-                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes is at least 65% and at least 60 episodes have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nIn SELF_PLAY the opponent is a frozen snapshot of the agent itself, observing through its own radar, with an ADAPTIVE shooter in a third of episodes. Snapshots are taken on entering the stage and every 250k steps, into models_bvr/selfplay_pool. The log splits the win rate by opponent kind.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
+                'When ON, the system automatically advances to the next harder opponent once the win rate over the last 50 episodes has stayed at or above ADVANCE AT (65% by default) for HOLD FOR checks in a row (5 by default, one check every 10 episodes), and at least MIN EPISODES / STAGE (60 by default) have been played on the current stage.\n\nOrder of stages:\nSTRAIGHT → EVASIVE → NOTCHER → SHOOTER → ADAPTIVE → SELF_PLAY\n\nIn SELF_PLAY the opponent is a frozen snapshot of the agent itself, observing through its own radar, with an ADAPTIVE shooter in a third of episodes. Snapshots are taken on entering the stage and every 250k steps, into models_bvr/selfplay_pool, which is emptied at the start of every training run. The log splits the win rate by opponent kind.\n\nTurn OFF if you want to stay on a specific opponent for a controlled experiment, or if you want to manually decide when to advance.')">?</button>
             </div>
-            <select id="cfg-curriculum">
+            <select id="cfg-curriculum" onchange="spCheck()">
               <option value="1" selected>ON (auto-advance)</option>
               <option value="0">OFF (stay on stage)</option>
             </select>
@@ -467,7 +701,7 @@ select option{background:#050810}
             <div class="field-label">
               <span>MODEL NAME</span>
               <button class="help-btn" onclick="help(this,'MODEL NAME',
-                'Name for the model file this run saves.\n\nThe final policy is written to:\n  models_bvr/<name>.zip\n\nLeave as "latest" to keep overwriting the default checkpoint, or give each run its own name (e.g. shooter_v2) to keep multiple trained models side by side.\n\nThis file — and the archive/best_* / archive/pre_* snapshots the curriculum saves along the way — is what shows up in RESUME FROM and CHECKPOINT TO LOAD once training finishes.')">?</button>
+                'Name for the model file this run saves.\n\nThe final policy is written to:\n  models_bvr/<name>.zip\n\nLeave as &quot;latest&quot; to keep overwriting the default checkpoint, or give each run its own name (e.g. shooter_v2) to keep multiple trained models side by side.\n\nThis file — and the archive/best_* / archive/pre_* snapshots the curriculum saves along the way — is what shows up in RESUME FROM and CHECKPOINT TO LOAD once training finishes.')">?</button>
             </div>
             <input type="text" id="cfg-runname" placeholder="latest" value="latest">
           </div>
@@ -475,13 +709,81 @@ select option{background:#050810}
             <div class="field-label">
               <span>RESUME FROM</span>
               <button class="help-btn" onclick="help(this,'RESUME CHECKPOINT',
-                'Continue training from a saved model instead of starting fresh.\n\nLeave at "fresh start" to begin from a random policy.\n\nThe list is read live from your models_bvr/ folder — top-level saves (e.g. latest.zip) and archive/ snapshots (best_*, pre_*) both show up here.')">?</button>
+                'Continue training from a saved model instead of starting fresh.\n\nLeave at &quot;fresh start&quot; to begin from a random policy.\n\nThe list is read live from your models_bvr/ folder — top-level saves (e.g. latest.zip) and archive/ snapshots (best_*, pre_*) both show up here.')">?</button>
             </div>
             <select id="cfg-resume">
               <option value="">— fresh start —</option>
             </select>
           </div>
         </div>
+
+        <div class="row3">
+          <div class="field">
+            <div class="field-label">
+              <span>ADVANCE AT (WIN %)</span>
+              <button class="help-btn" onclick="help(this,'ADVANCE AT',
+                'The win rate over the last 50 episodes at which the auto-curriculum moves on to the next opponent. 65% by default.\n\nSet it per matchup. An outmatched platform may never reach 65%: a slower aircraft can\'t catch a faster opponent that runs, and a faster opponent\'s missiles out-range its own. For example, two UCAVs against an F-16 may need 40–50%.\n\nToo low and the agent moves on before it has learned the stage. Watch the win-rate trend: advance once it has levelled off.\n\nIgnored when AUTO-CURRICULUM is OFF.')">?</button>
+            </div>
+            <input type="number" id="cfg-adv-wr" value="65" min="5" max="100" step="5">
+          </div>
+          <div class="field">
+            <div class="field-label">
+              <span>MIN EPISODES / STAGE</span>
+              <button class="help-btn" onclick="help(this,'MIN EPISODES / STAGE',
+                'Episodes the agent must play against the current opponent before the curriculum may advance, even if the win rate is already past the mark. 60 by default.\n\nThe win rate is measured over the last 50 episodes, so this makes sure every one of them was flown against the current opponent, not partly against the easier one before it. HOLD FOR is what guards against a lucky streak.\n\nIgnored when AUTO-CURRICULUM is OFF.')">?</button>
+            </div>
+            <input type="number" id="cfg-adv-min" value="60" min="10" max="5000" step="10">
+          </div>
+          <div class="field">
+            <div class="field-label">
+              <span>HOLD FOR (CHECKS)</span>
+              <button class="help-btn" onclick="help(this,'HOLD FOR',
+                'How many checks in a row the win rate must stay at or above ADVANCE AT before the curriculum moves on. The win rate is checked every 10 episodes. 5 by default.\n\nEvery check is a new chance for a lucky 50 episodes. With 1 check, an agent that really wins 55% of the time passes a 65% mark within 1000 episodes 97% of the time. With 5 checks, 29%. An agent that really wins 65% still passes, about 40 episodes later.\n\nIgnored when AUTO-CURRICULUM is OFF.')">?</button>
+            </div>
+            <input type="number" id="cfg-adv-hold" value="5" min="1" max="50" step="1">
+          </div>
+        </div>
+
+        <details class="sp-grp" id="cfg-sp-box">
+          <summary>SELF-PLAY (ADVANCED)</summary>
+          <div id="cfg-sp-note"></div>
+          <div class="row2">
+            <div class="field">
+              <div class="field-label">
+                <span>SCRIPTED SHARE (%)</span>
+                <button class="help-btn" onclick="help(this,'SCRIPTED SHARE',
+                  'Share of SELF_PLAY episodes flown against the scripted ADAPTIVE SHOOTER instead of a snapshot of the agent. 33% by default.\n\nIt keeps a committed attacker in the mix: without one, self-play in BVR tends to settle into both sides turning away at long range.\n\nRaise it if win rate vs scripted falls while win rate vs policy rises (the agent is overfitting to its own style). Lower it if the scripted shooter is already beaten easily.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-scripted" value="33" min="0" max="100" step="1">
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>NEWEST SHARE (%)</span>
+                <button class="help-btn" onclick="help(this,'NEWEST SHARE',
+                  'Of the episodes against a snapshot, the share against the newest one. The rest draw a snapshot at random from the pool (which may also be the newest). 50% by default.\n\nLower it if the agent forgets how to beat older versions of itself. Raise it for opposition closer to its current strength.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-newest" value="50" min="0" max="100" step="5">
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <div class="field-label">
+                <span>SNAPSHOT EVERY (K STEPS)</span>
+                <button class="help-btn" onclick="help(this,'SNAPSHOT EVERY',
+                  'How often, in thousands of training steps, the current policy is saved into the self-play pool while in SELF_PLAY. 250 by default. A snapshot is also taken on entering the stage.\n\nShorter keeps opponents close to the current policy. Longer spreads the pool over more of its history.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-every" value="250" min="1" max="10000" step="50">
+            </div>
+            <div class="field">
+              <div class="field-label">
+                <span>POOL SIZE</span>
+                <button class="help-btn" onclick="help(this,'POOL SIZE',
+                  'Snapshots kept in the self-play pool; beyond this the oldest is deleted. 12 by default: with a snapshot every 250k steps, about the last 3M steps of the policy.\n\nBigger keeps older opponents around longer, at the cost of disk space and loading time. The pool is emptied at the start of every training run.')">?</button>
+              </div>
+              <input type="number" id="cfg-sp-pool" value="12" min="1" max="100" step="1">
+            </div>
+          </div>
+        </details>
 
         <div class="btn-row">
           <button class="btn go"   id="btn-train" style="flex:1">▶ START TRAINING</button>
@@ -490,41 +792,54 @@ select option{background:#050810}
       </div>
     </div>
 
-    <!-- TRAINING PROGRESS -->
-    <div class="section" id="sec-prog">
-      <div class="sec-head" onclick="toggle(this)">📊 TRAINING PROGRESS<span>▲</span></div>
+    <!-- CURRENT RUN: what the running (or last) trainer was launched with -->
+    <div class="section" id="sec-run">
+      <div class="sec-head" onclick="toggle(this)">▶ CURRENT RUN<span>▲</span></div>
       <div class="sec-body">
-
+        <div class="field-label" style="margin-bottom:4px">
+          <span id="run-state">NO RUN YET</span>
+          <button class="help-btn" onclick="help(this,'CURRENT RUN',
+            'The settings the running (or most recent) training run was started with, and what the trainer reported when it started: the platforms it loaded, the checkpoint it resumed from, any note that a resume is a warm start, and its curriculum plan.\n\nThese stay here for the whole run instead of scrolling out of the log. They are the settings as launched: changing the configuration above does not affect a running trainer.\n\nCODE is the checked-out commit of the repository. Files marked as modified differ from that commit; they are what training actually runs, so check them if results look wrong.')">?</button>
+        </div>
+        <div id="run-info"><div style="color:var(--muted)">Start a run above; its settings and startup notes appear here.</div></div>
+      </div>
+    </div>
+  </div>
+  <div id="train-dash">
+    <div class="dash-row">
+      <div class="dash-card" style="flex:2">
         <div style="font-size:12px;letter-spacing:2px;color:var(--bright);font-weight:bold;margin-bottom:4px">CURRICULUM STAGE</div>
         <div class="curr-track">
           <div class="curr-stage" id="cs-straight">STRAIGHT</div>
-          <div style="color:var(--border);padding:0 2px">›</div>
+          <div style="color:var(--muted);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-evasive">EVASIVE</div>
-          <div style="color:var(--border);padding:0 2px">›</div>
+          <div style="color:var(--muted);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-notcher">NOTCHER</div>
-          <div style="color:var(--border);padding:0 2px">›</div>
+          <div style="color:var(--muted);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-shooter">SHOOTER</div>
-          <div style="color:var(--border);padding:0 2px">›</div>
+          <div style="color:var(--muted);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-adaptive">ADAPTIVE</div>
-          <div style="color:var(--border);padding:0 2px">›</div>
+          <div style="color:var(--muted);padding:0 2px">›</div>
           <div class="curr-stage" id="cs-self_play">SELF_PLAY</div>
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin:8px 0 2px">
           <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">WIN RATE</span>
           <button class="help-btn" onclick="help(this,'WIN RATE',
-            'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick at 65% is the threshold for advancing to the next opponent stage.\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
-          <span style="font-size:11px;color:var(--amber)">advance at 65% →</span>
+            'Percentage of episodes your agent wins (kills the enemy without being killed).\n\nThe yellow tick marks this run\'s threshold for advancing to the next opponent stage (65% unless set otherwise under ADVANCE AT).\n\nWatching the trend matters more than a single number. A rising line = healthy training. Flat = stuck. Falling = regression, check your reward or try resuming an older checkpoint.')">?</button>
+          <span id="curr-note" style="font-size:11px;color:var(--amber)">advance at 65% →</span>
         </div>
         <div style="position:relative">
           <div class="prog-bar" style="height:14px">
             <div class="prog-fill" id="wr-bar" style="width:0%"></div>
           </div>
-          <div style="position:absolute;left:65%;top:-3px;width:2px;height:22px;
+          <div id="wr-tick" style="position:absolute;left:65%;top:-3px;width:2px;height:22px;
                       background:var(--yellow);opacity:0.7"></div>
           <div style="position:absolute;right:0;top:0;font-size:13px;color:var(--bright);font-weight:bold" id="wr-pct">—</div>
         </div>
 
+      </div>
+      <div class="dash-card" style="flex:1">
         <div class="row2" style="margin-top:10px">
           <div>
             <div style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">STEPS</div>
@@ -539,8 +854,9 @@ select option{background:#050810}
         </div>
         <div style="font-size:12px;color:var(--amber);margin-top:4px" id="prog-eta">—</div>
 
-        <!-- KPI CARDS -->
-        <div class="kpi-grid">
+      </div>
+    </div>
+    <div class="dash-kpis">
           <div class="kpi" id="kpi-wr">
             <button class="help-btn" onclick="help(this,'WIN RATE',
               'Kills divided by total episodes (last 50). The most important number.\n\nHealthy progression for STRAIGHT: should exceed 65% within 200k–500k steps.\n\nIf stuck below 30%: try lowering the learning rate, or reset to fresh start.')">?</button>
@@ -549,7 +865,7 @@ select option{background:#050810}
           </div>
           <div class="kpi" id="kpi-ex">
             <button class="help-btn" onclick="help(this,'EXCHANGE RATIO',
-              'Kills ÷ (losses + mutual kills). How many enemies you kill per own aircraft lost.\n\n• >2.0 = good BVR agent\n• ~1.0 = trading evenly\n• <1.0 = losing more than winning\n\nTarget: >2.5 against SHOOTER to advance.')">?</button>
+              '(Kills + mutual kills) ÷ (losses + mutual kills), over the last 50 episodes: enemy aircraft destroyed per own aircraft lost. A mutual kill counts on both sides. With no losses it shows the number of enemies destroyed.\n\n• >2.0 = good BVR agent\n• ~1.0 = trading evenly\n• <1.0 = losing more than winning\n\nThe curriculum advances on win rate, not on this.')">?</button>
             <div class="kval" id="kv-ex">—</div>
             <div class="klabel">EXCHANGE RATIO</div>
           </div>
@@ -565,82 +881,155 @@ select option{background:#050810}
             <div class="kval" id="kv-to">—</div>
             <div class="klabel">TIMEOUT RATE</div>
           </div>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:6px;margin:4px 0 2px">
-          <span style="font-size:12px;letter-spacing:1px;font-weight:bold;color:var(--bright)">WIN RATE TREND</span>
-          <span style="font-size:10px;color:var(--dim)">(last 300 episodes)</span>
-        </div>
-        <div class="chart-wrap"><canvas id="cv-wr"></canvas></div>
-
-        <div class="row2" style="margin-top:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">LAUNCH RANGE</span>
-              <button class="help-btn" onclick="help(this,'LAUNCH RANGE',
+          <div class="kpi" id="kpi-rng">
+            <button class="help-btn" onclick="help(this,'LAUNCH RANGE',
                 'Average distance from the enemy when a missile is fired.\n\nCompare to your Rmax (shown in the tactical view as the green dashed ring).\n\nIdeal: shoot at 55–85% of Rmax. Too close = wasted energy advantage. Too far = shot cannot reach.\n\nIf this is consistently above Rmax, the fire mask is failing — check bvr_env._can_fire().')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rng">—</div>
+            <div class="kval" id="kv-rng">—</div>
+            <div class="klabel">LAUNCH RANGE</div>
           </div>
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">r / Rmax AT SHOT</span>
-              <button class="help-btn" onclick="help(this,'r / Rmax AT SHOT',
+          <div class="kpi" id="kpi-rrm">
+            <button class="help-btn" onclick="help(this,'r / Rmax AT SHOT',
                 'Launch range divided by maximum missile range at the moment of firing.\n\n• 0.5–0.9 = ideal (inside the envelope, with energy margin)\n• >1.0 = shot outside the envelope (miss guaranteed, masking failed)\n• <0.4 = shooting too close (did not use the range advantage)\n\nThis is the single best diagnostic for shot quality.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rrm">—</div>
+            <div class="kval" id="kv-rrm">—</div>
+            <div class="klabel">r / Rmax AT SHOT</div>
           </div>
-        </div>
-        <div class="row2" style="margin-top:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">SHOTS / EPISODE</span>
-              <button class="help-btn" onclick="help(this,'SHOTS PER EPISODE',
+          <div class="kpi" id="kpi-sh">
+            <button class="help-btn" onclick="help(this,'SHOTS PER EPISODE',
                 'Average missiles fired per episode.\n\n• 1–2 = typical for a well-trained agent (fires once, supports, wins)\n• 3–4 = panic firing or shots outside envelope\n• 0–0.5 = agent is too passive to engage\n\nWatch this alongside Pk. High shots + low Pk = fires recklessly.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-sh">—</div>
+            <div class="kval" id="kv-sh">—</div>
+            <div class="klabel">SHOTS / EPISODE</div>
           </div>
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">TRACK FRACTION</span>
-              <button class="help-btn" onclick="help(this,'TRACK FRACTION',
+          <div class="kpi" id="kpi-tf">
+            <button class="help-btn" onclick="help(this,'TRACK FRACTION',
                 'Fraction of simulation time the radar was in TRACK state (actively tracking the enemy).\n\n• >0.7 = good radar management — agent keeps the enemy on the nose\n• 0.4–0.7 = average\n• <0.4 = agent is cranking past the radar gimbal too often\n\nLow track fraction with high timeout rate = agent is running away and losing radar contact.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-tf">—</div>
+            <div class="kval" id="kv-tf">—</div>
+            <div class="klabel">TRACK FRACTION</div>
           </div>
-        </div>
-
-        <div class="row2" style="margin-top:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">BANK REVERSALS / MIN</span>
-              <button class="help-btn" onclick="help(this,'BANK REVERSALS PER MINUTE',
+          <div class="kpi" id="kpi-rev">
+            <button class="help-btn" onclick="help(this,'BANK REVERSALS PER MINUTE',
                 'How often the aircraft rolls from one side to the other (past 15° of bank each way), per minute of flight, over the last 50 episodes.\n\nA real intercept reverses a few times a minute at most. Tens per minute is wing-rocking: the policy flipping between two heading choices every second. The heading-change cost is there to push this down; if it stays high, raise W_HDG_CHANGE in bvr_env.py.')">?</button>
-            </div>
-            <div style="font-size:16px;font-weight:bold;color:var(--bright)" id="kv-rev">—</div>
+            <div class="kval" id="kv-rev">—</div>
+            <div class="klabel">BANK REVERSALS / MIN</div>
           </div>
-          <div>
-            <div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:bold;color:var(--bright)">BY DOCTRINE</span>
-              <button class="help-btn" onclick="help(this,'BY DOCTRINE',
-                'Shots per episode and realised Pk under each missile doctrine, over the last 150 episodes (shown when the run trains more than one).\n\nIf the doctrine is being learned, shots fall and Pk rises from AGGRESSIVE to CONSERVATIVE. Identical rows mean the policy is still ignoring its doctrine input.')">?</button>
-            </div>
-            <div style="font-size:11px;line-height:1.5;color:var(--bright)" id="kv-doc">—</div>
+          <div class="kpi" id="kpi-lost" style="display:none">
+            <button class="help-btn" onclick="help(this,'BLUE LOST / EPISODE','2 v 1 only: blue aircraft lost per episode over the last 50 (0 to 2).\n\nA clean kill loses none; MUTUAL KILL means red was killed at the cost of a blue aircraft. This should fall as the pair learns to support each other.')">?</button>
+            <div class="kval" id="kv-lost">—</div>
+            <div class="klabel">BLUE LOST / EPISODE</div>
           </div>
-        </div>
-
-        <!-- REWARD DRIVERS -->
-        <div style="margin-top:12px">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-            <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">REWARD DRIVERS</span>
-            <button class="help-btn" onclick="help(this,'REWARD DRIVERS',
-              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — time-to-go on the nearest inbound missile\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button>
-          </div>
-          <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
-        </div>
-
+    </div>
+    <div class="dash-grid">
+      <div class="dash-card wide" id="card-outcomes">
+        <div class="dash-head"><span class="dash-title">OUTCOMES</span><button class="help-btn" onclick="help(this,'OUTCOMES','How the last 50 finished episodes ended, plotted every 10 episodes.\n\n• WIN: my missile killed the bandit\n• LOSS: shot down\n• MUTUAL: both killed, including by a missile that flies on after its shooter is killed (in 2 v 1: red killed at the cost of a blue aircraft)\n• TIMEOUT: nobody died in 300 s\n\nThe dashed line is the 65% advance mark. A rising timeout line is the first sign of passivity.')">?</button></div>
+        <div class="dash-sub">share of the last 50 episodes · dashed: the <span id="adv-sub">65%</span> advance mark</div>
+        <div class="ts-chart" id="ch-outcomes"></div>
+      </div>
+      <div class="dash-card" id="card-exch">
+        <div class="dash-head"><span class="dash-title">EXCHANGE RATIO</span></div>
+        <div class="dash-sub">(kills + mutual kills) ÷ (losses + mutual kills)</div>
+        <div class="ts-chart" id="ch-exch"></div>
+      </div>
+      <div class="dash-card" id="card-pk">
+        <div class="dash-head"><span class="dash-title">REALISED Pk</span></div>
+        <div class="dash-sub">kills per missile fired</div>
+        <div class="ts-chart" id="ch-pk"></div>
+      </div>
+      <div class="dash-card" id="card-shots">
+        <div class="dash-head"><span class="dash-title">SHOTS / EPISODE</span></div>
+        <div class="dash-sub">missiles fired per episode</div>
+        <div class="ts-chart" id="ch-shots"></div>
+      </div>
+      <div class="dash-card" id="card-rrmax">
+        <div class="dash-head"><span class="dash-title">r / Rmax AT SHOT</span></div>
+        <div class="dash-sub">where in the envelope it shoots · band: the 0.6–0.85 target</div>
+        <div class="ts-chart" id="ch-rrmax"></div>
+      </div>
+      <div class="dash-card" id="card-track">
+        <div class="dash-head"><span class="dash-title">TRACK FRACTION</span></div>
+        <div class="dash-sub">share of steps with a firm track</div>
+        <div class="ts-chart" id="ch-track"></div>
+      </div>
+      <div class="dash-card" id="card-rev">
+        <div class="dash-head"><span class="dash-title">BANK REVERSALS / MIN</span></div>
+        <div class="dash-sub">wing-rocking check: a few a minute is normal</div>
+        <div class="dash-sub" id="rev-hdg"></div>
+        <div class="ts-chart" id="ch-rev"></div>
+      </div>
+      <div class="dash-card" id="card-lost" style="display:none">
+        <div class="dash-head"><span class="dash-title">BLUE LOST / EPISODE</span></div>
+        <div class="dash-sub">2 v 1: blue aircraft lost per episode, 0–2</div>
+        <div class="ts-chart" id="ch-lost"></div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-head"><span class="dash-title">REWARD DRIVERS</span><button class="help-btn" onclick="help(this,'REWARD DRIVERS',
+              'Which part of the reward is actually moving it: the five shaping terms, plus the two costs.\n\nThe shaping reward is γ·Φ(s\') − Φ(s), and Φ is the weighted sum of five terms. These bars split that reward by term, using the mean ABSOLUTE contribution of each over the last ~5000 steps — so they show influence, not whether it was positive.\n\n• ENVELOPE (w=0.60) — being inside your launch envelope and out of his\n• TRACK (w=0.25) — holding a radar track\n• ENERGY (w=0.15) — energy advantage over the target\n• SUPPORT (w=0.30) — keeping a track while your own missile needs guidance\n• DEFENCE (w=0.80) — danger from the nearest inbound missile: 0 when none, falling towards −0.80 as its time-to-go runs out; turning away wins it back\n• HEADING — cost of changing the heading choice (0.015 per 180°); discourages wing-rocking\n• SHOTS — the missile doctrine\'s cost per missile fired\n\nHow to read it: one term near 100% means the others are not shaping behaviour at all, so the agent is optimising a single dimension. DEFENCE dominating alongside a rising timeout rate is the passivity collapse — it is being paid mostly to survive. TRACK near zero while track_frac is low means holding a track is not being rewarded enough to matter.\n\nThe split shifts with the curriculum: unarmed opponents cannot produce DEFENCE at all, so it should only appear from SHOOTER onward.')">?</button></div>
+        <div class="dash-sub">share of the shaping reward by term, last ~5000 steps</div>
+        <div id="term-bars" style="display:flex;flex-direction:column;gap:3px"></div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-head"><span class="dash-title">BY DOCTRINE</span><button class="help-btn" onclick="help(this,'BY DOCTRINE',
+                'Shots per episode and realised Pk under each missile doctrine, over the last 150 episodes (shown when the run trains more than one).\n\nIf the doctrine is being learned, shots fall and Pk rises from AGGRESSIVE to CONSERVATIVE. Identical rows mean the policy is still ignoring its doctrine input.')">?</button></div>
+        <div class="dash-sub">shots, Pk and win under each doctrine, last 150 episodes</div>
+        <div style="font-size:13px;line-height:1.7;color:var(--bright)" id="kv-doc">—</div>
       </div>
     </div>
+    <div class="dash-card" id="train-log-card">
+      <div class="dash-head" style="gap:8px;flex-wrap:wrap">
+        <span class="dash-title">TRAINING LOG</span>
+        <span class="badge amber" id="log-ep-badge" style="display:none">ep —</span>
+        <span class="badge green" id="log-rate-badge" style="display:none">— ep/min</span>
+        <span class="badge teal"  id="log-shots-badge" style="display:none"></span>
+        <span class="dash-sub" style="margin:0 0 0 auto">trainer, cross-play, library and calibration</span>
+      </div>
+      <div id="train-log-lines"><div class="log-info">Waiting for training to start...</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="max-backdrop"></div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- LEFT: canvases -->
+  <div id="left-col">
+    <div class="panel" id="panel-tac" style="flex:3">
+      <div class="ph">
+        <span>TACTICAL VIEW</span>
+        <span class="ph-right">
+          <span id="tac-info" style="font-size:11px;color:var(--text)"></span>
+          <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+        </span>
+      </div>
+      <div id="cv-tac" style="position:relative;overflow:hidden"></div>
+    </div>
+    <div class="vsplit" data-above="panel-tac" data-below="panel-alt" title="Drag to resize"></div>
+    <div class="panel" id="panel-alt" style="flex:1">
+      <div class="ph">
+        <span>ALTITUDE PROFILE</span>
+        <button class="ph-toggle" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+      </div>
+      <canvas id="cv-alt"></canvas>
+    </div>
+    <div class="vsplit" data-above="panel-alt" data-below="log-bar" title="Drag to resize"></div>
+
+    <!-- LOG -->
+    <div class="panel" id="log-bar">
+      <div id="log-header">
+        <span>EVAL LOG</span>
+        <button class="btn" id="btn-decisions"
+          style="font-size:11px;padding:2px 10px;margin-left:8px">📋 Shot Trace</button>
+        <button class="ph-toggle" style="margin-left:auto" onclick="panelToggle(this)" title="Hide this panel to reclaim screen space">▲ HIDE</button>
+      </div>
+      <div id="log-lines">
+        <div class="log-info">Evaluation output appears here.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hsplit" title="Drag to resize"></div>
+
+  <!-- RIGHT: controls -->
+  <div id="right-col">
 
     <!-- EVALUATION -->
     <div class="section" id="sec-eval">
@@ -685,14 +1074,46 @@ select option{background:#050810}
 
         <div class="field">
           <div class="field-label">
+            <span>EPISODES</span>
+            <button class="help-btn" onclick="help(this,'EPISODES',
+              'How many episodes to play before stopping by itself. Until stopped keeps going until you press STOP EVAL.\n\nThe WATCH STATISTICS panel below sums up the episodes of the current session. For hundreds of episodes use CROSS-PLAY instead: it runs without drawing, in parallel, far faster.')">?</button>
+          </div>
+          <select id="eval-episodes">
+            <option value="0">until stopped</option>
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
             <span>MISSILE DOCTRINE</span>
             <button class="help-btn" onclick="help(this,'MISSILE DOCTRINE (eval)',
               'The missile doctrine sets a reward cost for every missile fired, charged at launch. A shot is only worth taking when it raises the chance of a kill by more than about cost ÷ 1.5.\n\n• AGGRESSIVE — cost 0. Fires whenever in range, usually emptying the rack.\n• BALANCED — cost 0.10. Fires when a shot adds more than ~7% kill chance.\n• CONSERVATIVE — cost 0.30. Fires when a shot adds more than ~20%: closer, higher-Pk shots, and waits to see if the first missile hits.\n\nThe policy sees the doctrine as an input, so one model can fly all three\n\nOnly models trained with the doctrine input (MIXED or a fixed doctrine, after this feature was added) respond to it. An older checkpoint loads fine but flies the same under every doctrine.')">?</button>
           </div>
-          <select id="eval-doctrine">
+          <select id="eval-doctrine" style="margin-bottom:6px">
             <option value="AGGRESSIVE">AGGRESSIVE — cost 0</option>
             <option value="BALANCED" selected>BALANCED — cost 0.10</option>
             <option value="CONSERVATIVE">CONSERVATIVE — cost 0.30</option>
+          </select>
+          <div class="field-label" style="margin-top:4px">
+            <span>OPPONENT FLIES</span>
+            <button class="help-btn" onclick="help(this,'OPPONENT PLATFORM (eval)',
+              'The checkpoint always flies the platform it was trained on (stored in the checkpoint). This sets what the opponent flies; by default the opponent platform the checkpoint was trained against.')">?</button>
+          </div>
+          <select id="eval-opp-platform"><option value="">— checkpoint's training opponent —</option></select>
+          <div class="field-label" style="margin-top:6px">
+            <span>FORMAT</span>
+            <button class="help-btn" onclick="help(this,'FORMAT (eval)',
+              'By default a checkpoint is evaluated in the format it was trained in. 2 v 1 flies both blue aircraft with the checkpoint (the wingman on the checkpoint\'s wingman platform, or its own); a 2 v 1 checkpoint can also be watched in 1 v 1, where its wingman inputs read absent.')">?</button>
+          </div>
+          <select id="eval-format">
+            <option value="">— checkpoint's format —</option>
+            <option value="1v1">1 v 1</option>
+            <option value="2v1">2 v 1</option>
           </select>
         </div>
 
@@ -700,7 +1121,7 @@ select option{background:#050810}
           <div class="field-label">
             <span>CHECKPOINT TO LOAD</span>
             <button class="help-btn" onclick="help(this,'CHECKPOINT TO LOAD',
-              'The saved model file to load for evaluation.\n\nThe list is read live from your models_bvr/ folder — the most recent save is pre-selected. Pick an archive/best_* or archive/pre_* snapshot to evaluate an earlier checkpoint instead.\n\nSelect "random / untrained policy" to run without a trained model.')">?</button>
+              'The saved model file to load for evaluation.\n\nThe list is read live from your models_bvr/ folder — the most recent save is pre-selected. Pick an archive/best_* or archive/pre_* snapshot to evaluate an earlier checkpoint instead.\n\nSelect &quot;random / untrained policy&quot; to run without a trained model.')">?</button>
           </div>
           <select id="eval-ckpt">
             <option value="">— random / untrained policy —</option>
@@ -712,101 +1133,21 @@ select option{background:#050810}
           <button class="btn stop" id="btn-stop-eval" style="display:none;flex:1">■ STOP EVAL</button>
         </div>
 
-        <div style="font-size:11px;color:var(--dim);margin-top:8px">
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">
           After an episode, click 📋 Shot Trace in the log bar to review every missile launch.
         </div>
       </div>
     </div>
 
-    <!-- CROSS-PLAY -->
-    <div class="section" id="sec-xplay">
-      <div class="sec-head" onclick="toggle(this)">⚔ CROSS-PLAY EVALUATION<span>▲</span></div>
+    <!-- WATCH STATISTICS -->
+    <div class="section" id="sec-wstats">
+      <div class="sec-head" onclick="toggle(this)">📊 WATCH STATISTICS<span>▲</span></div>
       <div class="sec-body">
-        <div style="font-size:12px;color:var(--text);margin-bottom:10px;line-height:1.5">
-          Round-robin between saved checkpoints: every one against every other and itself, in both seats.
-          Shows whether later checkpoints really beat earlier ones.
+        <div style="display:flex;justify-content:flex-end;margin:-4px 0 2px">
+          <button class="help-btn" onclick="help(this,'WATCH STATISTICS',
+            'A summary of the episodes played since you last pressed START EVAL. Episodes stopped part-way are left out.\n\nWIN RATE shows a 95% range: with few episodes it is wide, so do not read much into 10 episodes.\n\nWATCH always takes the policy\'s single most likely action, while training samples its actions, so these numbers can differ from the training dashboard (usually higher).\n\nBY START GEOMETRY and BY START RANGE show where it wins and loses. ⇄ marks a mirrored start: the bandit has the start named (nose on while you are offset, you beaming, or you running with it behind). LOSS is shot down, MUT is a mutual kill, OTHER is escape or crash.')">?</button>
         </div>
-
-        <div class="field">
-          <div class="field-label">
-            <span>CHECKPOINTS</span>
-            <button class="help-btn" onclick="help(this,'CHECKPOINTS',
-              'Checkpoints to include. Each plays every other and itself, in both seats (AC1 row, AC2 column), with its own radar on each side and no truth.\n\nGames grow with the square of the count: 6 checkpoints and 2 scripted opponents at 40 games is 1,920 games. Older checkpoints (before the doctrine input) are widened automatically.')">?</button>
-            <span style="margin-left:auto;font-size:11px">
-              <a href="#" style="color:var(--blue)" onclick="xpSelect('all');return false">all</a> ·
-              <a href="#" style="color:var(--blue)" onclick="xpSelect('archive');return false">archive</a> ·
-              <a href="#" style="color:var(--blue)" onclick="xpSelect('none');return false">none</a>
-            </span>
-          </div>
-          <div id="xp-models"><div style="font-size:11px;color:var(--dim)">loading…</div></div>
-        </div>
-
-        <div class="field">
-          <div class="field-label">
-            <span>SCRIPTED COLUMNS</span>
-            <button class="help-btn" onclick="help(this,'SCRIPTED COLUMNS',
-              'Scripted opponents added as extra columns. They can only fly AC2, so they get a column but no row.\n\nThey anchor the Elo scale to fixed references: a checkpoint that beats every older checkpoint but not SHOOTER has learned to beat itself, not to fight.')">?</button>
-          </div>
-          <div class="xp-chk" id="xp-scripted">
-            <label><input type="checkbox" value="straight">STRAIGHT</label>
-            <label><input type="checkbox" value="evasive">EVASIVE</label>
-            <label><input type="checkbox" value="notcher">NOTCHER</label>
-            <label><input type="checkbox" value="shooter" checked>SHOOTER</label>
-            <label><input type="checkbox" value="adaptive_shooter" checked>ADAPTIVE</label>
-          </div>
-        </div>
-
-        <div class="row3">
-          <div class="field">
-            <div class="field-label"><span>GAMES / CELL</span>
-              <button class="help-btn" onclick="help(this,'GAMES PER CELL',
-                'Games per cell: how many engagements each ordered pairing plays. The ± shown in each cell is the 95% margin on its score.\n\n• 20 — quick look, about ±0.20\n• 40 — default, about ±0.12–0.15\n• 60–100 — to separate close versions\n\nEvery pairing replays the same start geometries (game i starts identically everywhere), so cells differ by policy, not luck.')">?</button></div>
-            <select id="xp-episodes" onchange="xpEstimate()">
-              <option value="20">20</option><option value="40" selected>40</option>
-              <option value="60">60</option><option value="100">100</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label"><span>WORKERS</span>
-              <button class="help-btn" onclick="help(this,'WORKERS',
-                'Parallel worker processes. Each plays whole games; use a little below your physical core count.\n\nCross-play competes with training for the same cores: running both at once slows both.')">?</button></div>
-            <select id="xp-workers" onchange="xpEstimate()">
-              <option>4</option><option>8</option><option>12</option><option>16</option>
-              <option selected>20</option><option>24</option><option>32</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label"><span>DOCTRINE</span></div>
-            <select id="xp-doctrine">
-              <option value="aggressive">AGGRESSIVE</option>
-              <option value="balanced" selected>BALANCED</option>
-              <option value="conservative">CONSERVATIVE</option>
-            </select>
-          </div>
-        </div>
-        <div id="xp-estimate" style="font-size:11px;color:var(--amber);margin:-4px 0 8px"></div>
-
-        <div class="btn-row">
-          <button class="btn go"   id="btn-xplay" style="flex:1">▶ RUN CROSS-PLAY</button>
-          <button class="btn stop" id="btn-stop-xplay" style="display:none;flex:1">■ STOP</button>
-        </div>
-        <div id="xp-progress" style="display:none;margin-top:8px">
-          <div style="height:8px;background:var(--card);border:1px solid var(--border)">
-            <div id="xp-bar" style="height:100%;width:0%;background:#c79bff"></div></div>
-          <div id="xp-progress-txt" style="font-size:11px;color:var(--text);margin-top:3px"></div>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:6px;margin-top:12px">
-          <span style="font-size:12px;letter-spacing:1px;color:var(--bright);font-weight:bold">RESULTS</span>
-          <button class="help-btn" onclick="help(this,'CROSS-PLAY RESULTS',
-            'Each cell is the ROW checkpoint\'s score flying AC1 against the COLUMN player flying AC2: win 1, draw 0.5, loss 0.\n\nWin = kill or the enemy crashes. Loss = shot down or own crash. Draw = mutual kill, timeout or escape.\n\nHow to read it:\n• The dashed diagonal (a policy against itself) should be near 0.50.\n• Seat bias is the AC1 seat\'s advantage on mirrored matchups; near 0 means the seats are fair.\n• A later checkpoint is better only if its Elo gap is larger than the ± margins.\n• Hover a cell for wins-draws-losses and shots per game.')">?</button>
-          <span id="xp-meta" style="font-size:10px;color:var(--dim);margin-left:auto"></span>
-          <button class="btn" style="padding:1px 7px;font-size:11px" title="Open the results full-screen (Esc closes)"
-                  onclick="document.getElementById('xp-results').classList.toggle('wide')">⤢</button>
-        </div>
-        <div id="xp-results" style="overflow-x:auto">
-          <div style="font-size:11px;color:var(--dim)">no cross-play run yet</div>
-        </div>
+        <div id="ws-body"><div style="color:var(--muted);font-size:12px">Start an eval to collect statistics.</div></div>
       </div>
     </div>
 
@@ -815,7 +1156,7 @@ select option{background:#050810}
       <div class="sec-head" onclick="toggle(this)">🎯 LIVE ENGAGEMENT<span>▲</span></div>
       <div class="sec-body">
         <div id="hud-text">
-          <div style="color:var(--dim);font-size:12px">Start an eval episode to see live data.</div>
+          <div style="color:var(--muted);font-size:12px">Start an eval episode to see live data.</div>
         </div>
       </div>
     </div>
@@ -830,7 +1171,7 @@ select option{background:#050810}
       <h2>📋 SHOT DECISION TRACE</h2>
       <span style="cursor:pointer;color:var(--red);font-size:16px" id="modal-close">✕</span>
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.5">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
       Every missile launch in the last eval episode. Shows where, when, and in what track quality the agent decided to shoot.
       Ideal shot: TRACK state · pos σ &lt;500m · r/Rmax between 0.5 and 0.9.
     </div>
@@ -873,7 +1214,7 @@ let ws, wsRetry = 0;
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen  = () => { document.getElementById('ws-dot').style.color='var(--green)'; wsRetry=0;
-                       addLog('[status] Connected.','log-info'); };
+                       addLog('[status] Connected.','log-info','both'); };
   ws.onclose = () => { document.getElementById('ws-dot').style.color='var(--red)';
                        setTimeout(connect, Math.min(5000, 500*++wsRetry)); };
   ws.onmessage = e => { try { handle(JSON.parse(e.data)); } catch(x) { console.warn(x); } };
@@ -928,7 +1269,7 @@ let followAC=null;       // null | 1 | 2  — which aircraft to follow
 let _projOwn=null, _projTgt=null;  // projected screen positions for hit testing
 // Smoothed envelope radii (prevent jitter)
 let sRmax=0, sRnez=0, sRmaxT=0;
-const tacBuf1=[], tacBuf2=[], tacBuf3d1=[], tacBuf3d2=[], tacMsls={}, altBuf1=[], altBuf2=[];
+const tacBuf1=[], tacBuf2=[], tacBuf3d1=[], tacBuf3d2=[], tacMsls={}, altBuf1=[], altBuf2=[], altBuf3=[];
 const wrHist=[];
 let totalSteps=2000000, epStartTime=Date.now(), epCount=0, stepsDone=0;
 const TRACK_N=['NONE','ACQUIRING','TRACK','COAST'];
@@ -939,16 +1280,17 @@ function handle(m) {
   if(m.type==='status')    setState(m);
   if(m.type==='telemetry') handleFrame(m.data);
   if(m.type==='metrics')   handleMetrics(m.data);
-  if(m.type==='log')       handleLog(m.msg);
+  if(m.type==='log')       handleLog(m.msg, m.src);
   if(m.type==='episode_end') onEpEnd(m.meta);
   if(m.type==='crossplay_progress') xpProgress(m);
   if(m.type==='crossplay_done') { xpLoadResults(); refreshModelList(); }
+  if(m.type==='calibrate_progress' || m.type==='calibrate_done') onCalibrate(m);
 }
 
 // Training (a subprocess) and eval (a thread in the server) are independent
 // and may run at once, so the server sends a flag for each rather than one
 // state word. appState stays as the derived label the progress/ETA code reads.
-let isTraining=false, isEval=false, isXplay=false;
+let isTraining=false, isEval=false, isXplay=false, lastStatusMsg=null;
 function setState(st) {
   const wasTraining=isTraining, wasEval=isEval;
   isTraining = !!st.training;
@@ -964,7 +1306,15 @@ function setState(st) {
   if(isXplay) { txt = (txt==='IDLE' ? '' : txt+' + ') + 'CROSS-PLAY'; if(cls==='idle') cls='eval'; }
   p.className = 'pill '+cls; p.textContent = txt;
 
-  if(st.msg) addLog('[status] '+st.msg, 'log-info');
+  // Every status push repeats the last message; log it only when it changes,
+  // in the log of whichever activity it is about.
+  if(st.msg && st.msg!==lastStatusMsg) {
+    lastStatusMsg=st.msg;
+    addLog('[status] '+st.msg, 'log-info', /^eval/i.test(st.msg) ? 'watch' : 'train');
+  }
+  if('run' in st) { RUN=st.run; }
+  if('code' in st) { CODE=st.code; renderCodeWarn(); }
+  renderRun();
   document.getElementById('btn-train').style.display      = isTraining ? 'none' : '';
   document.getElementById('btn-stop-train').style.display = isTraining ? ''     : 'none';
   document.getElementById('btn-eval').style.display       = isEval    ? 'none' : '';
@@ -972,6 +1322,7 @@ function setState(st) {
   document.getElementById('btn-xplay').style.display      = isXplay   ? 'none' : '';
   document.getElementById('btn-stop-xplay').style.display = isXplay   ? ''     : 'none';
   document.getElementById('xp-progress').style.display    = isXplay   ? ''     : 'none';
+  if (!isXplay) document.getElementById('xp-tab-prog').textContent = '';
   // A training run only writes its final model on exit, and eval-loaded
   // checkpoints don't change the dir at all — refresh right when either one
   // stops so a just-finished run's model shows up without a page reload.
@@ -996,7 +1347,7 @@ function xpRenderModels(models) {
       <input type="checkbox" data-p="${esc(m.path)}" ${xpChecked.has(m.path)?'checked':''}
              onchange="this.checked?xpChecked.add(this.dataset.p):xpChecked.delete(this.dataset.p);xpEstimate()">
       ${esc(m.path)}<span class="m">${fmtSize(m.size)} · ${fmtAgo(m.mtime)}</span></label>`).join('')
-    : '<div style="font-size:11px;color:var(--dim)">no checkpoints in the model folder</div>';
+    : '<div style="font-size:11px;color:var(--muted)">no checkpoints in the model folder</div>';
   xpEstimate();
 }
 function xpSelect(which) {
@@ -1021,6 +1372,8 @@ function xpEstimate() {
 }
 document.getElementById('xp-scripted').addEventListener('change', xpEstimate);
 function xpProgress(m) {
+  // the tab carries the progress too, so a run can be followed from the console
+  document.getElementById('xp-tab-prog').textContent = `${(100 * m.done / Math.max(m.total, 1)).toFixed(0)}%`;
   document.getElementById('xp-progress').style.display = '';
   document.getElementById('xp-bar').style.width = (100 * m.done / Math.max(m.total, 1)).toFixed(1) + '%';
   document.getElementById('xp-progress-txt').textContent = m.msg.replace('[crossplay] ', '');
@@ -1037,14 +1390,14 @@ async function xpLoadResults() {
   const cfg = d.config || {};
   document.getElementById('xp-meta').textContent =
     `${d.finished || ''} · ${cfg.episodes || '?'} games/cell · ${(cfg.doctrine || '').toUpperCase()}`;
-  // Checkpoints are numbered so columns stay narrow in the side panel; the
-  // names are on the rows, and every header and cell has a full tooltip.
+  // Checkpoints are numbered so columns stay narrow; the names are on the
+  // rows, and every header and cell has a full tooltip.
   const num = {}; d.rows.forEach((r, k) => num[r] = k + 1);
   const short = c => num[c] ? '#' + num[c] : c.replace('ADAPTIVE_SHOOTER', 'ADAPT').slice(0, 5);
-  const head = '<tr><th class="r" style="color:var(--dim)">AC1 ↓ · AC2 →</th>'
+  const head = '<tr><th class="r" style="color:var(--muted)">AC1 ↓ · AC2 →</th>'
     + d.cols.map(c => `<th title="${esc(c)}">${esc(short(c))}</th>`).join('') + '</tr>';
   const body = d.rows.map(r => '<tr><th class="r" title="' + esc(r) + '">'
-    + `<span style="color:#c79bff">#${num[r]}</span><span class="xp-rowname"> ${esc(r)}</span>` + '</th>'
+    + `<span style="color:#c79bff">#${num[r]}</span><span> ${esc(r)}</span>` + '</th>'
     + d.cols.map(c => {
         const x = d.cells[`${r} | ${c}`];
         if (!x) return '<td>—</td>';
@@ -1055,17 +1408,15 @@ async function xpLoadResults() {
       }).join('') + '</tr>').join('');
   const elo = Object.entries(d.elo || {}).sort((a, b) => b[1] - a[1]);
   const lo = Math.min(...elo.map(e => e[1])), hi = Math.max(...elo.map(e => e[1]));
-  const eloHtml = elo.map(([p, v]) => `<div style="display:flex;align-items:center;gap:6px;font-size:11px">
-      <span class="xp-elo-name" style="width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p)}">${num[p] ? `<span style="color:#c79bff">#${num[p]}</span> ` : ''}${esc(p)}</span>
+  const eloHtml = elo.map(([p, v]) => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;max-width:760px;padding:2px 0">
+      <span class="xp-elo-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p)}">${num[p] ? `<span style="color:#c79bff">#${num[p]}</span> ` : ''}${esc(p)}</span>
       <div style="flex:1;height:8px;background:var(--card)"><div style="height:100%;width:${(12 + 88 * (v - lo) / Math.max(hi - lo, 1)).toFixed(0)}%;background:#c79bff"></div></div>
       <span style="width:38px;text-align:right;color:var(--bright)">${v.toFixed(0)}</span></div>`).join('');
   const sb = d.seat_bias || 0;
-  el.innerHTML = `<div class="xp-close" style="text-align:right"><a href="#" style="color:var(--blue);font-size:12px"
-      onclick="document.getElementById('xp-results').classList.remove('wide');return false">close ✕</a></div>
-    <table id="xp-table">${head}${body}</table>
+  el.innerHTML = `<table id="xp-table">${head}${body}</table>
     <div style="font-size:11px;margin:8px 0 4px;color:${Math.abs(sb) > 0.05 ? 'var(--amber)' : 'var(--text)'}">
-      Seat bias ${sb >= 0 ? '+' : ''}${sb.toFixed(3)}${Math.abs(sb) > 0.05 ? ' — larger than expected; add games or check the seats' : ' (fair)'}</div>
-    <div style="font-size:12px;color:var(--bright);font-weight:bold;margin:8px 0 4px">ELO <span style="font-weight:normal;font-size:10px;color:var(--dim)">(mean 1000)</span></div>
+      Seat bias ${sb >= 0 ? '+' : ''}${sb.toFixed(3)}: how far the AC1 seat scores above 0.5 on the same starts played both ways. It cancels in the head-to-head scores and Elo, since every pairing is played from both seats. ${Math.abs(sb) > 0.05 ? 'Starts are mirrored half the time, so a bias this large usually means few games per cell, or checkpoints that react differently to the first seconds of a start.' : '(fair)'}</div>
+    <div style="font-size:12px;color:var(--bright);font-weight:bold;margin:8px 0 4px">ELO <span style="font-weight:normal;font-size:11px;color:var(--muted)">(mean 1000)</span></div>
     ${eloHtml}`;
 }
 document.getElementById('btn-xplay').onclick = () => {
@@ -1074,7 +1425,8 @@ document.getElementById('btn-xplay').onclick = () => {
   const config = {models, scripted: xpScripted(),
     episodes: parseInt(document.getElementById('xp-episodes').value) || 40,
     workers:  parseInt(document.getElementById('xp-workers').value) || 8,
-    doctrine: document.getElementById('xp-doctrine').value};
+    doctrine: document.getElementById('xp-doctrine').value,
+    scripted_platform: document.getElementById('xp-scripted-platform').value || undefined};
   if (isTraining && !confirm('Training is running. Cross-play uses the same CPU cores, so both will slow down. Start anyway?')) return;
   document.getElementById('xp-bar').style.width = '0%';
   document.getElementById('xp-progress-txt').textContent = 'starting workers…';
@@ -1088,27 +1440,650 @@ document.getElementById('btn-stop-xplay').onclick = () => {
 };
 xpLoadResults();
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') document.getElementById('xp-results').classList.remove('wide');
+  if (e.key === 'Escape') closeHelp();
 });
 
-// ─── Log ─────────────────────────────────────────────────────────
-const MAX_LOG=150; let logArr=[];
-function addLog(msg, cls='log-info') {
-  logArr.push({msg,cls});
-  if(logArr.length>MAX_LOG) logArr.shift();
-  const el=document.getElementById('log-lines');
-  el.innerHTML=logArr.map(l=>`<div class="${l.cls}">${esc(l.msg)}</div>`).join('');
-  el.scrollTop=el.scrollHeight;
+// ─── Display units ───────────────────────────────────────────────
+// Everything is stored and computed in SI; this only changes what is shown.
+// Aviation: altitude ft, distance nm, speed kt, vertical speed ft/min.
+let UNITS = 'si';
+try { UNITS = localStorage.getItem('bvr_units') === 'avi' ? 'avi' : 'si'; } catch (e) {}
+const FT = 3.28084, KT = 1.943844, NM = 1852;
+const nfmt = (x, d = 0) => Number(x).toLocaleString('en-US', {minimumFractionDigits: d, maximumFractionDigits: d});
+const U = {
+  alt:  (m, d = 0) => UNITS === 'si' ? `${nfmt(m, d)} m` : `${nfmt(m * FT, 0)} ft`,
+  // an altitude used as a label ("9 km"): km in SI, feet rounded to 100 in aviation units
+  altLbl: m => UNITS === 'si' ? (m < 1000 ? `${nfmt(m)} m` : `${nfmt(m / 1000, m % 1000 ? 1 : 0)} km`)
+                              : `${nfmt(Math.round(m * FT / 100) * 100)} ft`,
+  dist: (m, d = 1) => UNITS === 'si' ? `${nfmt(m / 1000, d)} km` : `${nfmt(m / NM, d)} nm`,
+  spd:  (v, d = 0) => UNITS === 'si' ? `${nfmt(v, d)} m/s` : `${nfmt(v * KT, d)} kt`,
+  vs:   v => UNITS === 'si' ? `${nfmt(v)} m/s` : `${nfmt(v * FT * 60)} ft/min`,
+};
+function toggleUnits() {
+  UNITS = UNITS === 'si' ? 'avi' : 'si';
+  try { localStorage.setItem('bvr_units', UNITS); } catch (e) {}
+  applyUnits();
 }
+function applyUnits() {
+  document.getElementById('units-btn').textContent = UNITS === 'si' ? 'm · m/s' : 'ft · kt';
+  if (typeof lastMetrics !== 'undefined' && lastMetrics) handleMetrics(lastMetrics);
+  if (libPerf) renderPerf(libPerf);
+  refreshUnitHints();
+}
+setTimeout(applyUnits, 0);
+
+// ─── Library ─────────────────────────────────────────────────────
+let VIEW = 'train';
+function showView(v) {
+  if (v !== 'library' && !libConfirmLeave()) return;
+  VIEW = v;
+  const views = {train: 'train-view', watch: 'main', xplay: 'xplay-view', library: 'library-view'};
+  for (const [k, id] of Object.entries(views))
+    document.getElementById(id).style.display = v === k ? 'flex' : 'none';
+  for (const t of Object.keys(views))
+    document.getElementById('tab-' + t).classList.toggle('on', v === t);
+  if (v === 'library') loadLibrary();
+  if (v === 'xplay') xpLoadResults();
+  // Hidden views have no size: lay out the one just shown.
+  if (v === 'watch') setTimeout(resize, 0);
+  if (v === 'train') setTimeout(drawDash, 0);
+}
+const KIND_TITLE = {platform: 'PLATFORMS', airframe: 'AIRFRAMES', radar: 'RADARS', missile: 'MISSILES'};
+let LIB = null, libSel = null, libCur = null, libPerf = null, libDirty = false;
+let libBase = null;   // the item a user copy was made from: its curves are drawn as the reference
+function libSetDirty(v) {
+  libDirty = v;
+  const el = document.getElementById('lib-dirty'); if (el) el.style.display = v ? 'inline' : 'none';
+}
+function libConfirmLeave() {
+  if (!libDirty) return true;
+  if (!confirm(`Discard your unsaved changes to "${libCur.item.id}"?`)) return false;
+  libSetDirty(false); return true;
+}
+
+// Why the platform lists are empty, if they are; shown under ENGAGEMENT.
+let LIB_ERR=null;
+async function loadLibrary() {
+  let d;
+  try {
+    const r = await fetch('/library');
+    d = await r.json();
+    if (!r.ok || d.error || !Array.isArray(d.items))
+      throw new Error(d.error || `HTTP ${r.status}`);
+  } catch (e) {
+    LIB_ERR = `The library could not be read from the server (${e.message}). `
+      + `See the server console for the error; a stale or edited bvr_library.py is a common cause.`;
+    addLog('Library: '+LIB_ERR, 'log-err');
+    refreshPlatformSelects();
+    return;
+  }
+  LIB = d; LIB_ERR = null;
+  for (const p of (LIB.problems || [])) addLog('Library: '+p, 'log-warn');
+  const box = document.getElementById('lib-list');
+  box.innerHTML = Object.keys(KIND_TITLE).map(k => {
+    const items = LIB.items.filter(i => i.kind === k);
+    return `<h4>${KIND_TITLE[k]}</h4>` + items.map(i => {
+      const cal = k === 'missile' ? (LIB.calibrated[i.id] ? ' <span class="b" title="launch envelope calibrated">✓ cal</span>'
+                                                         : ' <span class="b" style="color:var(--amber)" title="not calibrated">✗ cal</span>') : '';
+      const sel = libSel && libSel.kind === k && libSel.id === i.id ? ' sel' : '';
+      return `<div class="lib-item${sel}" onclick="openItem('${k}','${esc(i.id)}')">${i.builtin ? '🔒' : '✎'}
+        <span>${esc(i.name)}</span>${cal}</div>`;
+    }).join('');
+  }).join('');
+  refreshPlatformSelects();
+}
+
+function refreshPlatformSelects() {
+  const plats = LIB ? LIB.items.filter(i => i.kind === 'platform') : [];
+  if (LIB && !plats.length && !LIB_ERR)
+    LIB_ERR = `No platforms found in ${LIB.library_dir || 'the library folder'}/builtin/platform or user/platform.`
+      + ((LIB.problems||[]).length ? ' Problems: ' + LIB.problems.join('; ') : '');
+  const fill = (id, keepBlank, dflt) => {
+    const el = document.getElementById(id); if (!el) return;
+    if (!plats.length) {
+      // Say so in the list itself rather than showing an empty dropdown.
+      if (!keepBlank) el.innerHTML = '<option value="" disabled selected>— no platforms found —</option>';
+      return;
+    }
+    const prev = el.value;
+    const blank = keepBlank && el.options.length && el.options[0].value === '' ? el.options[0].outerHTML : '';
+    el.innerHTML = blank + plats.map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('');
+    el.value = plats.some(p => p.id === prev) || (keepBlank && prev === '') ? prev : (dflt || '');
+  };
+  fill('cfg-platform', false, 'F-16C');
+  fill('cfg-opp-platform', false, 'F-16C');
+  fill('cfg-wing-platform', true, '');
+  fill('eval-opp-platform', true, '');
+  fill('xp-scripted-platform', true, '');
+  engageCheck();
+}
+
+function engageCheck() {
+  const a = document.getElementById('cfg-platform').value, b = document.getElementById('cfg-opp-platform').value;
+  const opp = document.getElementById('cfg-opponent').value;
+  const w = document.getElementById('cfg-engage-warn');
+  const team = document.getElementById('cfg-format').value === '2v1';
+  document.getElementById('cfg-wing-row').style.display = team ? '' : 'none';
+  document.getElementById('cfg-plat-lbl').textContent = team ? 'LEAD FLIES' : 'AGENT FLIES';
+  w.style.color = LIB_ERR ? 'var(--red)' : 'var(--amber)';
+  if (LIB_ERR) {
+    w.textContent = '⚠ ' + LIB_ERR;
+  } else if (team) {
+    w.textContent = opp === 'self_play'
+      ? '⚠ 2 v 1 has no self-play stage yet; pick a scripted stage.'
+      : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.'
+        + (a && b && a !== b ? ' Blue and red fly different platforms: if blue is outmatched it may never reach 65%; consider a lower ADVANCE AT.' : '');
+  } else if (a && b && a !== b) {
+    w.textContent = opp === 'self_play'
+      ? '⚠ self-play needs both sides on the same platform; pick another stage.'
+      : 'Different platforms: self-play does not apply, so the curriculum ends at ADAPTIVE SHOOTER. If one side is outmatched it may never reach 65%: consider a lower ADVANCE AT.';
+  } else w.textContent = '';
+  spCheck();
+}
+
+// The SELF-PLAY section applies only when this run can reach the stage.
+function spCheck() {
+  const a = document.getElementById('cfg-platform').value, b = document.getElementById('cfg-opp-platform').value;
+  const opp = document.getElementById('cfg-opponent').value;
+  const team = document.getElementById('cfg-format').value === '2v1';
+  const curr = document.getElementById('cfg-curriculum').value === '1';
+  const why = team ? '2 v 1 has no self-play stage yet'
+    : (a && b && a !== b) ? 'the two sides fly different platforms'
+    : (!curr && opp !== 'self_play') ? 'the auto-curriculum is OFF and the run does not start at SELF_PLAY'
+    : '';
+  const box = document.getElementById('cfg-sp-box');
+  box.classList.toggle('off', !!why);
+  box.querySelectorAll('input').forEach(el => el.disabled = !!why);
+  document.getElementById('cfg-sp-note').textContent = why
+    ? `Not used in this run: ${why}.`
+    : 'Used once the run reaches SELF_PLAY.';
+  return !why;
+}
+
+async function openItem(kind, id) {
+  if (!(libSel && libSel.kind === kind && libSel.id === id && !libDirty) && !libConfirmLeave()) return;
+  libSel = {kind, id}; libPerf = null;
+  let d;
+  try { d = await (await fetch(`/library/item?kind=${kind}&id=${encodeURIComponent(id)}`)).json(); }
+  catch (e) { return; }
+  libBase = null;
+  if (d.item && d.item.based_on) {
+    try {
+      const b = await (await fetch(`/library/item?kind=${kind}&id=${encodeURIComponent(d.item.based_on)}`)).json();
+      if (b.item) libBase = b.item;
+    } catch (e) {}
+  }
+  libCur = d;
+  document.querySelectorAll('.lib-item').forEach(el => el.classList.remove('sel'));
+  document.querySelectorAll('.lib-item').forEach(el => {
+    if (el.getAttribute('onclick') === `openItem('${kind}','${id}')`) el.classList.add('sel');
+  });
+  renderItem();
+}
+
+function fmtVal(p, v) {
+  if (p.kind === 'table') return v.map(r => `${r[0]}, ${r[1]}`).join('\n');
+  if (p.kind === 'list') return v.join(', ');
+  return v;
+}
+
+function renderItem() {
+  const d = libCur, it = d.item, ro = it.builtin;
+  const schema = LIB.schema[it.kind];
+  const groups = [];
+  for (const p of schema) {
+    let g = groups.find(x => x.name === p.group);
+    if (!g) groups.push(g = {name: p.group, adv: true, ps: []});
+    g.ps.push(p); if (!p.advanced) g.adv = false;
+  }
+  const refOpts = (kind, cur) => LIB.items.filter(i => i.kind === kind)
+      .map(i => `<option value="${esc(i.id)}" ${i.id === cur ? 'selected' : ''}>${esc(i.id)}</option>`).join('');
+  const row = p => {
+    const v = it.params[p.key], src = (it.sources || {})[p.key] || '';
+    let inp;
+    if (p.kind === 'ref') inp = ro ? `<input readonly value="${esc(v)}">`
+        : `<select data-k="${p.key}">${refOpts(p.ref, v)}</select>`;
+    else if (p.kind === 'table') inp = `<textarea data-k="${p.key}" rows="${Math.min(v.length, 8)}" ${ro ? 'readonly' : ''}>${esc(fmtVal(p, v))}</textarea>`;
+    else inp = `<input data-k="${p.key}" value="${esc(String(fmtVal(p, v)))}" ${ro ? 'readonly' : ''}
+                oninput="libCheck(this)">`;
+    const range = p.lo != null ? `${p.lo} – ${p.hi}` : '';
+    const help = p.help ? `<div class="lib-help">${esc(p.help)}</div>` : '';
+    const srcCell = ro ? esc(src) : `<input data-src="${p.key}" value="${esc(src)}" placeholder="where this value comes from">`;
+    const hint = p.unit === 'm' || p.unit === 'm/s' ? `<div class="u-hint" data-hint="${p.key}"></div>` : '';
+    const chart = CHARTS[p.key] ? `<tr><td colspan="5" class="chart-cell"><div class="lib-chart" data-chart="${p.key}"></div></td></tr>` : '';
+    return `<tr><td class="l">${esc(p.label)}${help}</td><td class="v">${inp}</td><td class="u">${esc(p.unit)}${hint}</td>
+            <td class="r">${range}</td><td class="s">${srcCell}</td></tr>${chart}`;
+  };
+  const groupChart = g => GROUP_CHARTS[it.kind + '/' + g.name]
+      ? `<div class="lib-chart" data-chart="${GROUP_CHARTS[it.kind + '/' + g.name]}" style="margin:8px 8px 10px"></div>` : '';
+  const body = groups.map(g => `<details class="lib-grp" ${g.adv ? '' : 'open'}><summary>${esc(g.name.toUpperCase())}${g.adv ? ' (advanced)' : ''}</summary>
+      <table class="lib-tbl"><thead><tr><th>Parameter</th><th>Value</th><th>Unit</th><th>Valid range</th>
+        <th>Source</th></tr></thead><tbody>${g.ps.map(row).join('')}</tbody></table>${groupChart(g)}</details>`).join('');
+  const perfBtn = (it.kind === 'airframe' || it.kind === 'platform')
+      ? `<button class="btn" onclick="libPerfCard()">▶ Performance card</button>` : '';
+  const calBtn = it.kind === 'missile'
+      ? `<button class="btn" onclick="libCalibrate()">⟳ Calibrate envelope</button>
+         <span id="lib-cal" style="font-size:11px;color:${d.calibrated ? 'var(--green)' : 'var(--amber)'}">
+           ${d.calibrated ? 'calibrated for these parameters' : 'NOT calibrated: training with this missile is refused until it is'}</span>` : '';
+  const usedBy = d.used_by && d.used_by.length ? `<div style="font-size:11px;color:var(--muted)">used by platform(s): ${d.used_by.map(esc).join(', ')}</div>` : '';
+  document.getElementById('lib-detail').innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+      <h2>${ro ? esc(it.name) : `<input id="lib-name" value="${esc(it.name)}" style="font-size:15px;width:420px;background:var(--card);color:var(--bright);border:1px solid var(--border)">`}</h2>
+      <span class="badge ${ro ? 'bi' : 'us'}">${ro ? 'BUILT-IN · READ-ONLY' : 'USER COPY'}</span></div>
+    <div style="font-size:11px;color:var(--muted);margin:2px 0 6px">${esc(it.kind)} · id <b>${esc(it.id)}</b>
+      ${it.based_on ? ` · copied from ${esc(it.based_on)}` : ''} · parameter fingerprint ${d.fingerprint}</div>
+    ${ro ? `<div style="font-size:12px;max-width:800px;line-height:1.5">${esc(it.description || '')}</div>`
+         : `<textarea id="lib-desc" rows="2" style="width:100%;max-width:800px;background:var(--card);color:var(--text);border:1px solid var(--border);font-size:12px">${esc(it.description || '')}</textarea>`}
+    ${usedBy}
+    <div class="btn-row" style="margin:8px 0;flex-wrap:wrap;align-items:center">
+      <button class="btn" onclick="libCopy()">⧉ Copy…</button>
+      ${ro ? '' : '<button class="btn go" style="padding:4px 12px;font-size:12px" onclick="libSave()">✔ Save</button><button class="btn stop" style="padding:4px 12px;font-size:12px" onclick="libDelete()">✕ Delete</button><span id="lib-dirty">● unsaved changes</span>'}
+      ${perfBtn} ${calBtn}
+    </div>
+    <div id="lib-errors">${(d.errors || []).map(esc).join('<br>')}</div>
+    ${body}
+    <div id="lib-perf"></div>`;
+  if (libPerf) renderPerf(libPerf);
+  libSetDirty(false);
+  if (!ro) document.getElementById('lib-detail').querySelectorAll('input,select,textarea')
+      .forEach(el => el.addEventListener('input', () => { libSetDirty(true); refreshUnitHints(el); libDrawCharts(el); }));
+  refreshUnitHints();
+  libDrawCharts();
+}
+
+function libCheck(el) {
+  const p = LIB.schema[libCur.item.kind].find(x => x.key === el.dataset.k);
+  if (!p || p.kind === 'list') return;
+  const x = parseFloat(el.value);
+  el.classList.toggle('bad', !(isFinite(x) && (p.lo == null || (x >= p.lo && x <= p.hi))));
+}
+
+function libCollect() {
+  const it = JSON.parse(JSON.stringify(libCur.item));
+  delete it.builtin;
+  it.name = document.getElementById('lib-name').value.trim() || it.id;
+  it.description = document.getElementById('lib-desc').value;
+  it.sources = it.sources || {};
+  for (const p of LIB.schema[it.kind]) {
+    const el = document.querySelector(`#lib-detail [data-k="${p.key}"]`);
+    if (el) {
+      const raw = el.value;
+      if (p.kind === 'ref') it.params[p.key] = raw;
+      else if (p.kind === 'table') it.params[p.key] = raw.split('\n').map(l => l.trim()).filter(Boolean)
+          .map(l => l.split(/[,;\s]+/).map(Number));
+      else if (p.kind === 'list') it.params[p.key] = raw.split(/[,;\s]+/).filter(Boolean).map(Number);
+      else it.params[p.key] = Number(raw);
+    }
+    const se = document.querySelector(`#lib-detail [data-src="${p.key}"]`);
+    if (se) it.sources[p.key] = se.value;
+  }
+  return it;
+}
+
+async function libPost(path, body) {
+  const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify(body)});
+  return r.json();
+}
+async function libSave() {
+  const r = await libPost('/library/save', {item: libCollect()});
+  if (!r.ok) { document.getElementById('lib-errors').innerHTML = esc(r.error).split('; ').join('<br>'); return; }
+  addLog(`Library: saved ${libCur.item.kind} ${libCur.item.id}`, 'log-ok');
+  libSetDirty(false);
+  await loadLibrary(); openItem(libSel.kind, libSel.id);
+}
+async function libCopy() {
+  if (!libConfirmLeave()) return;
+  const it = libCur.item;
+  const nid = prompt(`New id for the copy of ${it.id} (letters, digits, - _ .):`, `${it.id}-copy`);
+  if (!nid) return;
+  const name = prompt('Name for the copy:', `${it.name} (copy)`) || undefined;
+  const r = await libPost('/library/copy', {kind: it.kind, id: it.id, new_id: nid.trim(), new_name: name});
+  if (!r.ok) { alert(r.error); return; }
+  addLog(`Library: copied ${it.kind} ${it.id} → ${nid}`, 'log-ok');
+  await loadLibrary(); openItem(it.kind, nid.trim());
+}
+async function libDelete() {
+  const it = libCur.item;
+  if (!confirm(`Delete ${it.kind} "${it.id}"? This cannot be undone.`)) return;
+  libSetDirty(false);
+  const r = await libPost('/library/delete', {kind: it.kind, id: it.id});
+  if (!r.ok) { alert(r.error); return; }
+  libSel = null; libCur = null;
+  await loadLibrary();
+  document.getElementById('lib-detail').innerHTML = '<div style="color:var(--muted)">deleted</div>';
+}
+async function libPerfCard() {
+  const it = libCur.item;
+  document.getElementById('lib-perf').innerHTML = '<div style="color:var(--amber)">flying test manoeuvres… (about 5 s)</div>';
+  let c;
+  try { c = await (await fetch(`/library/perf?kind=${it.kind}&id=${encodeURIComponent(it.id)}`)).json(); }
+  catch (e) { return; }
+  if (c.error) { document.getElementById('lib-perf').innerHTML = `<div style="color:var(--red)">${esc(c.error)}</div>`; return; }
+  libPerf = c; renderPerf(c);
+}
+function renderPerf(c) {
+  // One bordered box per test, each with a title, a line saying what was
+  // flown, column headers and row lines, so no two tables run together.
+  const km = a => U.altLbl(a);
+  const st = x => x == null ? 'never' : `${x.toFixed(0)} s`;
+  const si = UNITS === 'si', vu = si ? 'm/s' : 'kt', vn = v => si ? v : v * KT;
+  const sgn = x => (x >= 0 ? '+' : '−') + nfmt(Math.abs(vn(x)), 1) + ' ' + vu;
+  const box = (title, sub, head, rows) => `<div class="perf-box">
+      <div class="perf-title">${title}</div><div class="perf-sub">${sub}</div>
+      <table class="perf-tbl"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r => `<tr>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const cl = c.climb_3km_from_5km, ap = c.autopilot;
+  const speedRows = [];
+  for (const [a, steps] of Object.entries(c.speed_hold || {}))
+    steps.slice(1).forEach((x, i) => speedRows.push([i ? '' : km(+a), `${nfmt(vn(x.from))} → ${U.spd(x.to)}`,
+      sgn(x.steady_error), U.spd(x.overshoot, 1), st(x.settle_s)]));
+  document.getElementById('lib-perf').innerHTML = `
+    <div class="perf-head">PERFORMANCE CARD <span>the flight model flown with these parameters</span></div>
+    ${c.warnings.length ? `<div class="perf-warn">${c.warnings.map(w => '⚠ ' + esc(w)).join('<br>')}</div>`
+                        : '<div class="perf-ok">✔ no problems found</div>'}
+    <div class="perf-grid">
+      ${box('TOP SPEED', 'level flight, full throttle', ['Altitude', 'Speed', 'Mach'],
+            Object.entries(c.top_speed).map(([a, v]) => [km(+a), U.spd(v.speed), v.mach.toFixed(2)]))}
+      ${box('MAX-BANK TURN', `40 s level turn at ${U.spd(c.turn_speed_ref)}; rate over the last 10 s`,
+            ['Altitude', 'Turn rate', 'Load', 'Speed lost', 'Altitude error'],
+            Object.entries(c.max_bank_turn_40s).map(([a, v]) => [km(+a), `${v.turn_rate_deg_s.toFixed(1)} °/s`,
+              `${v.load_factor.toFixed(1)} g`, U.spd(v.speed_loss), U.alt(v.alt_error)]))}
+      ${box(`CLIMB ${km(5000)} → ${km(8000)}`, c.climb_schedule === 'platform' ? "with the platform's climb schedule"
+            : 'at the flat 25° limit; open a platform to test its climb schedule', ['Measure', 'Value'],
+            [['Time', `${cl.time_s.toFixed(0)} s`], ['Average rate', U.vs(cl.rate_m_s)],
+             ['Speed', `${nfmt(vn(cl.speed_start))} → ${U.spd(cl.speed_end)}`]])}
+      ${box('CEILING', `full throttle climb until below ${si ? '0.5 m/s' : '100 ft/min'}`, ['Altitude', 'Note'],
+            [[U.alt(c.ceiling_m), c.ceiling_at_model_cap ? 'reached the service-ceiling limit' : 'thrust-limited']])}
+      ${box('AUTOPILOT STEP RESPONSE', 'how far a command is overshot and how long it takes to settle',
+            ['Command', 'Overshoot', 'Settles'],
+            [['90° heading change', `${ap.heading_overshoot_deg.toFixed(0)}°`, st(ap.heading_settle_s)],
+             [`+${km(1000)} altitude`, U.alt(ap.altitude_overshoot_m), st(ap.altitude_settle_s)]])}
+      ${box('SPEED HOLD', 'each command held until the speed stops changing', ['Altitude', 'Step', 'Steady error',
+            'Overshoot', 'Settles'], speedRows)}
+    </div>`;
+}
+// ─── Library: unit hints ─────────────────────────────────────────
+// Parameters are stored in SI. In aviation units each metre or m/s value
+// gets its converted value underneath, updated as it is typed.
+function hintOf(key, unit, x) {
+  if (!isFinite(x)) return '';
+  // non-breaking spaces: a list may wrap between values, never inside one
+  if (unit === 'm/s') return `${nfmt(x * KT)}\u00a0kt`;
+  if (/ALT/.test(key) || Math.abs(x) < 2000) return `${nfmt(x * FT)}\u00a0ft`;
+  return `${nfmt(x / NM, 1)}\u00a0nm`;
+}
+function refreshUnitHints(src) {
+  if (src && !(src.dataset && src.dataset.k)) return;
+  const sel = src ? `.u-hint[data-hint="${src.dataset.k}"]` : '.u-hint';
+  document.querySelectorAll('#lib-detail ' + sel).forEach(h => {
+    if (UNITS === 'si') { h.textContent = ''; return; }
+    const key = h.dataset.hint, el = document.querySelector(`#lib-detail [data-k="${key}"]`);
+    const p = LIB.schema[libCur.item.kind].find(x => x.key === key);
+    if (!el || !p) return;
+    const vals = el.value.split(/[,;\s]+/).filter(Boolean).map(Number);
+    h.textContent = '≈\u00a0' + vals.map(x => hintOf(key, p.unit, x)).join(', ');
+  });
+}
+
+// ─── Library: curves ─────────────────────────────────────────────
+// The item's curve in blue; on a user copy, the curve of the item it was
+// copied from dashed in orange, so an edit is seen against where it started.
+const CH_ITEM = '#3b8ad8', CH_REF = '#cf7b24';
+const CHARTS = {
+  THRUST_MACH_TABLE: {title: 'Thrust factor vs Mach', sub: 'multiplies sea-level thrust; altitude lapse is applied on top',
+                      y: 'thrust factor', table: true, zero: false},
+  DRAG_TABLE: {title: 'Missile drag coefficient vs Mach', sub: 'linear between the points; held flat beyond the last one',
+               y: 'CD', table: true, zero: true},
+  __DRAG_RISE: {title: 'Zero-lift drag vs Mach', sub: 'CD₀ plus the transonic rise; held at its Mach-M2 value above M2',
+                y: 'CD₀ + rise', table: false, zero: true},
+};
+const GROUP_CHARTS = {'airframe/Transonic drag rise': '__DRAG_RISE'};
+
+function libVal(key, fromItem) {
+  // The value being edited (from the form) or, for the reference, stored.
+  const p = LIB.schema[libCur.item.kind].find(x => x.key === key);
+  const el = fromItem ? null : document.querySelector(`#lib-detail [data-k="${key}"]`);
+  if (!el) return (fromItem || libCur.item).params[key];
+  if (p.kind === 'table') return el.value.split('\n').map(l => l.trim()).filter(Boolean)
+      .map(l => l.split(/[,;\s]+/).map(Number)).filter(r => r.length >= 2 && isFinite(r[0]) && isFinite(r[1]));
+  return Number(el.value);
+}
+function dragRiseCurve(get) {
+  const cd0 = get('CD0'), m0 = get('DRAG_RISE_M0'), m1 = get('DRAG_RISE_M1'), m2 = get('DRAG_RISE_M2');
+  const pk = get('DRAG_RISE_PEAK'), dc = get('DRAG_RISE_DECAY');
+  if (![cd0, m0, m1, m2, pk, dc].every(isFinite) || !(m1 > m0)) return [];
+  const rise = m => m < m0 ? 0 : m < m1 ? pk * Math.sin(0.5 * Math.PI * (m - m0) / (m1 - m0))
+                  : m < m2 ? pk * Math.exp(-dc * (m - m1)) : pk * Math.exp(-dc * (m2 - m1));
+  const pts = [], top = Math.max(2.2, m2 + 0.4);
+  for (let m = 0; m <= top + 1e-9; m += 0.01) pts.push([+m.toFixed(2), cd0 + rise(m)]);
+  // sample exactly at the breakpoints so the kinks are drawn where they are
+  for (const b of [m0, m1, m2]) pts.push([b - 1e-6, cd0 + rise(b - 1e-6)], [b, cd0 + rise(b)]);
+  return pts.sort((a, b) => a[0] - b[0]);
+}
+function curveOf(key, item) {
+  const get = k => libVal(k, item);
+  if (key === '__DRAG_RISE') return dragRiseCurve(get);
+  const t = get(key);
+  return Array.isArray(t) ? t.map(r => [+r[0], +r[1]]) : [];
+}
+function interpAt(pts, x) {
+  // np.interp: flat beyond the ends
+  if (!pts.length) return NaN;
+  if (x <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++)
+    if (x <= pts[i][0]) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+      return x1 === x0 ? y1 : y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+    }
+  return pts[pts.length - 1][1];
+}
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(s => s >= raw) || raw;
+  const out = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-6; v += step) out.push(+v.toPrecision(12));
+  return {ticks: out, step};
+}
+
+function libDrawCharts(src) {
+  // Redraw only the charts the edited field feeds.
+  if (!libCur) return;
+  document.querySelectorAll('#lib-detail .lib-chart').forEach(box => {
+    const key = box.dataset.chart;
+    if (src && src.dataset && src.dataset.k) {
+      const k = src.dataset.k;
+      if (key === '__DRAG_RISE' ? !(k === 'CD0' || k.startsWith('DRAG_RISE_')) : key !== k) return;
+    }
+    const cfg = CHARTS[key];
+    const series = [{name: libCur.item.id, pts: curveOf(key, null), color: CH_ITEM, marks: cfg.table}];
+    if (libBase) series.push({name: libBase.id, pts: curveOf(key, libBase), color: CH_REF, dash: true});
+    drawCurveChart(box, cfg, series.filter(s => s.pts.length));
+  });
+}
+
+function drawCurveChart(box, cfg, series) {
+  const W = 640, H = 230, L = 52, R = 110, T = 10, B = 34, pw = W - L - R, ph = H - T - B;
+  const all = series.flatMap(s => s.pts);
+  if (!all.length) { box.innerHTML = `<div class="ch-sub">${esc(cfg.title)}: no valid points to draw</div>`; return; }
+  let x0 = Math.min(...all.map(p => p[0])), x1 = Math.max(...all.map(p => p[0]));
+  let y0 = Math.min(...all.map(p => p[1])), y1 = Math.max(...all.map(p => p[1]));
+  if (cfg.zero) y0 = Math.min(0, y0);
+  if (x1 - x0 < 1e-9) x1 = x0 + 1;
+  const padY = (y1 - y0 || Math.abs(y1) || 1) * 0.08;
+  y1 += padY; if (!cfg.zero) y0 -= padY;
+  const xt = niceTicks(x0, x1, 8), yt = niceTicks(y0, y1, 4);
+  x0 = Math.min(x0, xt.ticks[0]); x1 = Math.max(x1, xt.ticks[xt.ticks.length - 1]);
+  y0 = Math.min(y0, yt.ticks[0]); y1 = Math.max(y1, yt.ticks[yt.ticks.length - 1]);
+  const X = x => L + (x - x0) / (x1 - x0) * pw, Y = y => T + ph - (y - y0) / (y1 - y0) * ph;
+  const dec = s => Math.max(0, -Math.floor(Math.log10(s) + 1e-9));
+  const mant = s => s / Math.pow(10, Math.floor(Math.log10(s) + 1e-9));
+  const yd = dec(yt.step) + (Math.abs(mant(yt.step) - 2.5) < 1e-6 ? 1 : 0);   // 0.025 needs three places
+  const fy = v => isFinite(v) ? v.toPrecision(3) : '–', fx = v => v.toFixed(2);
+
+  const grid = yt.ticks.filter(v => v >= y0 && v <= y1).map(v =>
+      `<line x1="${L}" x2="${L + pw}" y1="${Y(v)}" y2="${Y(v)}" stroke="#16263a"/>
+       <text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(yd)}</text>`).join('')
+    + xt.ticks.filter(v => v >= x0 && v <= x1).map(v =>
+      `<line x1="${X(v)}" x2="${X(v)}" y1="${T + ph}" y2="${T + ph + 4}" stroke="#2a3d57"/>
+       <text x="${X(v)}" y="${T + ph + 16}" text-anchor="middle">${v.toFixed(dec(xt.step))}</text>`).join('');
+  // The dashed reference is drawn over the item's solid line, so where the
+  // copy is unchanged both stay visible; the item's points go on top.
+  const lines = series.map(s => {
+    const d = s.pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
+    return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" ${s.dash ? 'stroke-dasharray="6 4"' : ''}/>`;
+  }).join('') + series.filter(s => s.marks).map(s => s.pts.map(p =>
+    `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="4" fill="${s.color}" stroke="#080f1a" stroke-width="2"/>`).join('')).join('');
+  // direct labels at the right end, pushed apart when they would overlap
+  let labels = '';
+  if (series.length > 1) {
+    const ends = series.map(s => ({s, y: Y(s.pts[s.pts.length - 1][1])})).sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+    labels = ends.map(e => `<text x="${L + pw + 8}" y="${e.y + 4}" fill="var(--text)">${esc(e.s.name)}${e.s.dash ? ' (base)' : ''}</text>`).join('');
+  }
+  const legend = series.length > 1 ? `<div class="ch-legend">${series.map(s =>
+      `<span><i style="border-top-color:${s.color};${s.dash ? 'border-top-style:dashed' : ''}"></i>${esc(s.name)}${s.dash ? ' (copied from)' : ''}</span>`).join('')}</div>` : '';
+  box.innerHTML = `<div class="ch-title">${esc(cfg.title)}</div><div class="ch-sub">${esc(cfg.sub)}</div>${legend}
+    <svg viewBox="0 0 ${W} ${H}" font-size="11" fill="var(--muted)" font-family="inherit" role="img" aria-label="${esc(cfg.title)}">
+      ${grid}
+      <line x1="${L}" x2="${L + pw}" y1="${T + ph}" y2="${T + ph}" stroke="#2a3d57"/>
+      <text x="${L + pw / 2}" y="${H - 2}" text-anchor="middle">Mach</text>
+      <text transform="translate(12 ${T + ph / 2}) rotate(-90)" text-anchor="middle">${esc(cfg.y)}</text>
+      ${lines}${labels}
+      <g class="ch-hover" style="display:none">
+        <line y1="${T}" y2="${T + ph}" stroke="#6f86a3" stroke-dasharray="2 3"/>
+        ${series.map(s => `<circle r="4" fill="${s.color}" stroke="#080f1a" stroke-width="2"/>`).join('')}
+      </g>
+      <rect x="${L}" y="${T}" width="${pw}" height="${ph}" fill="transparent" style="cursor:crosshair"/>
+    </svg><div class="ch-tip"></div>`;
+  const svg = box.querySelector('svg'), hov = box.querySelector('.ch-hover'), tip = box.querySelector('.ch-tip');
+  const hit = box.querySelector('rect');
+  hit.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect(), k = W / r.width;
+    const m = Math.min(x1, Math.max(x0, x0 + ((e.clientX - r.left) * k - L) / pw * (x1 - x0)));
+    const px = X(m);
+    hov.style.display = '';
+    hov.querySelector('line').setAttribute('x1', px); hov.querySelector('line').setAttribute('x2', px);
+    const vals = series.map(s => interpAt(s.pts, m));
+    hov.querySelectorAll('circle').forEach((c, i) => { c.setAttribute('cx', px); c.setAttribute('cy', Y(vals[i])); });
+    tip.innerHTML = `<b>Mach ${fx(m)}</b>` + series.map((s, i) =>
+        `<div><span style="color:${s.color}">${s.dash ? '╌' : '━'}</span> ${esc(s.name)}: <b>${fy(vals[i])}</b></div>`).join('');
+    tip.style.display = 'block';
+    const bx = box.getBoundingClientRect(), sx = e.clientX - bx.left, sy = e.clientY - bx.top;
+    tip.style.left = (sx + 14 + tip.offsetWidth > bx.width ? sx - 14 - tip.offsetWidth : sx + 14) + 'px';
+    tip.style.top = Math.max(0, sy - tip.offsetHeight - 8) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => { hov.style.display = 'none'; tip.style.display = 'none'; });
+}
+function libCalibrate() {
+  const it = libCur.item;
+  if (!confirm(`Calibrate ${it.id}? The missile is flown over the whole launch grid; this takes a few minutes and uses one CPU core.`)) return;
+  send({cmd: 'calibrate_missile', id: it.id});
+  const el = document.getElementById('lib-cal');
+  if (el) { el.style.color = 'var(--amber)'; el.textContent = 'calibrating… starting'; }
+}
+function onCalibrate(m) {
+  const el = document.getElementById('lib-cal');
+  const here = libCur && libCur.item.kind === 'missile' && libCur.item.id === m.id;
+  if (m.type === 'calibrate_progress' && here && el) el.textContent = `calibrating… ${m.done}/${m.total} launch conditions`;
+  if (m.type === 'calibrate_done') {
+    addLog(`Calibration of ${m.id} ${m.ok ? 'finished' : 'FAILED'}`, m.ok ? 'log-ok' : 'log-warn');
+    loadLibrary().then(() => { if (here) openItem('missile', m.id); });
+  }
+}
+loadLibrary();
+window.addEventListener('beforeunload', e => { if (libDirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// ─── Log ─────────────────────────────────────────────────────────
+// Two logs: TRAINING (trainer, cross-play, library, calibration) on the
+// TRAINING tab and EVAL (evaluation runs and their episodes) on the WATCH tab.
+const MAX_LOG=300;
+const LOGS={train:{arr:[], el:'train-log-lines'}, watch:{arr:[], el:'log-lines'}};
+function addLog(msg, cls='log-info', where='train') {
+  for(const k of (where==='both' ? ['train','watch'] : [where])){
+    const L=LOGS[k]; if(!L) continue;
+    L.arr.push({msg,cls});
+    if(L.arr.length>MAX_LOG) L.arr.shift();
+    const el=document.getElementById(L.el); if(!el) continue;
+    // Keep the reader's place when they have scrolled up to read older lines.
+    const atEnd=el.scrollHeight-el.scrollTop-el.clientHeight<24;
+    el.innerHTML=L.arr.map(l=>`<div class="${l.cls}">${esc(l.msg)}</div>`).join('');
+    if(atEnd) el.scrollTop=el.scrollHeight;
+  }
+}
+function clearLog(where){ LOGS[where].arr=[]; }
+// ─── Current run ─────────────────────────────────────────────────
+// RUN comes from the server's status (the configuration it launched the
+// trainer with), RUN_NOTES from bvr_metrics.json (what the trainer reported
+// at startup), CODE from the server (the checked-out commit).
+let RUN=null, RUN_NOTES=null, CODE=null;
+function renderRun() {
+  const box=document.getElementById('run-info'), hd=document.getElementById('run-state');
+  if(!box) return;
+  // Notes belong to this run only if the trainer started after the launch
+  // (its run id begins with its start time in seconds).
+  const notesStart=RUN_NOTES ? parseInt(String(RUN_NOTES.run||'0')) : 0;
+  const notes=RUN && RUN.notes ? RUN.notes
+    : RUN_NOTES && (!RUN || notesStart>=RUN.started-5) ? RUN_NOTES.notes : null;
+  if(!RUN && !notes) return;
+  hd.textContent = RUN ? (isTraining ? 'RUNNING' : 'LAST RUN · ENDED') : 'FROM bvr_metrics.json';
+  hd.style.color = RUN && isTraining ? 'var(--green)' : '';
+  let html='';
+  if(RUN) {
+    const c=RUN.config||{}, team=c.format==='2v1';
+    const t=new Date(RUN.started*1000);
+    const rows=[
+      ['MODEL', `${c.run_name||'latest'}.zip`],
+      ['STARTED', t.toLocaleString()],
+      ['RESUMED', c.resume||'fresh start'],
+      ['FORMAT', team?'2 v 1':'1 v 1'],
+      [team?'BLUE':'AGENT', team?`${c.platform||'F-16C'} + ${c.wingman_platform||c.platform||'F-16C'}`:(c.platform||'F-16C')],
+      ['OPPONENT', `${c.opponent_platform||'F-16C'} · start at ${String(c.opponent||'straight').toUpperCase()}`],
+      ['CURRICULUM', c.curriculum===false?'off (stays on stage)'
+        :`auto-advance at ${Math.round((c.advance_win_rate??0.65)*100)}%, held ${c.advance_hold_checks??5} checks, after ${c.advance_min_episodes??60} episodes`],
+      ...(c.sp_scripted_frac!==undefined ? [['SELF-PLAY',
+        `${Math.round(c.sp_scripted_frac*100)}% scripted · newest ${Math.round(c.sp_newest_frac*100)}% · snapshot every ${Math.round(c.sp_snapshot_steps/1000)}k steps · pool ${c.sp_pool_size}`]] : []),
+      ['DOCTRINE', String(c.doctrine||'mixed').toUpperCase()],
+      ['STEPS', `${fmt(c.steps||0)} on ${c.n_envs||1} env${(c.n_envs||1)>1?'s':''}`],
+      ['PPO', `γ ${c.gamma} · lr ${c.lr} · batch ${c.batch_size}`],
+    ];
+    const code=RUN.code||CODE;
+    if(code) rows.push(['CODE', code.commit ? `${code.branch} @ ${code.commit}` : (code.error||'unknown')]);
+    if(code && code.modified && code.modified.length)
+      rows.push(['MODIFIED', code.modified.join(', '), 'warn']);
+    html+='<div class="run-kv">'+rows.map(([k,v,c])=>`<span>${k}</span><span${c?` class="${c}"`:''}>${esc(v)}</span>`).join('')+'</div>';
+  }
+  if(notes && notes.length)
+    html+='<div class="run-notes"><div style="color:var(--muted);font-size:11px;letter-spacing:1px">TRAINER AT STARTUP</div>'
+      +notes.map(n=>`<div class="${/NOTE|WARN|blocked|stays/i.test(n)?'warn':''}">${esc(n)}</div>`).join('')+'</div>';
+  else if(RUN && isTraining)
+    html+='<div class="run-notes"><div style="color:var(--muted)">Waiting for the trainer to start…</div></div>';
+  box.innerHTML=html;
+}
+// Files that differ from the checked-out commit: said once in the training
+// log (and listed under CURRENT RUN), not as a banner that never goes away.
+let codeWarned='';
+function renderCodeWarn() {
+  const mod=CODE && CODE.modified || [];
+  const key=CODE ? CODE.commit+':'+mod.join(',') : '';
+  if(!CODE || !CODE.commit || !mod.length || key===codeWarned) return;
+  codeWarned=key;
+  addLog(`⚠ ${mod.length} file${mod.length>1?'s':''} differ from ${CODE.branch} @ ${CODE.commit}: `
+    +`${mod.join(', ')}. Training and evaluation run these edited files; if that is not `
+    +`intended, restore them with git checkout -- <file> and restart the GUI.`, 'log-warn');
+}
+
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-function handleLog(msg) {
-  if(msg.includes('[bvr]')||msg.includes('[status]')) hasReceivedTrainingData=true;
+function handleLog(msg, src) {
   const cls = msg.includes('===')         ? 'log-warn'
             : msg.includes('win')&&msg.includes('ep') ? 'log-ok'
             : msg.toLowerCase().includes('error')       ? 'log-err'
-            : msg.includes('WARNING')                   ? 'log-warn' : 'log-info';
-  addLog(msg, cls);
+            : msg.includes('WARNING')||msg.includes('NOTE:') ? 'log-warn' : 'log-info';
+  if(src==='eval') { addLog(msg, cls, 'watch'); return; }
+  addLog(msg, cls, 'train');
+  if(src && src!=='train') return;
+  if(msg.includes('[bvr]')) hasReceivedTrainingData=true;
   const em = msg.match(/ep\s+(\d+)/);
   if(em) {
     epCount = parseInt(em[1]);
@@ -1127,7 +2102,10 @@ function handleLog(msg) {
 
 
 // ─── Metrics ──────────────────────────────────────────────────────
+let lastMetrics = null;
 function handleMetrics(d) {
+  lastMetrics = d;
+  if(d.run_notes) { RUN_NOTES={run:d.run, notes:d.run_notes}; renderRun(); }
   epCount    = d.episode||epCount;
   if(d.steps_done && d.steps_done>0) stepsDone=d.steps_done;
 
@@ -1139,7 +2117,11 @@ function handleMetrics(d) {
   const wr=Math.min(d.win_rate,1);
   const bar=document.getElementById('wr-bar');
   bar.style.width=pct(wr);
-  bar.className='prog-fill'+(wr>=0.65?' ':(wr>=0.4?' warn':' bad'));
+  const adv=(d.curriculum && d.curriculum.win_rate) || 0.65;
+  bar.className='prog-fill'+(wr>=adv?' ':(wr>=adv*0.6?' warn':' bad'));
+  document.getElementById('wr-tick').style.left=(adv*100)+'%';
+  document.getElementById('adv-sub').textContent=Math.round(adv*100)+'%';
+  if(DASH[0].ref!==adv){ DASH[0].ref=adv; drawDash(); }
   document.getElementById('wr-pct').textContent=pct(wr);
 
   const sf=Math.min(stepsDone/Math.max(totalSteps,1),1);
@@ -1163,17 +2145,23 @@ function handleMetrics(d) {
     document.getElementById('prog-eta').textContent='';
   }
 
-  document.getElementById('kv-rng').textContent = d.mean_launch_km.toFixed(1)+' km';
+  document.getElementById('kv-rng').textContent = U.dist(d.mean_launch_km * 1000, 1);
   document.getElementById('kv-rrm').textContent = d.launch_r_rmax.toFixed(3);
   document.getElementById('kv-sh').textContent  = d.shots_per_ep.toFixed(2);
   document.getElementById('kv-tf').textContent  = pct(d.track_frac);
   if(d.bank_rev_per_min!=null)
     document.getElementById('kv-rev').textContent = d.bank_rev_per_min.toFixed(1);
+  // What the heading choice switches between (older trainers don't report it).
+  document.getElementById('rev-hdg').textContent = d.hdg_switch_per_min!=null
+    ? `heading choice changes ${d.hdg_switch_per_min.toFixed(1)}/min`
+      + (d.hdg_top_pairs&&d.hdg_top_pairs.length
+         ? ' · most often ' + d.hdg_top_pairs.map(([k,v])=>`${k.replace('<>','↔')}° ${Math.round(v*100)}%`).join(', ') : '')
+    : '';
   const docs=d.doctrine?Object.entries(d.doctrine):[];
   document.getElementById('kv-doc').innerHTML = docs.length>1
     ? `<div style="display:grid;grid-template-columns:auto auto auto auto;column-gap:8px">`
-      +`<span style="color:var(--dim)"></span><span style="color:var(--dim)">shots</span>`
-      +`<span style="color:var(--dim)">Pk</span><span style="color:var(--dim)">win</span>`
+      +`<span style="color:var(--muted)"></span><span style="color:var(--muted)">shots</span>`
+      +`<span style="color:var(--muted)">Pk</span><span style="color:var(--muted)">win</span>`
       +docs.map(([k,v])=>`<span>${k.slice(0,3)}</span><span>${v.shots.toFixed(1)}</span>`
         +`<span>${v.pk.toFixed(2)}</span><span>${(v.win*100).toFixed(0)}%</span>`).join('')
       +`</div>`
@@ -1186,13 +2174,24 @@ function handleMetrics(d) {
   }
 
   updateCurriculum(d.opponent);
+  // Why the curriculum will or will not move on (older trainers do not report it).
+  const cn=document.getElementById('curr-note'), c=d.curriculum;
+  if(cn && !c){ cn.textContent='advance at 65% →'; cn.style.color='var(--amber)'; }
+  if(cn && c){
+    if(c.blocked){ cn.textContent=`stays on this stage: ${c.blocked}`; cn.style.color='var(--red)'; }
+    else { cn.textContent=`advance at ${Math.round(c.win_rate*100)}% → ${c.next}`
+             +(c.stage_episodes<c.min_episodes?` (after ${c.min_episodes} episodes; ${c.stage_episodes} so far)`
+               :(c.hold_checks>1?` (held ${c.hold_run||0}/${c.hold_checks} checks)`:''));
+           cn.style.color='var(--amber)'; }
+  }
   updateTermBars(d.term_share, d.term_abs);
 
-  if(d.history) {
-    wrHist.length=0;
-    for(const [,w] of d.history) wrHist.push(w);
-    drawMini('cv-wr', wrHist, 0, 1, 'var(--green)', 0.65);
-  }
+  // 2v1 only: blue aircraft lost per episode
+  const team = d.blue_losses_per_ep!=null;
+  document.getElementById('kpi-lost').style.display = team ? '' : 'none';
+  document.getElementById('card-lost').style.display = team ? '' : 'none';
+  if(team) setKPI('kpi-lost','kv-lost',d.blue_losses_per_ep.toFixed(2), d.blue_losses_per_ep<0.3, d.blue_losses_per_ep>1);
+  if(d.history) { dashHist = histPoints(d.history); drawDash(); }
 }
 
 // Order mirrors REWARD_TERMS in bvr_env.py: PHI_TERMS, then COST_TERMS.
@@ -1202,11 +2201,11 @@ const TERM_INFO=[['envelope','ENVELOPE','var(--green)'],
                  ['support', 'SUPPORT', 'var(--teal)'],
                  ['defence', 'DEFENCE', 'var(--red)'],
                  ['heading', 'HEADING', 'var(--yellow)'],
-                 ['shots',   'SHOTS',   'var(--dim)']];
+                 ['shots',   'SHOTS',   'var(--muted)']];
 function updateTermBars(share, abs) {
   const el=document.getElementById('term-bars');
   if(!share){
-    el.innerHTML='<div style="font-size:11px;color:var(--dim)">waiting for training data…</div>';
+    el.innerHTML='<div style="font-size:11px;color:var(--muted)">waiting for training data…</div>';
     return;
   }
   el.innerHTML=TERM_INFO.map(([k,label,color])=>{
@@ -1217,7 +2216,7 @@ function updateTermBars(share, abs) {
         <div style="height:100%;width:${(s*100).toFixed(1)}%;background:${color}"></div>
       </div>
       <span style="font-size:11px;color:var(--bright);width:34px;text-align:right">${(s*100).toFixed(0)}%</span>
-      <span style="font-size:10px;color:var(--dim);width:54px;text-align:right">${a.toFixed(4)}</span>
+      <span style="font-size:11px;color:var(--muted);width:54px;text-align:right">${a.toFixed(4)}</span>
     </div>`;
   }).join('');
 }
@@ -1238,6 +2237,139 @@ function updateCurriculum(name) {
     el.className='curr-stage'+(i<idx?' done':i===idx?' active':'');
   });
 }
+
+// ─── Training dashboard charts ────────────────────────────────────
+// One time series per card, x = episodes of this run. Colours validated for
+// the dark card surface (dataviz validator: all checks pass for the four
+// outcome colours); several series get a legend and direct labels.
+const TS_COL = {win:'#3987e5', loss:'#d95926', to:'#199e70', mut:'#c98500'};
+let dashHist = [];
+function histPoints(h){
+  // older trainers wrote [episode, win rate, exchange ratio]
+  return (h||[]).map(e => Array.isArray(e) ? {ep:e[0], win:e[1], exch:e[2]} : e);
+}
+const DASH = [
+  {id:'outcomes', y0:0, y1:1, fmt:v=>(v*100).toFixed(0)+'%', ref:0.65,
+   series:[{k:'win',name:'win',c:TS_COL.win},{k:'loss',name:'loss',c:TS_COL.loss},
+           {k:'to',name:'timeout',c:TS_COL.to},{k:'mut',name:'mutual',c:TS_COL.mut}]},
+  {id:'exch',  y0:0, fmt:v=>v.toFixed(2), series:[{k:'exch',name:'exchange ratio',c:TS_COL.win}]},
+  {id:'pk',    y0:0, y1:1, fmt:v=>v.toFixed(2), series:[{k:'pk',name:'realised Pk',c:TS_COL.win}]},
+  {id:'shots', y0:0, fmt:v=>v.toFixed(2), series:[{k:'shots',name:'shots per episode',c:TS_COL.win}]},
+  {id:'rrmax', y0:0, y1:1.2, fmt:v=>v.toFixed(2), band:[0.6,0.85], series:[{k:'rrmax',name:'r / Rmax',c:TS_COL.win}]},
+  {id:'track', y0:0, y1:1, fmt:v=>(v*100).toFixed(0)+'%', series:[{k:'track',name:'track fraction',c:TS_COL.win}]},
+  {id:'rev',   y0:0, fmt:v=>v.toFixed(1), series:[{k:'rev',name:'reversals / min',c:TS_COL.win}]},
+  {id:'lost',  y0:0, y1:2, fmt:v=>v.toFixed(2), series:[{k:'lost',name:'blue lost / episode',c:TS_COL.win}]},
+];
+function drawDash(){
+  if(VIEW!=='train') return;
+  for(const cfg of DASH){
+    const box=document.getElementById('ch-'+cfg.id);
+    if(box && box.offsetParent!==null) tsChart(box, cfg, dashHist);
+  }
+}
+function tsChart(box, cfg, hist){
+  const multi = cfg.series.length>1;
+  const ser = cfg.series.map(s=>({...s, pts: hist.filter(h=>typeof h[s.k]==='number').map(h=>[h.ep,h[s.k]])}))
+                        .filter(s=>s.pts.length);
+  if(!ser.length || Math.max(...ser.map(s=>s.pts.length))<2){
+    box.innerHTML='<div class="ts-empty">waiting for data: a point every 10 episodes</div>'; return;
+  }
+  const big = !!box.closest('.maxed');
+  const W=Math.max(300, box.clientWidth), L=48, R=multi?84:16, T=10, B=24;
+  const H = big ? Math.max(240, box.clientHeight-(multi?24:0)-6) : 180;
+  const pw=W-L-R, ph=H-T-B;
+  const all=ser.flatMap(s=>s.pts);
+  let x0=Math.min(...all.map(p=>p[0])), x1=Math.max(...all.map(p=>p[0]));
+  if(x1<=x0) x1=x0+1;
+  let y0=cfg.y0??Math.min(...all.map(p=>p[1]));
+  let y1=cfg.y1??Math.max(...all.map(p=>p[1]))*1.1;
+  if(cfg.y1!=null) y1=Math.max(cfg.y1, Math.max(...all.map(p=>p[1])));
+  if(y1<=y0) y1=y0+1;
+  const yt=niceTicks(y0,y1,big?8:4), xt=niceTicks(x0,x1,big?10:5);
+  y1=Math.max(y1, yt.ticks[yt.ticks.length-1]);
+  const X=x=>L+(x-x0)/(x1-x0)*pw, Y=y=>T+ph-(y-y0)/(y1-y0)*ph;
+  let g='';
+  if(cfg.band){
+    const [b0,b1]=cfg.band;
+    g+=`<rect x="${L}" y="${Y(b1)}" width="${pw}" height="${Y(b0)-Y(b1)}" fill="rgba(57,135,229,0.12)"/>`;
+  }
+  for(const v of yt.ticks) if(v>=y0-1e-9 && v<=y1+1e-9)
+    g+=`<line x1="${L}" x2="${L+pw}" y1="${Y(v)}" y2="${Y(v)}" stroke="#16263a"/>
+        <text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${cfg.fmt(v)}</text>`;
+  for(const v of xt.ticks) if(v>=x0 && v<=x1)
+    g+=`<text x="${X(v)}" y="${T+ph+17}" text-anchor="middle">${Math.round(v).toLocaleString('en-US')}</text>`;
+  g+=`<line x1="${L}" x2="${L+pw}" y1="${T+ph}" y2="${T+ph}" stroke="#2a3d57"/>`;
+  if(cfg.ref!=null && cfg.ref<=y1)
+    g+=`<line x1="${L}" x2="${L+pw}" y1="${Y(cfg.ref)}" y2="${Y(cfg.ref)}" stroke="#9ab3cf" stroke-dasharray="4 4" opacity="0.7"/>`;
+  for(const s of ser)
+    g+=`<path d="${s.pts.map((p,i)=>`${i?'L':'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('')}" fill="none" stroke="${s.c}" stroke-width="2" stroke-linejoin="round"/>`;
+  if(multi){                                   // direct labels, pushed apart
+    const ends=ser.map(s=>({s,y:Y(s.pts[s.pts.length-1][1])})).sort((a,b)=>a.y-b.y);
+    for(let i=1;i<ends.length;i++) if(ends[i].y-ends[i-1].y<14) ends[i].y=ends[i-1].y+14;
+    // lines that end together near the axis would push labels off the chart:
+    // pin the lowest to the axis and re-space upward, moving only the labels
+    // that collide, so a label far above stays beside its line
+    const n=ends.length;
+    if(n && ends[n-1].y>T+ph){
+      ends[n-1].y=T+ph;
+      for(let i=n-2;i>=0;i--) if(ends[i].y>ends[i+1].y-14) ends[i].y=ends[i+1].y-14;
+    }
+    g+=ends.map(e=>`<text x="${L+pw+8}" y="${e.y+4}" fill="#b8d4ee">${e.s.name}</text>`).join('');
+  }
+  const legend = multi ? `<div class="ch-legend">${ser.map(s=>`<span><i style="border-top-color:${s.c}"></i>${s.name}</span>`).join('')}</div>` : '';
+  box.innerHTML = `${legend}<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-size="11" fill="#9ab3cf" font-family="inherit">${g}
+    <g class="ts-hover" style="display:none"><line y1="${T}" y2="${T+ph}" stroke="#6f86a3" stroke-dasharray="2 3"/>
+    ${ser.map(s=>`<circle r="4" fill="${s.c}" stroke="#0d1220" stroke-width="2"/>`).join('')}</g>
+    <rect x="${L}" y="${T}" width="${pw}" height="${ph}" fill="transparent" style="cursor:crosshair"/></svg><div class="ch-tip"></div>`;
+  const svg=box.querySelector('svg'), hov=box.querySelector('.ts-hover'), tip=box.querySelector('.ch-tip');
+  const hit=box.querySelector('rect:last-of-type');
+  hit.addEventListener('mousemove', e=>{
+    const r=svg.getBoundingClientRect(), ex=x0+((e.clientX-r.left)*W/r.width-L)/pw*(x1-x0);
+    const vals=ser.map(s=>s.pts.reduce((a,p)=>Math.abs(p[0]-ex)<Math.abs(a[0]-ex)?p:a));
+    const px=X(vals[0][0]);
+    hov.style.display='';
+    hov.querySelector('line').setAttribute('x1',px); hov.querySelector('line').setAttribute('x2',px);
+    hov.querySelectorAll('circle').forEach((c,i)=>{c.setAttribute('cx',X(vals[i][0])); c.setAttribute('cy',Y(vals[i][1]));});
+    const h=hist.find(q=>q.ep===vals[0][0]);
+    tip.innerHTML=`<b>episode ${vals[0][0].toLocaleString('en-US')}</b>${h&&h.stage?' · '+h.stage.replace('_SHOOTER',''):''}`
+      +ser.map((s,i)=>`<div><span style="color:${s.c}">━</span> ${s.name}: <b>${cfg.fmt(vals[i][1])}</b></div>`).join('');
+    tip.style.display='block';
+    const bx=box.getBoundingClientRect(), sx=e.clientX-bx.left, sy=e.clientY-bx.top;
+    tip.style.left=(sx+14+tip.offsetWidth>bx.width ? sx-14-tip.offsetWidth : sx+14)+'px';
+    tip.style.top=Math.max(0,sy-tip.offsetHeight-8)+'px';
+  });
+  hit.addEventListener('mouseleave',()=>{hov.style.display='none'; tip.style.display='none';});
+}
+if(window.ResizeObserver) new ResizeObserver(()=>drawDash()).observe(document.getElementById('train-dash'));
+
+// Maximise: every chart card gets a button that lays it over the page at
+// full size, with finer axes; the button, Esc or a click outside restores it.
+function chartMax(card) {
+  const on = !card.classList.contains('maxed');
+  document.querySelectorAll('.dash-card.maxed').forEach(c=>{
+    c.classList.remove('maxed');
+    const b=c.querySelector('.max-btn'); b.textContent='⤢'; b.title='Maximise this chart';
+  });
+  if(on) {
+    card.classList.add('maxed');
+    const b=card.querySelector('.max-btn'); b.textContent='✕'; b.title='Restore (Esc)';
+  }
+  document.getElementById('max-backdrop').style.display = on ? 'block' : 'none';
+  drawDash();
+}
+document.querySelectorAll('#train-dash .dash-card').forEach(card=>{
+  if(!card.querySelector('.ts-chart')) return;
+  const b=document.createElement('button');
+  b.className='max-btn'; b.textContent='⤢'; b.title='Maximise this chart';
+  b.onclick=e=>{ e.stopPropagation(); chartMax(card); };
+  card.querySelector('.dash-head').appendChild(b);
+});
+document.getElementById('max-backdrop').onclick=()=>{
+  const c=document.querySelector('.dash-card.maxed'); if(c) chartMax(c);
+};
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ const c=document.querySelector('.dash-card.maxed'); if(c) chartMax(c); }
+});
 
 // ─── Mini chart ───────────────────────────────────────────────────
 function drawMini(id,data,lo,hi,col,thr) {
@@ -1276,6 +2408,7 @@ function handleFrame(f) {
   push(tacBuf3d2,[f.tgt[0],f.tgt[1],f.tgt[2]],200);
   push(altBuf1,f.alt,600);
   push(altBuf2,f.alt_t,600);
+  if(f.wing) push(altBuf3,f.wing.alt,600);
   for(const m of f.missiles){
     if(!tacMsls[m.id])tacMsls[m.id]={trail:[],trail3d:[],owner:m.owner,last:m};
     tacMsls[m.id].last=m;
@@ -1292,16 +2425,76 @@ function handleFrame(f) {
   t3UpdateScene(f);
   drawAlt(); updateHUD(f);
   document.getElementById('tac-info').textContent=
-    `T+${f.t.toFixed(1)}s  ${(f.rng/1000).toFixed(1)}km  ${f.clos.toFixed(0)}m/s`;
+    `T+${f.t.toFixed(1)}s  ${U.dist(f.rng)}  ${U.spd(f.clos)}`;
+}
+
+// ── WATCH statistics: the episodes of the current eval session ──
+const WS = {eps: [], label: '', nmax: 0};
+const WS_SCEN = {head_on: 'HEAD-ON', offset_left: 'OFFSET L', offset_right: 'OFFSET R',
+                 beam: 'BEAM', stern_conversion: 'STERN'};
+const WS_BANDS = [[0, 60, '< 60 km'], [60, 80, '60–80 km'], [80, 100, '80–100 km'], [100, 1e9, '≥ 100 km']];
+function wsReset(label, nmax) { WS.eps = []; WS.label = label; WS.nmax = nmax; wsRender(); }
+function wsWilson(k, n) {
+  if (!n) return [0, 0];
+  const z = 1.96, p = k / n, d = 1 + z * z / n;
+  const c = (p + z * z / (2 * n)) / d, h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+  return [Math.max(0, c - h), Math.min(1, c + h)];
+}
+function wsRows(groups) {
+  const pc = (a, n) => n ? Math.round(100 * a / n) + '%' : '—';
+  return groups.filter(g => g.eps.length).map(g => {
+    const n = g.eps.length, c = o => g.eps.filter(e => e.outcome === o).length;
+    const other = n - c('KILL') - c('MUTUAL_KILL') - c('SHOT_DOWN') - c('TIMEOUT');
+    return `<tr><td>${g.name}</td><td>${n}</td><td>${pc(c('KILL'), n)}</td><td>${pc(c('MUTUAL_KILL'), n)}</td>`
+         + `<td>${pc(c('SHOT_DOWN'), n)}</td><td>${pc(c('TIMEOUT'), n)}</td><td>${pc(other, n)}</td></tr>`;
+  }).join('');
+}
+function wsRender() {
+  const el = document.getElementById('ws-body'); if (!el) return;
+  const E = WS.eps, n = E.length;
+  if (!n) { el.innerHTML = `<div style="color:var(--muted);font-size:12px">${WS.label ? 'Waiting for the first episode to finish…' : 'Start an eval to collect statistics.'}</div>`; return; }
+  const c = o => E.filter(e => e.outcome === o).length;
+  const K = c('KILL'), M = c('MUTUAL_KILL'), L = c('SHOT_DOWN');
+  const team = E.some(e => e.blue_losses != null);
+  const lost = team ? E.reduce((a, e) => a + (e.blue_losses || 0), 0) : L + M;
+  const shots = E.reduce((a, e) => a + (e.shots || 0), 0);
+  const rr = E.flatMap(e => e.r_over_rmax || []);
+  const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
+  const [lo, hi] = wsWilson(K, n);
+  const order = ['KILL', 'MUTUAL_KILL', 'SHOT_DOWN', 'TIMEOUT', 'ESCAPE', 'CRASH', 'BANDIT_CRASH'];
+  const chips = order.filter(o => c(o)).map(o =>
+    `<span class="ws-chip">${o.replace('_', ' ')} <b>${c(o)}</b> · ${Math.round(100 * c(o) / n)}%</span>`).join('');
+  const kpi = (v, l) => `<div class="ws-kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  const head = '<tr><th>START</th><th>N</th><th>WIN</th><th>MUT</th><th>LOSS</th><th>T/O</th><th>OTHER</th></tr>';
+  const byScen = Object.keys(WS_SCEN).flatMap(k => [
+    {name: WS_SCEN[k], eps: E.filter(e => e.scenario === k && !e.mirrored)},
+    {name: WS_SCEN[k] + ' ⇄', eps: E.filter(e => e.scenario === k && e.mirrored)}]);
+  const byRange = WS_BANDS.map(([a, b, name]) => ({name, eps: E.filter(e => e.start_range / 1000 >= a && e.start_range / 1000 < b)}));
+  el.innerHTML =
+      `<div class="ws-top"><b>${n}</b> episode${n > 1 ? 's' : ''}${WS.nmax ? ` of ${WS.nmax}` : ''} · ${WS.label}</div>`
+    + `<div class="ws-top">WIN RATE <b>${Math.round(100 * K / n)}%</b> <span style="color:var(--muted)">(95% range ${Math.round(100 * lo)}–${Math.round(100 * hi)}%)</span></div>`
+    + `<div class="ws-chips">${chips}</div>`
+    + `<div class="ws-kpis">`
+    + kpi(((K + M) / Math.max(lost, 1)).toFixed(2), team ? 'EXCHANGE (per blue lost)' : 'EXCHANGE RATIO')
+    + kpi(shots ? ((K + M) / shots).toFixed(2) : '—', 'REALISED Pk')
+    + kpi((shots / n).toFixed(1), 'SHOTS / EPISODE')
+    + kpi(rr.length ? mean(rr).toFixed(2) : '—', 'MEAN r / Rmax AT SHOT')
+    + kpi(Math.round(mean(E.map(e => e.flight_time || 0))) + ' s', 'MEAN LENGTH')
+    + (team ? kpi((lost / n).toFixed(2), 'BLUE LOST / EPISODE') : kpi(c('TIMEOUT') ? Math.round(100 * c('TIMEOUT') / n) + '%' : '0%', 'TIMEOUT RATE'))
+    + `</div>`
+    + `<div class="ws-cap">BY START GEOMETRY</div><table class="ws-tbl">${head}${wsRows(byScen)}</table>`
+    + `<div class="ws-cap">BY START RANGE</div><table class="ws-tbl">${head}${wsRows(byRange)}</table>`;
 }
 
 function onEpEnd(meta) {
-  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;
+  if (meta && meta.outcome && meta.outcome !== '?') { WS.eps.push(meta); wsRender(); }
+  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k];
   t3ClearTrails();
   addLog(`[ep] outcome=${meta.outcome}  R=${meta.reward}  shots=${meta.shots}  support_losses=${meta.support_losses}`
         +(meta.doctrine?`  doctrine=${meta.doctrine}`:'')
-        +(meta.bank_rev_per_min!=null?`  bank_rev/min=${meta.bank_rev_per_min}`:''),'log-ok');
+        +(meta.bank_rev_per_min!=null?`  bank_rev/min=${meta.bank_rev_per_min}`:'')
+        +(meta.blue_losses!=null?`  blue_lost=${meta.blue_losses}`:''),'log-ok','watch');
   fetch('/replay').then(r=>r.json()).then(d=>{
     lastDecisions=d.frames?extractShots(d.frames):[];
   }).catch(()=>{});
@@ -1311,7 +2504,7 @@ function extractShots(frames){
   const s=[];let prev=null;
   for(const f of frames){
     if(prev!==null&&f.wpn<prev)
-      s.push({t:f.t,rng:(f.rng/1000).toFixed(1),aa:f.aa.toFixed(1),
+      s.push({t:f.t,rng:f.rng,aa:f.aa.toFixed(1),
               track:TRACK_N[f.track]||'?',pos_sig:f.pos_sig,trk_age:f.trk_age,
               r_rmax:(f.rng/Math.max(f.rmax,1)).toFixed(3),
               r_rnez:(f.rng/Math.max(f.rnez,1)).toFixed(3)});
@@ -1334,13 +2527,13 @@ function drawAlt(){
   const ctx=cv.getContext('2d');
   ctx.fillStyle='#07090f';ctx.fillRect(0,0,W,H);
   if(!altBuf1.length)return;
-  const all=[...altBuf1,...altBuf2];
+  const all=[...altBuf1,...altBuf2,...altBuf3];
   const lo=Math.max(0,Math.min(...all)-800),hi=Math.max(...all)+800,range=hi-lo||1000,p=24;
   const sx=(W-2*p)/Math.max(altBuf1.length-1,1),sy=(H-2*p)/range;
   ctx.strokeStyle='rgba(50,85,130,0.7)';ctx.lineWidth=0.8;
   for(let i=0;i<=4;i++){const y=p+i*(H-2*p)/4;ctx.beginPath();ctx.moveTo(p,y);ctx.lineTo(W-p,y);ctx.stroke();
-    ctx.fillStyle='rgba(110,165,220,0.9)';ctx.font='bold 10px Courier New';
-    ctx.fillText(`${Math.round(hi-(i*(range/4)))}m`,2,y+4);}
+    ctx.fillStyle='rgba(110,165,220,0.9)';ctx.font='bold 11px Courier New';
+    ctx.fillText(U.alt(hi-(i*(range/4))),2,y+4);}
   // fill under curves for better visibility
   const lineFill=(buf,strokeCol,fillCol)=>{
     if(buf.length<2)return;
@@ -1351,14 +2544,34 @@ function drawAlt(){
     ctx.fillStyle=fillCol;ctx.lineTo(p+(buf.length-1)*sx,H-p);ctx.lineTo(p,H-p);ctx.closePath();ctx.fill();
   };
   lineFill(altBuf1,'#4aaaff','rgba(58,160,255,0.12)');
+  if(altBuf3.length) lineFill(altBuf3,'#a98bff','rgba(169,139,255,0.10)');
   lineFill(altBuf2,'#ff5555','rgba(255,80,80,0.12)');
   if(lastFrame){
-    ctx.fillStyle='#4aaaff';ctx.font='bold 11px Courier New';ctx.fillText(`AC1 ${lastFrame.alt.toFixed(0)}m`,W-96,15);
-    ctx.fillStyle='#ff5555';ctx.fillText(`AC2 ${lastFrame.alt_t.toFixed(0)}m`,W-96,28);
+    const team=!!lastFrame.wing;
+    ctx.fillStyle='#4aaaff';ctx.font='bold 11px Courier New';
+    ctx.fillText(`${team?'LEAD':'AC1'} ${U.alt(lastFrame.alt)}`,W-120,15);
+    ctx.fillStyle='#ff5555';ctx.fillText(`${team?'RED':'AC2'} ${U.alt(lastFrame.alt_t)}`,W-120,28);
+    if(team){ ctx.fillStyle='#a98bff'; ctx.fillText(`WING ${U.alt(lastFrame.wing.alt)}`,W-120,41); }
   }
 }
 
 // ─── HUD ──────────────────────────────────────────────────────────
+// 2v1: the wingman, the datalink and whom red is engaging.
+function teamHud(f){
+  const w=f.wing, dead='<span class="hud-val bad">LOST</span>';
+  const tgt=f.red_tgt===1?'LEAD':'WING';
+  const wingMsls=f.missiles.filter(m=>m.owner===3).length, atWing=f.missiles.filter(m=>m.owner===4).length;
+  return `<div class="hud-block">
+  <div class="hud-title">TEAM — 2 v 1</div>
+  <div class="hud-row"><span class="hud-label">Lead</span>${f.own_alive?'<span class="hud-val good">flying</span>':dead}</div>
+  <div class="hud-row"><span class="hud-label">Wingman</span>${w.alive?`<span class="hud-val">${U.dist(w.rng,1)} from red · ${w.wpn} msl</span>`:dead}</div>
+  <div class="hud-row"><span class="hud-label">Lead flies on</span><span class="hud-val">${f.dl?'<span style="color:#a98bff">wingman\'s track (datalink)</span>':'own radar'}</span></div>
+  <div class="hud-row"><span class="hud-label">Wingman flies on</span><span class="hud-val">${!w.alive?'—':w.dl?'<span style="color:#a98bff">lead\'s track (datalink)</span>':'own radar · '+(TRACK_N[w.track]||'?')}</span></div>
+  <div class="hud-row"><span class="hud-label">Red is engaging</span><span class="hud-val ${f.red_tgt===1?'bad':''}">${tgt}</span></div>
+  <div class="hud-row"><span class="hud-label">Wingman missiles · red missiles at wingman</span><span class="hud-val">${wingMsls} · ${atWing}</span></div>
+</div>`;
+}
+
 function updateHUD(f){
   const inEnv=f.rng<f.rmax*1.15&&f.track===2&&f.wpn>0;
   const ownMsls=f.missiles.filter(m=>m.owner===1);
@@ -1378,28 +2591,29 @@ function updateHUD(f){
   document.getElementById('hud-text').innerHTML=`
 <div class="hud-block">
   <div class="hud-title">ENGAGEMENT</div>
-  <div class="hud-row"><span class="hud-label">Range</span><span class="hud-val">${(f.rng/1000).toFixed(2)} km</span></div>
-  <div class="hud-row"><span class="hud-label">Closure</span><span class="hud-val ${f.clos>0?'good':'bad'}">${f.clos.toFixed(0)} m/s</span></div>
-  <div class="hud-row"><span class="hud-label">AC1 aspect (nose→AC2)</span><span class="hud-val">${f.aa.toFixed(1)}°</span></div>
-  <div class="hud-row"><span class="hud-label">AC2 aspect (nose→AC1)</span><span class="hud-val">${f.aa_t.toFixed(1)}°</span></div>
+  <div class="hud-row"><span class="hud-label">Range</span><span class="hud-val">${U.dist(f.rng, 2)}</span></div>
+  <div class="hud-row"><span class="hud-label">Closure</span><span class="hud-val ${f.clos>0?'good':'bad'}">${U.spd(f.clos)}</span></div>
+  <div class="hud-row"><span class="hud-label">${f.wing?'Lead aspect (nose→RED)':'AC1 aspect (nose→AC2)'}</span><span class="hud-val">${f.aa.toFixed(1)}°</span></div>
+  <div class="hud-row"><span class="hud-label">${f.wing?'Red aspect (nose→LEAD)':'AC2 aspect (nose→AC1)'}</span><span class="hud-val">${f.aa_t.toFixed(1)}°</span></div>
 </div>
 <div class="hud-block">
   <div class="hud-title">RADAR TRACK</div>
   <div class="hud-row"><span class="hud-label">State</span><span class="hud-val" style="color:${TRACK_C[f.track]}">${TRACK_N[f.track]||'?'}</span></div>
-  <div class="hud-row"><span class="hud-label">Position σ (uncertainty)</span><span class="hud-val ${f.pos_sig<500?'good':f.pos_sig>2000?'bad':'warn'}">${f.pos_sig.toFixed(0)} m</span></div>
-  <div class="hud-row"><span class="hud-label">Track age</span><span class="hud-val">${f.trk_age.toFixed(1)} s</span></div>
+  <div class="hud-row"><span class="hud-label">Position σ (uncertainty)</span><span class="hud-val ${f.pos_sig<500?'good':f.pos_sig>2000?'bad':'warn'}">${U.alt(f.pos_sig)}</span></div>
+  <div class="hud-row"><span class="hud-label">Track age</span><span class="hud-val">${f.track===0?'—':f.trk_age.toFixed(1)+' s'}</span></div>
 </div>
 <div class="hud-block">
   <div class="hud-title">LAUNCH ENVELOPE ${inEnv?'<span style="color:var(--green);font-size:12px">✓ IN ENVELOPE</span>':''}</div>
   <div class="hud-row"><span class="hud-label">r / Rmax  (shoot if &lt;1)</span><span class="hud-val ${f.rng<f.rmax?'good':'bad'}">${(f.rng/Math.max(f.rmax,1)).toFixed(3)}</span></div>
   <div class="hud-row"><span class="hud-label">r / NEZ   (best if &lt;1)</span><span class="hud-val ${f.rng<f.rnez?'good':''}">${(f.rng/Math.max(f.rnez,1)).toFixed(3)}</span></div>
-  <div class="hud-row"><span class="hud-label">Own Rmax / Threat Rmax</span><span class="hud-val">${(f.rmax/1000).toFixed(1)} / <span class="${f.rng<f.rmax_t*1.1?'bad':''}">${(f.rmax_t/1000).toFixed(1)}</span> km</span></div>
+  <div class="hud-row"><span class="hud-label">Own Rmax / Threat Rmax</span><span class="hud-val">${U.dist(f.rmax)} / <span class="${f.rng<f.rmax_t*1.1?'bad':''}">${U.dist(f.rmax_t)}</span></span></div>
 </div>
 <div class="hud-block">
-  <div class="hud-title">WEAPONS — AC1: ${f.wpn}× &nbsp; AC2: ${f.wpn_t}×</div>
+  <div class="hud-title">WEAPONS — ${f.wing?'LEAD':'AC1'}: ${f.wpn}× &nbsp; ${f.wing?'WING: '+f.wing.wpn+'× &nbsp; RED':'AC2'}: ${f.wpn_t}×</div>
   ${ownMsls.map(mslLine).join('')}
-  ${thrMsls.length?`<div style="font-size:10px;color:var(--red);letter-spacing:1px;margin-top:4px">INBOUND:</div>${thrMsls.map(mslLine).join('')}`:''}
+  ${thrMsls.length?`<div style="font-size:11px;color:var(--red);letter-spacing:1px;margin-top:4px">INBOUND:</div>${thrMsls.map(mslLine).join('')}`:''}
 </div>
+${f.wing?teamHud(f):''}
 ${f.rwr_warn?`<div style="background:#1a0000;border:1px solid var(--red);padding:6px 8px;font-size:12px;color:var(--red);font-weight:bold">
   ⚠ ${f.rwr_sa?'🎯 SEEKER ACTIVE — EVADE NOW':'LAUNCH WARNING — MISSILE INBOUND'}
 </div>`:''}`;
@@ -1407,6 +2621,8 @@ ${f.rwr_warn?`<div style="background:#1a0000;border:1px solid var(--red);padding
 
 // ─── Controls ─────────────────────────────────────────────────────
 document.getElementById('btn-train').onclick=()=>{
+  if(LIB_ERR && !confirm('The platform library could not be loaded:\n\n'+LIB_ERR
+     +'\n\nStart anyway with F-16C on both sides?')) return;
   const opp=document.getElementById('cfg-opponent').value;
   const ne=parseInt(document.getElementById('cfg-nenvs').value)||1;
   const steps=parseInt(document.getElementById('cfg-steps').value)||2000000;
@@ -1414,16 +2630,32 @@ document.getElementById('btn-train').onclick=()=>{
   const lr=parseFloat(document.getElementById('cfg-lr').value)||0.00025;
   const batch=parseInt(document.getElementById('cfg-batch').value)||256;
   const curr=document.getElementById('cfg-curriculum').value==='1';
+  const advPct=parseFloat(document.getElementById('cfg-adv-wr').value);
+  const advMin=parseInt(document.getElementById('cfg-adv-min').value);
+  const advHold=parseInt(document.getElementById('cfg-adv-hold').value);
+  if(curr && !(advPct>0 && advPct<=100)){ alert('ADVANCE AT must be a win rate between 1 and 100%.'); return; }
+  if(curr && !(advMin>=1)){ alert('MIN EPISODES / STAGE must be at least 1.'); return; }
+  if(curr && !(advHold>=1)){ alert('HOLD FOR must be at least 1 check.'); return; }
+  const spOn=spCheck();
+  const spScr=parseFloat(document.getElementById('cfg-sp-scripted').value);
+  const spNew=parseFloat(document.getElementById('cfg-sp-newest').value);
+  const spEvery=parseInt(document.getElementById('cfg-sp-every').value);
+  const spPool=parseInt(document.getElementById('cfg-sp-pool').value);
+  if(spOn && !(spScr>=0 && spScr<=100)){ alert('SCRIPTED SHARE must be between 0 and 100%.'); return; }
+  if(spOn && !(spNew>=0 && spNew<=100)){ alert('NEWEST SHARE must be between 0 and 100%.'); return; }
+  if(spOn && !(spEvery>=1)){ alert('SNAPSHOT EVERY must be at least 1 (thousand steps).'); return; }
+  if(spOn && !(spPool>=1)){ alert('POOL SIZE must be at least 1.'); return; }
   const resume=document.getElementById('cfg-resume').value.trim();
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   const doctrine=document.getElementById('cfg-doctrine').value;
   totalSteps=steps; epStartTime=Date.now(); epCount=0; stepsDone=0;
-  logArr=[];
+  clearLog('train');
   // Clear all displays so old-run values don't mislead
-  ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf','kv-rev','kv-doc'].forEach(id=>{
+  dashHist=[]; drawDash();
+  ['kv-wr','kv-ex','kv-pk','kv-to','kv-rng','kv-rrm','kv-sh','kv-tf','kv-rev','kv-doc','kv-lost'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.textContent='—';
   });
-  ['kpi-wr','kpi-ex','kpi-pk','kpi-to'].forEach(id=>{
+  ['kpi-wr','kpi-ex','kpi-pk','kpi-to','kpi-lost'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.className='kpi';
   });
   document.getElementById('wr-bar').style.width='0%';
@@ -1440,10 +2672,22 @@ document.getElementById('btn-train').onclick=()=>{
   STAGE_IDS.forEach(id=>{
     const el=document.getElementById('cs-'+id); if(el) el.className='curr-stage';
   });
-  addLog(`▶ Training: opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
+  const fmtSel=document.getElementById('cfg-format').value;
+  const wingSel=document.getElementById('cfg-wing-platform').value;
+  const blueDesc=fmtSel==='2v1'
+    ? `2v1 ${document.getElementById('cfg-platform').value} + ${wingSel||document.getElementById('cfg-platform').value}`
+    : document.getElementById('cfg-platform').value;
+  addLog(`▶ Training: ${blueDesc} v ${document.getElementById('cfg-opp-platform').value}  opponent=${opp.toUpperCase()}  steps=${fmt(steps)}  n_envs=${ne}  doctrine=${doctrine.toUpperCase()}  γ=${gamma}  lr=${lr}  saving as ${runName}.zip`,'log-ok');
   addLog('Initialising SB3 networks... first episode may take 30–60 s.','log-info');
   send({cmd:'start_training',config:{opponent:opp,n_envs:ne,steps,gamma,lr,
-    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine}});
+    batch_size:batch,curriculum:curr,resume:resume||undefined,run_name:runName,doctrine,
+    advance_win_rate:curr?advPct/100:undefined, advance_min_episodes:curr?advMin:undefined,
+    advance_hold_checks:curr?advHold:undefined,
+    sp_scripted_frac:spOn?spScr/100:undefined, sp_newest_frac:spOn?spNew/100:undefined,
+    sp_snapshot_steps:spOn?spEvery*1000:undefined, sp_pool_size:spOn?spPool:undefined,
+    platform:document.getElementById('cfg-platform').value||'F-16C',
+    opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C',
+    format:fmtSel, wingman_platform:(fmtSel==='2v1'&&wingSel)||undefined}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
@@ -1459,14 +2703,19 @@ document.getElementById('btn-eval').onclick=()=>{
   const ckpt=document.getElementById('eval-ckpt').value.trim();
   const speed=parseFloat(document.getElementById('eval-speed').value)||3;
   const doctrine=document.getElementById('eval-doctrine').value;
-  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;
+  tacBuf1.length=0;tacBuf2.length=0;tacBuf3d1.length=0;tacBuf3d2.length=0;altBuf1.length=0;altBuf2.length=0;altBuf3.length=0;
   for(const k in tacMsls)delete tacMsls[k]; lastFrame=null;
   t3ClearTrails();
-  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`, 'log-ok');
-  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine}});
+  const nEp=parseInt(document.getElementById('eval-episodes').value)||0;
+  addLog(`▶ Eval: opponent=${opp}  doctrine=${doctrine}  speed=${speed}×  ckpt=${ckpt||'random'}`
+         +(nEp?`  episodes=${nEp}`:''), 'log-ok', 'watch');
+  wsReset(`${ckpt||'random policy'} v ${opp.replace('_SHOOTER','')} · ${doctrine}`, nEp);
+  send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,n_episodes:nEp,
+    opponent_platform:document.getElementById('eval-opp-platform').value||undefined,
+    format:document.getElementById('eval-format').value||undefined}});
   send({cmd:'set_eval_speed',speed});
 };
-document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn');send({cmd:'stop_eval'})};
+document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn','watch');send({cmd:'stop_eval'})};
 
 // ETA update
 function updateETA() {
@@ -1506,13 +2755,13 @@ updateTermBars(null);
 document.getElementById('btn-decisions').onclick=()=>{
   const mb=document.getElementById('modal-body');
   if(!lastDecisions.length){
-    mb.innerHTML='<div style="color:var(--dim);font-size:13px;padding:10px">No shots recorded — run an eval episode first.</div>';
+    mb.innerHTML='<div style="color:var(--muted);font-size:13px;padding:10px">No shots recorded — run an eval episode first.</div>';
   } else {
     mb.innerHTML=`<table style="width:100%;border-collapse:collapse">
 <tr><th>Time</th><th>Range</th><th>r/Rmax</th><th>r/NEZ</th>
     <th>Aspect</th><th>Track</th><th>Pos σ</th><th>Age</th></tr>
 ${lastDecisions.map(s=>`<tr>
-<td>${s.t}s</td><td>${s.rng} km</td>
+<td>${s.t}s</td><td>${U.dist(s.rng)}</td>
 <td style="color:${parseFloat(s.r_rmax)<1?'var(--green)':'var(--red)'};font-weight:bold">${s.r_rmax}</td>
 <td>${s.r_rnez}</td><td>${s.aa}°</td>
 <td style="color:${TRACK_C[TRACK_N.indexOf(s.track)]||'var(--text)'}">${s.track}</td>
@@ -1574,6 +2823,7 @@ function leftColAvail(){
 // collapse/expand instead of overflowing or leaving a gap.
 function leftColNormalize(){
   const avail = leftColAvail();
+  if (avail <= 0) return;            // WATCH tab hidden: nothing to lay out
   const totalWeight = LEFT_IDS.reduce((s,k)=>s+LEFT_WEIGHT[k],0);
   LEFT_IDS.forEach(id => {
     if (LEFT_H[id] == null) LEFT_H[id] = avail * LEFT_WEIGHT[id] / totalWeight;
@@ -1659,6 +2909,7 @@ function mainColAvail(){
 
 function mainColNormalize(){
   const avail = mainColAvail();
+  if (avail <= 0) return;            // WATCH tab hidden
   if (MAIN_RIGHT_W == null) MAIN_RIGHT_W = 360;   // matches the old fixed width
   MAIN_RIGHT_W = Math.max(MAIN_MIN_RIGHT, Math.min(MAIN_RIGHT_W, avail-MAIN_MIN_LEFT));
   const leftW = Math.max(MAIN_MIN_LEFT, avail-MAIN_RIGHT_W);
@@ -1711,7 +2962,7 @@ function resize(){
   // 2D altitude canvas
   const calt=document.getElementById('cv-alt'); if(calt){calt.width=calt.clientWidth;calt.height=calt.clientHeight;}
   if(lastFrame){drawAlt();}
-  drawMini('cv-wr',wrHist,0,1,'var(--green)',0.65);
+  drawDash();
 }
 window.addEventListener('resize',resize);
 setTimeout(resize,100);
@@ -1753,7 +3004,7 @@ const T3 = {
   follow:'fit',        // 'fit' | 'blue' | 'red' | 'free'
   autoFit:true,
   showRings:true, showLabels:true, showTrails:true, showGrid:true,
-  showBlue:true, showRed:true, showMslBlue:true, showMslRed:true, showLinks:true,
+  showBlue:true, showRed:true, showWing:true, showMslBlue:true, showMslRed:true, showLinks:true,
   labels:{}, seen:new Set(),
   zx:1,                // altitude exaggeration (1/3/6) — see the ALT chip
 
@@ -1766,6 +3017,7 @@ const T3_TRAIL = 260;
 // readable. Horizontal geometry is never touched, and the chip shows the factor.
 const ZX = z => z*T3.zx;
 const COLB = 0x37c8ff, COLR = 0xff4d54;      // blufor / opfor
+const COLW = 0xa98bff;                        // 2v1: the blue wingman
 const DEG = 180/Math.PI;
 
 // ── init ───────────────────────────────────────────────────────────
@@ -1783,6 +3035,9 @@ function t3Init(){
 
   T3.scn = new THREE.Scene();
   T3.scn.background = new THREE.Color(0xbcd6e8);
+  // Haze for the ground, grid and sky only. Every entity material sets
+  // fog:false, so aircraft, missiles, trails and rings keep full colour at
+  // any zoom instead of fading into the sky colour when zoomed out.
   T3.scn.fog = new THREE.FogExp2(0xbcd6e8, 0.0000045);
   T3.cam = new THREE.PerspectiveCamera(52, W/H, 20, 900000);
   T3.tgt = new THREE.Vector3(0,0,9000); T3.tgtWant = T3.tgt.clone();
@@ -1819,7 +3074,7 @@ function t3Init(){
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6),3));
   T3.los = new THREE.Line(lg, new THREE.LineDashedMaterial(
-    {color:0xffffff,transparent:true,opacity:0.45,dashSize:900,gapSize:700,depthTest:false}));
+    {color:0xffffff,transparent:true,opacity:0.45,dashSize:900,gapSize:700,depthTest:false,fog:false}));
   T3.los.renderOrder=3; T3.los.frustumCulled=false; T3.scn.add(T3.los);
 
   // weapon-envelope rings
@@ -1846,6 +3101,28 @@ function t3Grid(step, span, color, opacity, z){
   g.setAttribute('position', new THREE.Float32BufferAttribute(p,3));
   const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color,transparent:true,opacity}));
   l.position.z=z; T3.scn.add(l); return l;
+}
+
+// 2v1: the wingman's jet, trails and line of sight, made on the first 2v1 frame.
+function t3EnsureWing(){
+  if(T3.jet3) return;
+  T3.jet3 = t3MakeJet(COLW);
+  T3.tr3  = t3MakeTrail(COLW,0.95); T3.gt3 = t3MakeTrail(COLW,0.30);
+  T3.shadow3 = t3MakeShadow(); T3.stalk3 = t3MakeStalk(COLW);
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6),3));
+  T3.los2 = new THREE.Line(lg, new THREE.LineDashedMaterial(
+    {color:0xffffff,transparent:true,opacity:0.45,dashSize:900,gapSize:700,depthTest:false,fog:false}));
+  T3.los2.renderOrder=3; T3.los2.frustumCulled=false; T3.scn.add(T3.los2);
+  const chip=document.querySelector('#t3-follow .t3chip[data-m="wing"]'); if(chip) chip.style.display='';
+  const lg2=document.getElementById('t3-lg-wing'); if(lg2) lg2.style.display='';
+}
+function t3Los(line, a, b, op){
+  const lp=line.geometry.attributes.position.array;
+  lp[0]=a[0];lp[1]=a[1];lp[2]=ZX(a[2]); lp[3]=b[0];lp[4]=b[1];lp[5]=ZX(b[2]);
+  line.geometry.attributes.position.needsUpdate=true;
+  line.computeLineDistances();
+  line.material.opacity=op;
 }
 
 // ── meshes ─────────────────────────────────────────────────────────
@@ -1880,7 +3157,7 @@ function t3MakeJet(col){
   tg.setAttribute('position', new THREE.Float32BufferAttribute(tri,3));
   tg.computeVertexNormals();
   body.add(new THREE.Mesh(tg, new THREE.MeshLambertMaterial(
-    {color:col, emissive:new THREE.Color(col).multiplyScalar(0.35), side:THREE.DoubleSide})));
+    {color:col, emissive:new THREE.Color(col).multiplyScalar(0.35), side:THREE.DoubleSide, fog:false})));
 
   // white outline keeps the silhouette legible against sky and ground alike
   const E=[['nose','wRootF'],['wRootF','wTip'],['wTip','wRootB'],['wRootB','tailT'],
@@ -1890,7 +3167,7 @@ function t3MakeJet(col){
   const eg=new THREE.BufferGeometry();
   eg.setAttribute('position', new THREE.Float32BufferAttribute(ep,3));
   body.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial(
-    {color:0xffffff,transparent:true,opacity:0.65})));
+    {color:0xffffff,transparent:true,opacity:0.65,fog:false})));
 
   g.userData.body = body;
   T3.scn.add(g); return g;
@@ -1902,26 +3179,26 @@ function t3MakeMslMesh(col){
   const inner=new THREE.Group(); g.add(inner);
   const geo=new THREE.CylinderGeometry(0.035,0.055,1.0,7);
   geo.rotateZ(-Math.PI/2);                     // cylinder +Y → +X
-  const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:col}));
+  const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:col,fog:false}));
   inner.add(m);
   const fp=[-0.4,0,0, -0.4,0.18,0,  -0.4,0,0, -0.4,-0.18,0,  -0.4,0,0, -0.4,0,0.18];
   const fg=new THREE.BufferGeometry();
   fg.setAttribute('position',new THREE.Float32BufferAttribute(fp,3));
-  inner.add(new THREE.LineSegments(fg,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.7})));
+  inner.add(new THREE.LineSegments(fg,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.7,fog:false})));
   g.userData.inner=inner; g.userData.mat=m.material;
   T3.scn.add(g); return g;
 }
 
 function t3MakeShadow(){
   const g=new THREE.Mesh(new THREE.CircleGeometry(1,20),
-    new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.22,depthWrite:false}));
+    new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.22,depthWrite:false,fog:false}));
   g.position.z=6; T3.scn.add(g); return g;
 }
 function t3MakeStalk(col){
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
   const l=new THREE.Line(g,new THREE.LineDashedMaterial(
-    {color:col,transparent:true,opacity:0.40,dashSize:400,gapSize:400}));
+    {color:col,transparent:true,opacity:0.40,dashSize:400,gapSize:400,fog:false}));
   l.frustumCulled=false; T3.scn.add(l); return l;
 }
 function t3Stalk(l,x,y,z){
@@ -1935,7 +3212,7 @@ function t3MakeLink(){
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
   const l=new THREE.Line(g,new THREE.LineDashedMaterial(
-    {color:0xffb020,transparent:true,opacity:0.8,dashSize:600,gapSize:500,depthTest:false}));
+    {color:0xffb020,transparent:true,opacity:0.8,dashSize:600,gapSize:500,depthTest:false,fog:false}));
   l.frustumCulled=false; l.renderOrder=3; l.visible=false; T3.scn.add(l); return l;
 }
 
@@ -1961,7 +3238,7 @@ function t3MakeTrail(hex,opacity){
   g.setAttribute('color',new THREE.BufferAttribute(col,3));
   g.setDrawRange(0,0);
   const line=new THREE.Line(g,new THREE.LineBasicMaterial(
-    {vertexColors:true,transparent:true,opacity,depthTest:false,depthWrite:false}));
+    {vertexColors:true,transparent:true,opacity,depthTest:false,depthWrite:false,fog:false}));
   line.renderOrder=4; line.frustumCulled=false; T3.scn.add(line);
   return {line,pts:[],base:new THREE.Color(hex)};
 }
@@ -1988,11 +3265,11 @@ function t3TrailBuf(tr){
 }
 // redraw every trail after the exaggeration factor changes
 function t3RefreshTrails(){
-  [T3.tr1,T3.tr2,T3.gt1,T3.gt2].forEach(t=>{ if(t) t3TrailBuf(t); });
+  [T3.tr1,T3.tr2,T3.gt1,T3.gt2,T3.tr3,T3.gt3].forEach(t=>{ if(t) t3TrailBuf(t); });
   Object.values(T3.missiles).forEach(m=>{ if(m&&m.trail) t3TrailBuf(m.trail); });
 }
 function t3ClearTrails(){
-  [T3.tr1,T3.tr2,T3.gt1,T3.gt2].forEach(t=>{ if(t){t.pts=[];t.line.geometry.setDrawRange(0,0);} });
+  [T3.tr1,T3.tr2,T3.gt1,T3.gt2,T3.tr3,T3.gt3].forEach(t=>{ if(t){t.pts=[];t.line.geometry.setDrawRange(0,0);} });
   Object.keys(T3.missiles).forEach(id=>t3KillMsl(id));
   T3.fA=T3.fB=null;
 }
@@ -2003,7 +3280,7 @@ function t3MakeRing(col,opacity){
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
   g.setDrawRange(0,0);
-  const line=new THREE.LineLoop(g,new THREE.LineBasicMaterial({color:col,transparent:true,opacity}));
+  const line=new THREE.LineLoop(g,new THREE.LineBasicMaterial({color:col,transparent:true,opacity,fog:false}));
   line.frustumCulled=false; line.renderOrder=2; T3.scn.add(line);
   return {line,N};
 }
@@ -2023,7 +3300,7 @@ function t3Ring(ring,cx,cy,cz,r){
 // ── missiles ───────────────────────────────────────────────────────
 function t3GetMsl(id,owner){
   if(T3.missiles[id]) return T3.missiles[id];
-  const col = owner===1?0xffdd22:0xff5566;
+  const col = (owner===1||owner===3)?0xffdd22:0xff5566;   // blue team: lead 1, wingman 3
   const mesh = t3MakeMslMesh(col);
   const trail = t3MakeTrail(col,0.9);
   const stalk = t3MakeStalk(col);
@@ -2052,7 +3329,7 @@ function t3UpdateCam(){
 function t3SetFollow(mode){
   T3.follow = mode;
   T3.autoFit = (mode!=='free');
-  followAC = mode==='blue' ? 1 : mode==='red' ? 2 : null;   // legacy global
+  followAC = mode==='blue' ? 1 : mode==='red' ? 2 : null;   // legacy global (1v1 display)
   document.querySelectorAll('#t3-follow .t3chip').forEach(c=>
     c.classList.toggle('on', c.dataset.m===mode));
   t3Sync();
@@ -2147,10 +3424,11 @@ function t3Controls(el, box){
     const mx=e.clientX-rect.left, my=e.clientY-rect.top;
     const ss=p=>{ const c=new THREE.Vector3(p[0],p[1],p[2]).project(T3.cam);
                   return [(c.x*0.5+0.5)*rect.width, (-c.y*0.5+0.5)*rect.height]; };
-    const [x1,y1]=ss(f.own), [x2,y2]=ss(f.tgt);
-    const d1=Math.hypot(mx-x1,my-y1), d2=Math.hypot(mx-x2,my-y2), TH=46;
-    if(d1<TH && d1<=d2)      t3SetFollow(T3.follow==='blue'?'fit':'blue');
-    else if(d2<TH && d2<d1)  t3SetFollow(T3.follow==='red' ?'fit':'red');
+    const cands=[['blue',f.own],['red',f.tgt]];
+    if(f.wing && f.wing.alive) cands.push(['wing',f.wing.pos]);
+    let best=null, bd=46;                                  // px: how close a click must land
+    for(const [m,p] of cands){ const [x,y]=ss(p), d=Math.hypot(mx-x,my-y); if(d<bd){ bd=d; best=m; } }
+    if(best) t3SetFollow(T3.follow===best?'fit':best);
   });
 
   // touch: one finger orbits, two fingers pinch-zoom
@@ -2183,6 +3461,7 @@ function t3Controls(el, box){
     if(k==='1') t3SetFollow('blue');
     else if(k==='2') t3SetFollow('red');
     else if(k==='3') t3SetFollow('fit');
+    else if(k==='4' && T3.jet3) t3SetFollow('wing');
     else if(k==='0') t3SetFollow('free');
     else if(k==='t') t3Preset('top');
     else if(k==='s') t3Preset('side');
@@ -2208,6 +3487,7 @@ function t3BuildOverlay(box){
         <span class="t3lab">FOLLOW</span>
         <button class="t3chip on" data-m="fit">BOTH</button>
         <button class="t3chip blue" data-m="blue">BLUE</button>
+        <button class="t3chip wing" data-m="wing" style="display:none">WING</button>
         <button class="t3chip red"  data-m="red">RED</button>
         <button class="t3chip" data-m="free">FREE</button>
       </div>
@@ -2227,9 +3507,10 @@ function t3BuildOverlay(box){
       </div>
     </div>
     <div id="t3-legend">
-      <div class="t3lgh" id="t3-lgh">LEGEND <span style="float:right;opacity:.6">hide &times;</span></div>
-      <div style="font-size:9px;opacity:.6;letter-spacing:.5px;margin:-2px 0 3px">checkbox = show/hide on the 3D view</div>
+      <div class="t3lgh" id="t3-lgh">LEGEND <span style="float:right;opacity:.9">hide &times;</span></div>
+      <div style="font-size:11px;opacity:.6;letter-spacing:.5px;margin:-2px 0 3px">checkbox = show/hide on the 3D view</div>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showBlue"><i style="background:#37c8ff"></i>BLUE — the agent</label>
+      <label class="t3lgr ck" id="t3-lg-wing" style="display:none"><input type="checkbox" checked data-t3show="showWing"><i style="background:#a98bff"></i>WING — the agent's wingman (2 v 1)</label>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showRed"><i style="background:#ff4d54"></i>RED — bandit</label>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showMslBlue"><i style="background:#ffdd22"></i>Blue missile in flight</label>
       <label class="t3lgr ck"><input type="checkbox" checked data-t3show="showMslRed"><i style="background:#ff5566"></i>Red missile (inbound)</label>
@@ -2245,7 +3526,7 @@ function t3BuildOverlay(box){
     </div>
     <button id="t3-legend-pill">? LEGEND</button>
     <div id="t3-scale"><div class="t3bar"></div><span>—</span></div>
-    <div id="t3-compass"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="rgba(6,10,18,.55)" stroke="rgba(160,200,240,.45)"/><g id="t3-needle"><polygon points="20,5 24,21 20,18 16,21" fill="#ff5566"/><polygon points="20,35 16,19 20,22 24,19" fill="#cfe2ef"/></g><text x="20" y="12" font-size="8" fill="#eef6ff" text-anchor="middle" font-family="Courier New">N</text></svg></div>
+    <div id="t3-compass"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="rgba(6,10,18,.55)" stroke="rgba(160,200,240,.45)"/><g id="t3-needle"><polygon points="20,5 24,21 20,18 16,21" fill="#ff5566"/><polygon points="20,35 16,19 20,22 24,19" fill="#cfe2ef"/></g><text x="20" y="13" font-size="10" font-weight="bold" fill="#eef6ff" text-anchor="middle" font-family="Courier New">N</text></svg></div>
     <div id="t3-threat"></div>
     <div id="t3-banner"></div>
     <div id="t3-sfx"></div>`;
@@ -2306,6 +3587,11 @@ function t3UpdateScene(f){
   t3Push(T3.tr2,f.tgt[0],f.tgt[1],f.tgt[2]);
   t3Push(T3.gt1,f.own[0],f.own[1],4);
   t3Push(T3.gt2,f.tgt[0],f.tgt[1],4);
+  if(f.wing){
+    t3EnsureWing();
+    const w=f.wing.pos;
+    t3Push(T3.tr3,w[0],w[1],w[2]); t3Push(T3.gt3,w[0],w[1],4);
+  }
   for(const m of (f.missiles||[])){
     if(m.state==='HIT'||m.state==='MISS') continue;
     t3Push(t3GetMsl(m.id,m.owner).trail, m.pos[0],m.pos[1],m.pos[2]);
@@ -2326,6 +3612,7 @@ const _lerp=(a,b,t)=>a+(b-a)*t;
 function _alerp(a,b,t){ let d=b-a; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI; return a+d*t; }
 
 function t3Render(){
+  if(VIEW!=='watch') return;         // no 3D work while another tab is shown
   const A=T3.fA, B=T3.fB;
   if(A&&B){
     const t = T3.dtEMA>16 ? Math.min(1,(performance.now()-T3.tB)/T3.dtEMA) : 1;
@@ -2347,11 +3634,12 @@ function t3Render(){
 function t3ChromeStatic(){
   const sb=document.getElementById('t3-scale');
   if(sb){
-    const targetPx=140, raw=targetPx*T3.vpp;
+    const targetPx=140, unit=UNITS==='si'?1:NM, raw=targetPx*T3.vpp/unit;   // raw in m or nm
     const pow=Math.pow(10,Math.floor(Math.log10(raw)));
     const nice=[1,2,5,10].map(k=>k*pow).reduce((a,b)=>Math.abs(b-raw)<Math.abs(a-raw)?b:a);
-    sb.querySelector('.t3bar').style.width=(nice/T3.vpp).toFixed(0)+'px';
-    sb.querySelector('span').textContent = nice>=1000 ? (nice/1000)+' km' : Math.round(nice)+' m';
+    sb.querySelector('.t3bar').style.width=(nice*unit/T3.vpp).toFixed(0)+'px';
+    sb.querySelector('span').textContent = UNITS==='si'
+      ? (nice>=1000 ? (nice/1000)+' km' : Math.round(nice)+' m') : (+nice.toPrecision(3))+' nm';
   }
   const nd=document.getElementById('t3-needle');
   if(nd) nd.setAttribute('transform',`rotate(${(-T3.theta*DEG).toFixed(1)} 20 20)`);
@@ -2372,11 +3660,26 @@ function t3DrawFrame(A,B,t){
 
   t3Orient(T3.jet1, own[0],own[1],ZX(own[2]), psi,  theta,  phi,  jetS);
   t3Orient(T3.jet2, tgt[0],tgt[1],ZX(tgt[2]), psi_t,theta_t,phi_t,jetS);
+  // 2v1: the wingman; an aircraft that has been lost is drawn no more
+  const W2 = B.wing, wA = (A.wing||W2);
+  const wing = W2 ? P(wA.pos, W2.pos) : null;
+  const leadUp = B.own_alive!==false, wingUp = !!(W2 && W2.alive);
+  if(wing && T3.jet3){
+    t3Orient(T3.jet3, wing[0],wing[1],ZX(wing[2]), _alerp(wA.psi,W2.psi,t),
+             _alerp(wA.theta||0,W2.theta||0,t), _alerp(wA.phi||0,W2.phi||0,t), jetS);
+    T3.jet3.visible = T3.shadow3.visible = T3.stalk3.visible = T3.showWing && wingUp;
+    T3.tr3.line.visible = T3.gt3.line.visible = T3.showWing;
+    T3.shadow3.position.set(wing[0],wing[1],6); T3.shadow3.scale.setScalar(jetS*0.38);
+    t3Stalk(T3.stalk3, wing[0],wing[1],wing[2]);
+    T3.los2.visible = T3.showWing && T3.showRed && wingUp;
+    t3Los(T3.los2, wing, tgt, B.red_tgt===2 ? 0.75 : 0.25);
+  }
 
   // legend checkboxes: BLUE/RED gate the jet plus everything that belongs to
   // it — trail, ground track, shadow, altitude stalk.
   T3.jet1.visible = T3.tr1.line.visible = T3.gt1.line.visible
                    = T3.shadow1.visible = T3.stalk1.visible = T3.showBlue;
+  if(!leadUp) T3.jet1.visible = T3.shadow1.visible = T3.stalk1.visible = false;
   T3.jet2.visible = T3.tr2.line.visible = T3.gt2.line.visible
                    = T3.shadow2.visible = T3.stalk2.visible = T3.showRed;
 
@@ -2386,12 +3689,10 @@ function t3DrawFrame(A,B,t){
   t3Stalk(T3.stalk1, own[0],own[1],own[2]);
   t3Stalk(T3.stalk2, tgt[0],tgt[1],tgt[2]);
 
-  // line of sight — only means something with both ends actually on screen
-  T3.los.visible = T3.showBlue && T3.showRed;
-  const lp=T3.los.geometry.attributes.position.array;
-  lp[0]=own[0];lp[1]=own[1];lp[2]=ZX(own[2]); lp[3]=tgt[0];lp[4]=tgt[1];lp[5]=ZX(tgt[2]);
-  T3.los.geometry.attributes.position.needsUpdate=true;
-  T3.los.computeLineDistances();
+  // line of sight — only means something with both ends actually on screen.
+  // In 2v1 the line to the aircraft red is engaging is drawn brighter.
+  T3.los.visible = T3.showBlue && T3.showRed && leadUp;
+  t3Los(T3.los, own, tgt, W2 ? (B.red_tgt===1 ? 0.75 : 0.25) : 0.45);
 
   // envelope rings, drawn at each shooter's own altitude
   t3Ring(T3.rings.rmax,  own[0],own[1],own[2], sRmax);
@@ -2411,23 +3712,25 @@ function t3DrawFrame(A,B,t){
     const mpsi = Math.atan2(v[0],v[1]);                       // ENU → psi from north
     const mth  = Math.atan2(v[2]*T3.zx, Math.hypot(v[0],v[1]));
     t3Orient(mo.mesh, pos[0],pos[1],ZX(pos[2]), mpsi, mth, 0, mslS);
-    const hot = m.seeker_active ? 0x22ffdd : (m.owner===1?0xffdd22:0xff5566);
+    const blueTeam = m.owner===1 || m.owner===3;
+    const hot = m.seeker_active ? 0x22ffdd : (blueTeam?0xffdd22:0xff5566);
     mo.mesh.userData.mat.color.setHex(hot);
     mo.stalk.material.color.setHex(hot);
     t3Stalk(mo.stalk, pos[0],pos[1],pos[2]);
-    const showMsl = m.owner===1 ? T3.showMslBlue : T3.showMslRed;
+    const showMsl = blueTeam ? T3.showMslBlue : T3.showMslRed;
     mo.mesh.visible = mo.trail.line.visible = mo.stalk.visible = showMsl;
 
-    if(m.owner===2){ inbound++;
+    if(!blueTeam){ inbound++;
       if(m.tgo>0 && m.tgo<900 && (nearestTgo==null || m.tgo<nearestTgo)) nearestTgo=m.tgo; }
 
     // datalink support: while the missile is blind it is flying on BLUE's track.
     // Gated on showMsl too — a link dangling to a missile you've hidden looks
     // like a stray line, not a control.
-    if(T3.showLinks && showMsl && m.owner===1 && m.needs_support && !m.seeker_active && linkN<T3.links.length){
+    const src = m.owner===1 ? own : (m.owner===3 ? wing : null);   // the shooter supports its missile
+    if(T3.showLinks && showMsl && src && m.needs_support && !m.seeker_active && linkN<T3.links.length){
       const L=T3.links[linkN++];
       const p=L.geometry.attributes.position.array;
-      p[0]=own[0];p[1]=own[1];p[2]=ZX(own[2]); p[3]=pos[0];p[4]=pos[1];p[5]=ZX(pos[2]);
+      p[0]=src[0];p[1]=src[1];p[2]=ZX(src[2]); p[3]=pos[0];p[4]=pos[1];p[5]=ZX(pos[2]);
       L.geometry.attributes.position.needsUpdate=true; L.computeLineDistances();
       L.material.color.setHex(m.t_stale>1.8?0xff4d54:0xffb020);
       L.material.opacity = 0.55+0.45*Math.sin(performance.now()/180);
@@ -2435,7 +3738,7 @@ function t3DrawFrame(A,B,t){
     }
 
     if(T3.showLabels && showMsl){
-      const el=t3Label('m'+m.id, m.owner===1?'blue':'red');
+      const el=t3Label('m'+m.id, blueTeam?'blue':'red');
       // tgo reads 999 until the missile has a usable solution — don't print that
       const ttg = (m.tgo>0 && m.tgo<900) ? ' · TTG '+m.tgo.toFixed(0)+'s' : '';
       const phase = m.seeker_active ? 'PITBULL'
@@ -2455,21 +3758,30 @@ function t3DrawFrame(A,B,t){
   if(T3.showLabels){
     if(T3.showBlue){
       const l1=t3Label('ac1','blue');
-      l1.innerHTML = `<b>BLUE</b> ${(own[2]/1000).toFixed(1)}km · M${(B.mach||0).toFixed(2)}`
-                   + `<br><span class="sub">${(B.nz||1).toFixed(1)}G · ${B.wpn} msl</span>`;
+      l1.innerHTML = !leadUp ? `<b>LEAD</b> ✕ LOST`
+                   : `<b>${W2?'LEAD':'BLUE'}</b> ${U.altLbl(own[2])} · M${(B.mach||0).toFixed(2)}`
+                   + `<br><span class="sub">${(B.nz||1).toFixed(1)}G · ${B.wpn} msl${B.dl?' · on datalink':''}</span>`;
       t3PlaceLabel(l1, own[0],own[1],own[2], 16, -34);
+    }
+    if(W2 && T3.showWing){
+      const l3=t3Label('ac3','wing');
+      l3.innerHTML = !wingUp ? `<b>WING</b> ✕ LOST`
+                   : `<b>WING</b> ${U.altLbl(wing[2])} · M${(W2.mach||0).toFixed(2)}`
+                   + `<br><span class="sub">${(W2.nz||1).toFixed(1)}G · ${W2.wpn} msl${W2.dl?' · on datalink':''}</span>`;
+      t3PlaceLabel(l3, wing[0],wing[1],wing[2], 16, 10);   // below its jet: clear of the lead's in formation
     }
     if(T3.showRed){
       const l2=t3Label('ac2','red');
-      l2.innerHTML = `<b>RED</b> ${(tgt[2]/1000).toFixed(1)}km · M${(B.mach_t||0).toFixed(2)}`
-                   + `<br><span class="sub">${(B.nz_t||1).toFixed(1)}G · ${B.wpn_t} msl</span>`;
+      l2.innerHTML = `<b>RED</b> ${U.altLbl(tgt[2])} · M${(B.mach_t||0).toFixed(2)}`
+                   + `<br><span class="sub">${(B.nz_t||1).toFixed(1)}G · ${B.wpn_t} msl`
+                   + `${W2?' · engaging '+(B.red_tgt===1?'LEAD':'WING'):''}</span>`;
       t3PlaceLabel(l2, tgt[0],tgt[1],tgt[2], 16, -34);
     }
     // range read-out sitting on the LOS midpoint — only means something with
     // both ends actually on screen (matches T3.los.visible above)
-    if(T3.showBlue && T3.showRed){
+    if(T3.showBlue && T3.showRed && leadUp){
       const lr=t3Label('rng','mid');
-      lr.textContent = (B.rng/1000).toFixed(1)+' km  '+(B.clos>=0?'+':'')+B.clos.toFixed(0)+' m/s';
+      lr.textContent = U.dist(B.rng)+'  '+(B.clos>=0?'+':'')+U.spd(B.clos);
       t3PlaceLabel(lr,(own[0]+tgt[0])/2,(own[1]+tgt[1])/2,(own[2]+tgt[2])/2, 0, -14);
     }
     // ring callouts, placed on the side of the ring facing the bandit
@@ -2498,9 +3810,15 @@ function t3DrawFrame(A,B,t){
   // ── camera target + auto-fit ──
   if(T3.follow==='blue')      T3.tgtWant.set(own[0],own[1],ZX(own[2]));
   else if(T3.follow==='red')  T3.tgtWant.set(tgt[0],tgt[1],ZX(tgt[2]));
+  else if(T3.follow==='wing' && wing) T3.tgtWant.set(wing[0],wing[1],ZX(wing[2]));
   else if(T3.follow==='fit'){
     let cx=(own[0]+tgt[0])/2, cy=(own[1]+tgt[1])/2, cz=ZX((own[2]+tgt[2])/2);
     let need=Math.hypot(tgt[0]-own[0],tgt[1]-own[1],ZX(tgt[2]-own[2]));
+    if(wing){                                           // 2v1: frame all three
+      cx=(own[0]+tgt[0]+wing[0])/3; cy=(own[1]+tgt[1]+wing[1])/3; cz=ZX((own[2]+tgt[2]+wing[2])/3);
+      need=0;
+      for(const q of [own,tgt,wing]) need=Math.max(need, 2*Math.hypot(q[0]-cx,q[1]-cy,ZX(q[2])-cz));
+    }
     for(const m of (B.missiles||[])){                 // keep missiles in frame too
       if(m.state==='HIT'||m.state==='MISS') continue;
       need=Math.max(need, 2*Math.hypot(m.pos[0]-cx,m.pos[1]-cy,ZX(m.pos[2])-cz));
@@ -2508,8 +3826,9 @@ function t3DrawFrame(A,B,t){
     T3.tgtWant.set(cx,cy,cz);
     if(T3.autoFit) T3.rWant=Math.max(2500,Math.min(300000,need*1.45+4000));
   }
-  if(T3.follow==='blue'||T3.follow==='red'){
-    if(T3.autoFit) T3.rWant=Math.max(2500,Math.min(300000,B.rng*0.85+5000));
+  if(T3.follow==='blue'||T3.follow==='red'||T3.follow==='wing'){
+    const r = T3.follow==='wing' && W2 ? W2.rng : B.rng;
+    if(T3.autoFit) T3.rWant=Math.max(2500,Math.min(300000,r*0.85+5000));
   }
 
   t3Chrome(B, inbound, nearestTgo);
@@ -2528,7 +3847,7 @@ function t3Chrome(f, inbound, nearestTgo){
   }
   const ti=document.getElementById('tac-info');
   if(ti) ti.textContent =
-    `T+${(f.t||0).toFixed(0)}s · ${(f.rng/1000).toFixed(1)} km · ${f.clos>=0?'+':''}${f.clos.toFixed(0)} m/s`
+    `T+${(f.t||0).toFixed(0)}s · ${U.dist(f.rng)} · ${f.clos>=0?'+':''}${U.spd(f.clos)}`
     + ` · ${T3.follow==='fit'?'auto-framed':'following '+T3.follow.toUpperCase()}`;
 }
 

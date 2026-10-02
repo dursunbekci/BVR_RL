@@ -16,7 +16,8 @@ IMPORTANT — CALIBRATE THIS.
 The analytic default below is a physically-shaped guess, not your missile.
 It exists so the RL side can be developed before the C++ missile is finished.
 Once `f16simmodel.exe` flies AIM-120s, run `sweep_envelope.py` to build a
-lookup table and load it with `Aim120Envelope.from_table("envelope.npz")`.
+lookup table (library/envelopes/<missile>-<fingerprint>.npz); BvrEnv loads
+the one matching each side's missile.
 An uncalibrated envelope will train a policy that shoots at the wrong range,
 and that error is invisible in the reward curve — it just caps your Pk.
 

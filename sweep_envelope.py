@@ -50,12 +50,15 @@ WHAT THIS SCRIPT DOES
     target-speed slice.
 
 USAGE
-    python sweep_envelope.py                    # writes envelope.npz
+    python sweep_envelope.py                    # AIM-120 -> library/envelopes/
+    python sweep_envelope.py --missile MY-MSL   # any library missile
     python sweep_envelope.py --quick             # coarser grid, for a sanity check
 
-Then either:
-    Aim120Envelope(envelope_table="envelope.npz")
-or pass --envelope-table envelope.npz to train_bvr.py (already wired there).
+Which missile: --missile <library id> (default AIM-120). The table is
+written to library/envelopes/<id>-<fingerprint>.npz, where the fingerprint
+is a hash of the missile's parameters, and the environment loads it from
+there. Editing a missile changes its fingerprint, so a stale table can never
+be used for it: the environment refuses to start until it is calibrated.
 """
 
 import argparse
@@ -65,6 +68,10 @@ import time
 import numpy as np
 
 from missile_sim import AIM120, MslPhase, _isa_a
+from bvr_library import missile_config, envelope_path
+
+# Set in main(): the library missile being calibrated.
+_MSL = None
 
 
 def _fly(launch_range, shooter_mach, alt, aspect_deg, target_mach,
@@ -93,7 +100,8 @@ def _fly(launch_range, shooter_mach, alt, aspect_deg, target_mach,
     # aspect=180: sin=0,cos=-1 -> vel=(0,+v_t,0) away from shooter (tail chase)
     target_vel = np.array([v_t * math.sin(th), -v_t * math.cos(th), 0.0])
 
-    m = AIM120(owner=1, target=2, pos=shooter_pos, vel=shooter_vel, handoff_range=12_000.0)
+    m = AIM120(owner=1, target=2, pos=shooter_pos, vel=shooter_vel,
+               handoff_range=0.5 * (_MSL.HANDOFF_MIN + _MSL.HANDOFF_MAX), cfg=_MSL)
     m.last_tgt_pos = target_pos.copy()
     m.last_tgt_vel = target_vel.copy()
 
@@ -127,10 +135,16 @@ def _bisect_max_range(shooter_mach, alt, aspect_deg, target_mach, reactive=False
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default="envelope.npz")
+    ap.add_argument("--missile", default="AIM-120", help="library missile id")
+    ap.add_argument("--out", default=None,
+                    help="output file (default: the library path for this missile)")
     ap.add_argument("--quick", action="store_true", help="coarse grid, fast sanity run")
     ap.add_argument("--target-mach", type=float, default=0.9)
     args = ap.parse_args()
+    global _MSL
+    _MSL = missile_config(args.missile)
+    out = args.out or str(envelope_path(_MSL))
+    print(f"Calibrating {_MSL.id} (parameters {_MSL.fingerprint}) -> {out}", flush=True)
 
     if args.quick:
         mach_grid = np.array([0.7, 1.1])
@@ -142,7 +156,8 @@ def main():
         # clock budget for this pure-Python missile sim (~1.2s/simulated
         # engagement). Tighten later with more grid points / GPU batching if
         # the trilinear interpolation proves too coarse near the NEZ.
-        mach_grid = np.array([0.7, 1.0, 1.3])
+        # 0.5 covers slow launchers such as a subsonic UCAV.
+        mach_grid = np.array([0.5, 0.7, 1.0, 1.3])
         alt_grid = np.array([3000.0, 9000.0, 13000.0])
         aspect_grid = np.array([0.0, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0])
 
@@ -170,10 +185,13 @@ def main():
                   f"r_max(tail)={r_max[im,ia,-1]/1000:.1f}km  "
                   f"[{time.time()-t0:.0f}s]", flush=True)
 
-    np.savez(args.out,
+    import os
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    np.savez(out,
              mach_grid=mach_grid, alt_grid=alt_grid, aspect_grid=aspect_grid,
-             r_max=r_max, r_nez=r_nez, target_mach_ref=args.target_mach)
-    print(f"\nWrote {args.out}  ({time.time()-t0:.0f}s total)")
+             r_max=r_max, r_nez=r_nez, target_mach_ref=args.target_mach,
+             missile=_MSL.id, fingerprint=_MSL.fingerprint)
+    print(f"\nWrote {out}  ({time.time()-t0:.0f}s total)")
     print(f"Head-on r_max range across grid: "
           f"{r_max[:,:,0].min()/1000:.1f}-{r_max[:,:,0].max()/1000:.1f} km")
 

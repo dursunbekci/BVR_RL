@@ -8,8 +8,8 @@ module widens such a checkpoint so it loads and acts exactly as before.
 
 The network input is N_STACK frames of the observation, frame after frame
 (then, with the privileged critic, N_STACK frames of "priv"). New inputs are
-always appended to the END of each frame (see OBS_LABELS), so an old column
-maps to a known new column and the new columns get zero weights. A zero weight
+always appended to the END of each frame (see OBS_LABELS and PRIV_LABELS), so
+an old column maps to a known new column and the new columns get zero weights. A zero weight
 means the new input has no effect until training gives it one: the widened
 policy's action probabilities are identical to the old policy's.
 
@@ -45,21 +45,25 @@ def _column_maps(old_space, new_space):
     """{old input width: (new column of each old column, new input width)}."""
     o_old, p_old = _widths(old_space)
     o_new, p_new = _widths(new_space)
-    if o_old % N_STACK or p_old != p_new:
+    if o_old % N_STACK or p_old % N_STACK or bool(p_old) != bool(p_new):
         raise ValueError(f"cannot migrate: checkpoint input obs={o_old} priv={p_old}, "
                          f"current code obs={o_new} priv={p_new}")
-    d_old, d_new = o_old // N_STACK, o_new // N_STACK
-    if d_old > d_new:
-        raise ValueError(f"checkpoint has {d_old} inputs per frame, the code only "
-                         f"{d_new}: it was trained by newer code")
-    c = np.arange(o_old)
-    obs_map = (c // d_old) * d_new + c % d_old
+
+    def frame_map(w_old, w_new, what):
+        d_old, d_new = w_old // N_STACK, w_new // N_STACK
+        if d_old > d_new:
+            raise ValueError(f"checkpoint has {d_old} {what} inputs per frame, the code "
+                             f"only {d_new}: it was trained by newer code")
+        c = np.arange(w_old)
+        return (c // d_old) * d_new + c % d_old
+
+    obs_map = frame_map(o_old, o_new, "observation")
     # The actor's first layer takes the obs frames only, the critic's (with a
     # privileged critic) obs then priv frames: two widths, two maps.
     maps = {o_old: (obs_map, o_new)}
     if p_old:
-        maps[o_old + p_old] = (np.concatenate([obs_map, o_new + np.arange(p_old)]),
-                               o_new + p_new)
+        priv_map = frame_map(p_old, p_new, "critic")
+        maps[o_old + p_old] = (np.concatenate([obs_map, o_new + priv_map]), o_new + p_new)
     return maps
 
 
@@ -128,7 +132,8 @@ def load_model(path: str, env=None, log=print, **kwargs):
         if migrate(path, tmp):
             if log:
                 log(f"[bvr] {os.path.basename(path)}: older observation layout, widened "
-                    f"to {OBS_DIM} inputs per frame (new inputs start at zero weight)")
+                    f"to {OBS_DIM} inputs per frame, {PRIV_DIM} for the critic (new inputs "
+                    f"start at zero weight)")
             return MaskablePPO.load(tmp, env=env, **kwargs)
         return MaskablePPO.load(path, env=env, **kwargs)
     finally:

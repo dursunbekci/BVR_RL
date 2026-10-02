@@ -19,6 +19,8 @@ from bvr_track_adapter import RadarTrackAdapter, TrackState, body_to_enu_matrix
 from bvr_envelope     import Aim120Envelope, aspect_deg_from_vectors
 from bvr_radar_sim    import RadarSim
 from bvr_opponents    import BvrOpponent, BvrOpponentType
+from bvr_library      import (load_platform, envelope_path, LibraryError,
+                              DEFAULT_PLATFORM)
 
 G       = 9.80665
 DEG2RAD = math.pi / 180.0
@@ -28,23 +30,30 @@ REF_LON = 35.0
 R_EARTH = 6_371_000.0
 A_SOUND = 300.0
 RANGE_MAX  = 160_000.0
+# Observation scaling bounds for altitude. The altitudes the agent may
+# command come from its platform (ALT_MIN_OP / ALT_MAX_OP in the library).
 ALT_MIN_OP = 1_000.0
 ALT_MAX_OP = 14_000.0
 
 # ── action space ─────────────────────────────────────────────────────
+# Heading choices are offsets from a reference bearing: the line to the
+# bandit's estimated position while there is a track estimate, otherwise the
+# last such bearing, held (or the heading when the track was first missing).
+# A held reference makes "the same choice" mean "the same heading": it used to
+# be the aircraft's own nose, so +30 re-picked each second kept turning, and
+# the reference jumped each time the track came and went.
 HDG_OFFSETS_DEG = [0.0,30.0,-30.0,50.0,-50.0,90.0,-90.0,135.0,-135.0,180.0]
 ALT_DELTAS_M    = [-3000.0,-1200.0,0.0,+1200.0,+3000.0]
+# The four commanded speeds are per platform (SPEED_CMDS in the library);
+# these are the F-16C's, kept for reference and for the action-space size.
 SPEED_CMDS      = [220.0,280.0,340.0,400.0]
 FIRE_OPTIONS    = [0,1]
 ACTION_NVEC     = [len(HDG_OFFSETS_DEG),len(ALT_DELTAS_M),len(SPEED_CMDS),len(FIRE_OPTIONS)]
 
-# Climb angle limit, by altitude. A flat 25° let every +1200/+3000 choice
-# zoom-climb: 8 -> 14 km in a minute while bleeding ~50 m/s. Up high the
-# aircraft has little excess thrust, so a real climb there is shallow. This
-# schedule holds speed within a few m/s on a 3 km climb from any altitude.
-# Dives keep the full 25°.
-CLIMB_FPA_LO_DEG, CLIMB_FPA_HI_DEG = 20.0, 10.0
-CLIMB_FPA_ALT_LO, CLIMB_FPA_ALT_HI = 5_000.0, 11_000.0
+# Climb-angle limit by altitude: per platform (CLIMB_FPA_* in the library).
+# A flat 25° let every climb zoom and bleed ~50 m/s; the F-16C schedule
+# (20° up to 5 km, easing to 10° above 11 km) holds speed within a few m/s
+# on a 3 km climb from any altitude. Dives keep the full 25°.
 
 # ── missile doctrine ─────────────────────────────────────────────────
 # Reward cost charged per missile fired, at launch. The policy sees the value
@@ -58,6 +67,28 @@ DOCTRINE_MIXED = "MIXED"          # training: a random doctrine each episode
 SHOT_COST_MAX = max(DOCTRINES.values())
 
 # ── observation layout ────────────────────────────────────────────────
+WM_OBS_LABELS = [
+    "wm_present","wm_range","wm_brg_cos","wm_brg_sin","wm_alt_rel",
+    "wm_hdg_cos","wm_hdg_sin","wm_speed",
+    "wm_has_track","dl_track_used","wm_wpn",
+    "wm_msl_count","wm_msl_support","wm_msl_tgo",
+    "wm_rwr_warn","wm_inbound_tgo","wm_r_over_rmax_thr",
+]
+WM_OBS_LOW  = [0,2,-1,-1,-8000,-1,-1,0, 0,0,0, 0,0,0, 0,0,0]
+WM_OBS_HIGH = [1,5.3,1,1,8000,1,1,700, 1,1,6, 6,1,90, 1,90,3]
+WM_PRIV_LABELS = [
+    "true_wm_present","true_wm_range_to_bandit","true_wm_aa_t_cos","true_wm_aa_t_sin",
+    "true_wm_r_over_rmax_thr","true_wm_threat_tgo","true_wm_own_tgo","true_bandit_targets_me",
+]
+WM_PRIV_LOW  = [0,0,-1,-1,0,0,0,0]
+WM_PRIV_HIGH = [1,RANGE_MAX,1,1,3,120,120,1]
+
+# The previous heading choice and the turn still to fly (commanded minus actual
+# heading). The heading-change cost is charged on the choice, so the policy must
+# see its last one to learn to hold it; without these it could not, and it
+# flipped between near-equal choices (wing-rocking).
+HDG_OBS_LABELS = ["hdg_prev_cos","hdg_prev_sin","hdg_turn_cos","hdg_turn_sin"]
+
 OBS_LABELS = [
     "own_mach","own_alt","own_gamma_fpa","own_phi_cos","own_phi_sin","own_nz",
     "own_energy","own_alpha","wpn_remaining","fuel_frac",
@@ -74,8 +105,16 @@ OBS_LABELS = [
     # Appended last: bvr_compat widens older checkpoints by adding inputs at
     # the end of each frame, so new inputs must always go at the end.
     "doctrine_shot_cost",
+    # The wingman (2v1 and larger), shared over the datalink. All zero with no
+    # wingman, so 1v1 fills them with "absent" and a 1v1 checkpoint, widened
+    # with zero weights for them, flies exactly as before.
+    *WM_OBS_LABELS,
+    # Appended after the wingman block, for the same reason.
+    *HDG_OBS_LABELS,
 ]
 OBS_DIM = len(OBS_LABELS)
+# The input width of checkpoints from before the wingman block was added.
+OBS_DIM_1V1 = OBS_LABELS.index(WM_OBS_LABELS[0])
 
 OBS_PHYS_LOW = np.array([
     0.4,ALT_MIN_OP,-0.6,-1,-1,-4,0,-0.3,0,0,
@@ -83,6 +122,8 @@ OBS_PHYS_LOW = np.array([
     0,-8000,-12000,-10,0,0,0,0,
     0,0,0,0,0,0,0,0,-1,-1,0,0,0,0,
     0,
+    *WM_OBS_LOW,
+    -1,-1,-1,-1,
 ],dtype=np.float32)
 OBS_PHYS_HIGH = np.array([
     2,ALT_MAX_OP,0.6,1,1,9,30000,0.5,6,1,
@@ -90,6 +131,8 @@ OBS_PHYS_HIGH = np.array([
     700,8000,12000,10,3,3,3,3,
     6,90,90,1,1,5,1,120,1,1,1,90,1,120,
     SHOT_COST_MAX,
+    *WM_OBS_HIGH,
+    1,1,1,1,
 ],dtype=np.float32)
 assert len(OBS_PHYS_LOW)==OBS_DIM==len(OBS_PHYS_HIGH)
 
@@ -100,10 +143,13 @@ PRIV_LABELS = [
     "true_alt_rel","true_speed_t","true_energy_delta",
     "true_tgt_wpn","true_tgt_has_lock",
     "true_nearest_threat_tgo","true_nearest_own_tgo","true_r_over_rmax_thr",
+    *WM_PRIV_LABELS,            # appended last, as for OBS_LABELS
 ]
 PRIV_DIM  = len(PRIV_LABELS)
-PRIV_PHYS_LOW  = np.array([0,-900,-1,-1,-1,-1,-1,-1,-12000,0,-12000,0,0,0,0,0],dtype=np.float32)
-PRIV_PHYS_HIGH = np.array([RANGE_MAX,900,1,1,1,1,1,1,12000,700,12000,6,1,120,120,3],dtype=np.float32)
+PRIV_DIM_1V1 = PRIV_DIM - len(WM_PRIV_LABELS)
+PRIV_PHYS_LOW  = np.array([0,-900,-1,-1,-1,-1,-1,-1,-12000,0,-12000,0,0,0,0,0,*WM_PRIV_LOW],dtype=np.float32)
+PRIV_PHYS_HIGH = np.array([RANGE_MAX,900,1,1,1,1,1,1,12000,700,12000,6,1,120,120,3,*WM_PRIV_HIGH],dtype=np.float32)
+assert len(PRIV_PHYS_LOW)==PRIV_DIM==len(PRIV_PHYS_HIGH)
 
 # The five components of the shaping potential, in the order _potential()
 # builds them. Consumers (trainer logging, GUI panel) key off this.
@@ -145,27 +191,49 @@ class BvrEnv(gym.Env):
 
     R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.5
     R_ESCAPE=-0.6; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
+    # Longest wait for missiles still in flight after the agent is killed; a
+    # missile's own lifetime (MAX_FLIGHT, 120 s) ends it sooner.
+    RESOLVE_MAX_S=130.0
 
     # Cost of changing the heading choice, per 180° of change. Heading
-    # choices are offsets from the line to the bandit, re-picked every second;
+    # choices are offsets from a reference bearing (see HDG_OFFSETS_DEG),
+    # re-picked every second;
     # when two score alike (+30/-30) the policy flipped between them and the
     # aircraft rocked its wings once a second without turning. This makes
-    # holding a choice the tie-break. A deliberate 135° defensive turn costs
-    # 0.011, negligible next to the defence term; flipping +30/-30 every
-    # second for 100 s costs 0.5.
-    W_HDG_CHANGE = 0.015
+    # holding a choice the tie-break. It was 0.015, and trained policies
+    # still switched about every 3.5 s (17-20 bank reversals a minute
+    # through a 3M-step self-play run): a +30/-30 flip cost 0.005, below the
+    # shaping terms it competes with (0.006-0.010 a step). At 0.04 that flip
+    # costs 0.013, about the largest shaping term; a deliberate 135°
+    # defensive turn costs 0.03, still negligible next to the defence term.
+    W_HDG_CHANGE = 0.04
     # A bank reversal is counted when bank passes this far to the other side.
     BANK_REV_DEG = 15.0
+    # A missile may only be launched at a target within this angle of the
+    # nose. It leaves the rail along the aircraft's axis and turns, and the
+    # turn costs it energy: with this missile model, head-on shots lose
+    # ~6% of R-max at 40 deg off the nose and 10-20% at 60 deg, and past 60 deg
+    # the minimum range jumps (at 90 deg a head-on shot only hits from about
+    # 12 to 30 km, a tail shot hardly at all). The radar's +/-60 deg field
+    # of view kept 1v1 shots inside this already; the gate also binds shots
+    # on a wingman's datalink track (2v1), which had no angle limit.
+    MAX_OFF_BORESIGHT_DEG = 60.0
 
     RADAR_OMEGA_COMPENSATED = False
     TRACK_CONVERT_HZ        = 10.0
 
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT,
                  gamma_discount=0.997, seed=42, instance_id=0,
-                 privileged_critic=True, envelope_table=None,
+                 privileged_critic=True, envelope_table="library",
                  radar_model="sim", enable_viz=False, selfplay_pool=None,
-                 doctrine=DOCTRINE_MIXED):
+                 sp_scripted_frac=None, sp_newest_frac=None,
+                 doctrine=DOCTRINE_MIXED, platform=DEFAULT_PLATFORM,
+                 opponent_platform=DEFAULT_PLATFORM):
         super().__init__()
+        # What each side flies, from the parameter library (bvr_library).
+        self._platform_id, self._opp_platform_id = platform, opponent_platform
+        self._plat = load_platform(platform)
+        self._opp_plat = load_platform(opponent_platform)
         doctrine=str(doctrine).upper()
         if doctrine!=DOCTRINE_MIXED and doctrine not in DOCTRINES:
             raise ValueError(f"doctrine {doctrine!r}: choose {DOCTRINE_MIXED} or "
@@ -173,6 +241,8 @@ class BvrEnv(gym.Env):
         self._doctrine_cfg = doctrine
         # Directory of policy snapshots for the SELF_PLAY stage (bvr_selfplay).
         self._selfplay_pool = selfplay_pool
+        # SELF_PLAY opponent mix; None = bvr_selfplay's defaults.
+        self._sp_scripted_frac, self._sp_newest_frac = sp_scripted_frac, sp_newest_frac
         self._sp_observers = {}
         # Optional callable(env) -> opponent, overriding opponent_type for every
         # episode. The cross-play evaluator uses it to pit two chosen policies.
@@ -194,15 +264,23 @@ class BvrEnv(gym.Env):
         self._obs_lo, self._obs_hi   = OBS_PHYS_LOW.copy(),  OBS_PHYS_HIGH.copy()
         self._priv_lo,self._priv_hi  = PRIV_PHYS_LOW.copy(), PRIV_PHYS_HIGH.copy()
 
-        self._world   = SimWorld(seed=seed+instance_id*1000)
+        self._world   = SimWorld(seed=seed+instance_id*1000,
+                                 platform1=self._plat, platform2=self._opp_plat)
         self._track   = RadarTrackAdapter()
-        self._env_mdl = Aim120Envelope(envelope_table)
+        # Launch envelopes: ours for our missile, the threat's for his.
+        self._env_own = self._load_envelope(self._plat.missile, envelope_table)
+        self._env_thr = (self._env_own if self._opp_plat.missile.fingerprint
+                         == self._plat.missile.fingerprint
+                         else self._load_envelope(self._opp_plat.missile, envelope_table))
         self._radar_model = radar_model
-        self._radar   = RadarSim(rng=self._rng) if radar_model=="sim" else None
+        self._radar   = (RadarSim(rng=self._rng, cfg=self._plat.radar,
+                                  target_rcs=self._opp_plat.rcs)
+                         if radar_model=="sim" else None)
 
         self._state={}; self._step_num=0; self._t_sim=0.0
         self._ready=False; self._episode_id=0; self._opponent=None
         self._outcome=None; self._last_shot_t=-999.0
+        self._done=False; self._frozen_phi=None; self.resolve_hook=None
         self._shots_fired=0; self._misses=0; self._support_losses=0
         self._events_seen=set(); self._launch_log=[]; self._last_convert_t=-1e9
         self._cmd_hdg=0.0; self._cmd_alt=9000.0; self._cmd_spd=300.0
@@ -210,8 +288,16 @@ class BvrEnv(gym.Env):
         self._doctrine="AGGRESSIVE"; self._shot_cost=0.0
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
+        self._hdg_switches=0; self._hdg_pairs={}
+        self._hdg_ref=None
         self._phi_terms={k:0.0 for k in PHI_TERMS}
         self._prev_phi_terms=dict(self._phi_terms)
+        # Team play (bvr_team): the wingman's observer, whose radar track is
+        # shared over the datalink, and whether the bandit is aiming at us.
+        # None / True in 1v1, where both change nothing.
+        self._wingman=None
+        self._bandit_targets_me=True
+        self._alive=True             # False once shot down or crashed (team play)
 
         self._viz=None
         if enable_viz:
@@ -228,11 +314,14 @@ class BvrEnv(gym.Env):
             return self._build_obs(),{}
 
         self._step_num=0; self._t_sim=0.0; self._ready=False; self._outcome=None
+        self._done=False; self._frozen_phi=None
         self._last_shot_t=-999.0; self._shots_fired=0; self._misses=0
         self._support_losses=0; self._events_seen.clear(); self._launch_log=[]
         self._state={}; self._last_convert_t=-1e9
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
+        self._hdg_switches=0; self._hdg_pairs={}
+        self._hdg_ref=None
         self._track.reset()
         if self._radar is not None: self._radar.reset()
 
@@ -264,37 +353,45 @@ class BvrEnv(gym.Env):
         self._step_num += 1
         want_fire = bool(FIRE_OPTIONS[i_fire]) and self._can_fire()
         cmd = self._encode_cmd(i_hdg,i_alt,i_spd,i_fire)
-        off = HDG_OFFSETS_DEG[i_hdg]
-        hdg_cost = self.W_HDG_CHANGE*abs(_wrap_deg(off-self._prev_hdg_off))/180.0
-        self._prev_hdg_off = off
+        hdg_cost = self._heading_choice(HDG_OFFSETS_DEG[i_hdg])
         shots_before = self._shots_fired
+        was_resolving = self._frozen_phi is not None
         self._advance(1.0/self.DECISION_HZ, cmd, fire=want_fire)
         shot_cost = self._shot_cost*(self._shots_fired-shots_before)
 
         obs   = self._build_obs()
-        phi   = self._potential()
-        shaping = self._gamma*phi - self._prev_phi
+        # After a kill the potential stays where it was at the kill: with the
+        # bandit gone the track and envelope terms would drift for reasons
+        # that have nothing to do with how the agent flies.
+        if self._frozen_phi is not None: phi, terms = self._frozen_phi
+        else: phi = self._potential(); terms = self._phi_terms
+        if was_resolving:
+            shaping = 0.0
+            shaping_terms = {k: 0.0 for k in PHI_TERMS}
+        else:
+            shaping = self._gamma*phi - self._prev_phi
+            # Same gamma*new - old applied per term, so these sum to `shaping`
+            # exactly and show which part of the potential moved the reward.
+            shaping_terms = {k: self._gamma*terms[k] - self._prev_phi_terms[k]
+                             for k in PHI_TERMS}
         self._prev_phi = phi
-        # Same gamma*new - old applied per term, so these sum to `shaping`
-        # exactly and show which part of the potential moved the reward.
-        terms = self._phi_terms
-        shaping_terms = {k: self._gamma*terms[k] - self._prev_phi_terms[k]
-                         for k in PHI_TERMS}
         self._prev_phi_terms = dict(terms)
         reward = float(shaping) - hdg_cost - shot_cost
 
-        terminated = self._outcome is not None
+        terminated = self._done
         truncated  = (not terminated) and (self._step_num >= self.MAX_STEPS)
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
                 "cost_terms":{"heading":-hdg_cost,"shots":-shot_cost},
                 "doctrine":self._doctrine,
-                "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._track.state],
+                "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._trk_state()],
                 "fired":want_fire,"opponent":self._opponent_type.name,
                 "opponent_detail":getattr(self._opponent,"label",self._opponent_type.name)}
 
         if terminated or truncated:
-            if truncated: self._outcome="TIMEOUT"
+            # Truncated while a kill waits on missiles still in flight: the
+            # kill stands.
+            if truncated: self._outcome=self._outcome or "TIMEOUT"
             reward += self._terminal_reward(self._outcome)
             info.update({"terminal_outcome":self._outcome,
                          "shots_fired":self._shots_fired,
@@ -302,6 +399,7 @@ class BvrEnv(gym.Env):
                          "support_losses":self._support_losses,
                          "launch_log":list(self._launch_log),
                          "bank_reversals":self._bank_revs,
+                         "hdg_switches":self._hdg_switches,"hdg_pairs":dict(self._hdg_pairs),
                          "flight_time":self._t_sim,
                          "wpn_remaining":self._state.get("wpn_remaining",0)})
             self._ready=False
@@ -318,16 +416,38 @@ class BvrEnv(gym.Env):
     def action_masks(self) -> np.ndarray:
         m_hdg=np.ones(len(HDG_OFFSETS_DEG),dtype=bool)
         m_alt=np.ones(len(ALT_DELTAS_M),dtype=bool)
-        m_spd=np.ones(len(SPEED_CMDS),dtype=bool)
+        m_spd=np.ones(len(self._plat.speed_cmds),dtype=bool)
         m_fire=np.array([True,self._can_fire()],dtype=bool)
         return np.concatenate([m_hdg,m_alt,m_spd,m_fire])
 
+    def _heading_choice(self, off) -> float:
+        """Record this step's heading choice (an offset, deg); returns its change cost.
+        Counts the switches, and which choice was left for which, so the
+        trainer can say what a wing-rocking policy alternates between."""
+        prev=self._prev_hdg_off
+        if off!=prev:
+            self._hdg_switches+=1
+            key=f"{_fmt_off(prev)}>{_fmt_off(off)}"
+            self._hdg_pairs[key]=self._hdg_pairs.get(key,0)+1
+        self._prev_hdg_off=off
+        return self.W_HDG_CHANGE*abs(_wrap_deg(off-prev))/180.0
+
+    def _off_boresight_deg(self, est) -> float:
+        """Angle between the aircraft's nose and the line to the estimated target, deg."""
+        if not est["valid"]: return 180.0
+        s=self._state; psi=s.get("psi",0.0); th=s.get("theta",0.0)
+        nose=np.array([math.cos(th)*math.sin(psi),math.cos(th)*math.cos(psi),math.sin(th)])
+        d=est["pos"]-self._own_pos_enu(); n=float(np.linalg.norm(d))
+        if n<1.0: return 0.0
+        return math.degrees(math.acos(float(np.clip(np.dot(nose,d)/n,-1.0,1.0))))
+
     def _can_fire(self) -> bool:
         if self._state.get("wpn_remaining",0)<=0: return False
-        if self._track.state!=TrackState.TRACK:   return False
+        if self._trk_state()!=TrackState.TRACK:   return False
         if (self._t_sim-self._last_shot_t)<3.0:   return False
-        est=self._track.estimate()
+        est=self._est()
         if not est["valid"]: return False
+        if self._off_boresight_deg(est)>self.MAX_OFF_BORESIGHT_DEG: return False
         r=self._est_range(est); r_max,_=self._own_envelope(est)
         # BUG FIX: this used to read `r<=1.15*r_max` — a shot up to 15% BEYOND
         # the missile's own computed kinematic reach. That is not a margin,
@@ -352,7 +472,16 @@ class BvrEnv(gym.Env):
         # decision: it changes slowly, and at 50 Hz it cost ~30% of throughput.
         self._opponent.rmax_t = self._bandit_rmax()
 
-        for k in range(n_frames):
+        # Frames past the decision period: the agent is dead but its missile
+        # is still flying, so the rest of the fight is flown out here, with
+        # the opponent still flying, and the episode ends in this step.
+        k = 0
+        ff_limit = n_frames + int(self.RESOLVE_MAX_S/sim_dt)
+        while k < n_frames or self._fast_forward():
+            if k >= ff_limit:
+                self._done = True; return
+            if k >= n_frames and k % n_frames == 0 and self.resolve_hook is not None:
+                self.resolve_hook(self)
             pkt = dict(cmd)
             pkt["fire"]         = 1 if k<fire_frames else 0
             pkt["msl_guidance"] = self._guidance_packet()
@@ -367,6 +496,10 @@ class BvrEnv(gym.Env):
 
             tlm = self._world.step(pkt, opp)
             self._ingest(tlm)
+            k += 1
+            if not self._state.get("alive",1):
+                if self._check_terminal(): return
+                continue
             ph = self._state.get("phi",0.0)
             if abs(ph) > self.BANK_REV_DEG*DEG2RAD:
                 sg = 1 if ph > 0 else -1
@@ -393,13 +526,14 @@ class BvrEnv(gym.Env):
         t=ev.get("type")
         if t=="MISSILE_LAUNCH" and ev.get("owner")==1:
             self._shots_fired+=1; self._last_shot_t=self._t_sim
-            est=self._track.estimate(); r=self._est_range(est)
+            est=self._est(); r=self._est_range(est)
             r_max,r_nez=self._own_envelope(est)
             self._launch_log.append({
                 "missile_id":ev.get("id"),"t_sim":round(self._t_sim,2),
                 "range_est":round(r,1),"range_true":round(self._state.get("range",-1),1),
                 "r_over_rmax":round(r/max(r_max,1),3),"r_over_rnez":round(r/max(r_nez,1),3),
                 "aspect_est":round(self._est_aspect(est),1),
+                "off_boresight":round(self._off_boresight_deg(est),1),
                 "own_mach":round(self._state.get("mach",0),3),
                 "own_alt":round(self._state.get("alt",0),0),
                 "track_age":round(est["age"],2),"pos_sigma":round(est["pos_sigma"],1)})
@@ -415,18 +549,38 @@ class BvrEnv(gym.Env):
             if   ev.get("ac")==1: self._outcome="CRASH"
             elif ev.get("ac")==2 and self._outcome is None: self._outcome="BANDIT_CRASH"
 
+    def _fast_forward(self) -> bool:
+        """The agent is dead and the episode waits only on its missiles."""
+        return (self._outcome is not None and not self._done
+                and not self._state.get("alive",1))
+
     def _check_terminal(self) -> bool:
-        if self._outcome is not None: return True
+        if self._done: return True
         s=self._state
+        if self._outcome is not None:
+            # A kill ends the fight only once no missile is left in flight at
+            # a live aircraft: a shooter killed with its missile already on
+            # its own seeker can still take its killer with it (MUTUAL_KILL).
+            # The survivor flies on meanwhile; if that is the agent it can
+            # still defend, if it is the opponent the rest is flown out in
+            # _advance within this step.
+            if self._outcome=="KILL" and s.get("alt",9000)<self.MIN_ALT:
+                self._outcome="MUTUAL_KILL"   # flew into the ground defending
+            elif self._outcome in ("KILL","SHOT_DOWN") and self._world.missiles_pending():
+                if self._frozen_phi is None:
+                    self._frozen_phi=(self._potential(), dict(self._phi_terms))
+                return False
+            self._done=True; return True
         if not s: return False
-        if s.get("alt",9000)<self.MIN_ALT:    self._outcome="CRASH";  return True
+        if s.get("alt",9000)<self.MIN_ALT:    self._outcome="CRASH"
         # The world never reports a crash (the flight model just clamps at
         # 10 m), so the same floor must be applied to the bandit here. Without
         # it BANDIT_CRASH could not happen and a self-play snapshot could fly
         # into the ground and keep fighting while the agent could not.
-        if s.get("alt_t",9000)<self.MIN_ALT:  self._outcome="BANDIT_CRASH"; return True
-        if s.get("range",0)>self.ESCAPE_RANGE: self._outcome="ESCAPE"; return True
-        return False
+        elif s.get("alt_t",9000)<self.MIN_ALT:  self._outcome="BANDIT_CRASH"
+        elif s.get("range",0)>self.ESCAPE_RANGE: self._outcome="ESCAPE"
+        else: return False
+        self._done=True; return True
 
     def _terminal_reward(self, outcome:str) -> float:
         base={"KILL":self.R_KILL,"SHOT_DOWN":self.R_KILLED,"MUTUAL_KILL":self.R_MUTUAL,
@@ -450,9 +604,12 @@ class BvrEnv(gym.Env):
         """
         o=self._sp_observers.get(privileged)
         if o is None:
+            # Seen from AC2: its platform is our opponent's and vice versa.
             o=BvrEnv(seed=self._instance*7919+17, instance_id=self._instance,
-                     privileged_critic=privileged, radar_model=self._radar_model)
-            o._env_mdl=self._env_mdl          # same calibrated envelope
+                     privileged_critic=privileged, radar_model=self._radar_model,
+                     envelope_table=None, platform=self._opp_platform_id,
+                     opponent_platform=self._platform_id)
+            o._env_own, o._env_thr = self._env_thr, self._env_own
             self._sp_observers[privileged]=o
         return o
 
@@ -464,12 +621,31 @@ class BvrEnv(gym.Env):
             d=names[int(self._rng.integers(len(names)))]
         self._doctrine=d; self._shot_cost=float(DOCTRINES[d])
 
+    @staticmethod
+    def _load_envelope(missile_cfg, envelope_table) -> Aim120Envelope:
+        """
+        "library": the table calibrated for this exact missile (by parameter
+        fingerprint); a path: that table, for every missile (legacy); None:
+        the uncalibrated analytic model (tests only).
+        """
+        if envelope_table is None:
+            return Aim120Envelope(None)
+        if envelope_table != "library":
+            return Aim120Envelope(envelope_table)
+        path = envelope_path(missile_cfg)
+        if not path.exists():
+            raise LibraryError(
+                f"no calibrated launch envelope for missile {missile_cfg.id!r} with its current "
+                f"parameters (expected {path.name}). Calibrate it first: GUI Library → Calibrate, "
+                f"or `python sweep_envelope.py --missile {missile_cfg.id}`.")
+        return Aim120Envelope(str(path))
+
     def _bandit_rmax(self) -> float:
         """The bandit's true R-max against us, from ground truth."""
         s=self._state
         tp=self._to_enu(s.get("lat_t",REF_LAT),s.get("lon_t",REF_LON),s.get("alt_t",9000))
         ua=aspect_deg_from_vectors(tp,self._own_pos_enu(),self._own_vel_enu())
-        rmt,_=self._env_mdl.compute(s.get("speed_t",280)/A_SOUND,s.get("alt_t",9000),ua,
+        rmt,_=self._env_thr.compute(s.get("speed_t",280)/A_SOUND,s.get("alt_t",9000),ua,
                                     s.get("speed",280)/A_SOUND)
         return float(rmt)
 
@@ -485,6 +661,9 @@ class BvrEnv(gym.Env):
     def _radar_update(self, dt:float=0.1) -> None:
         s=self._state
         if not s: return
+        # A destroyed bandit is frozen in place in the world; it must not be
+        # seen, so the track coasts and drops as it would on a real kill.
+        if not s.get("alive_t",1): return
         att   =(s.get("psi",0),s.get("theta",0),s.get("phi",0))
         omega = np.zeros(3) if self.RADAR_OMEGA_COMPENSATED else \
                 np.array([s.get("p",0),s.get("q",0),s.get("r_body",0)])
@@ -529,7 +708,7 @@ class BvrEnv(gym.Env):
     def _own_envelope(self,est) -> tuple:
         s=self._state; mach=s.get("mach",s.get("speed",280)/A_SOUND)
         tgt_mach=est["speed"]/A_SOUND if est["valid"] else 0.9
-        return self._env_mdl.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach)
+        return self._env_own.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach)
 
     def _threat_envelope(self,est) -> tuple:
         if not est["valid"]: return 60_000.0,25_000.0
@@ -537,17 +716,114 @@ class BvrEnv(gym.Env):
         own_vel=self._own_vel_enu()
         our_asp=aspect_deg_from_vectors(est["pos"],self._own_pos_enu(),own_vel)
         own_mach=s.get("mach",s.get("speed",280)/A_SOUND)
-        return self._env_mdl.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach)
+        return self._env_thr.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach)
 
     def _guidance_packet(self) -> dict:
-        est=self._track.estimate()
-        if not est["valid"] or self._track.state==TrackState.NONE:
+        est=self._est()
+        if not est["valid"] or self._trk_state()==TrackState.NONE:
             return {"valid":0}
         return {"valid":1,
                 "tgt_pos":[round(float(v),1) for v in est["pos"]],
                 "tgt_vel":[round(float(v),2) for v in est["vel"]],
                 "pos_sigma":round(est["pos_sigma"],1),
                 "t_est":round(self._t_sim-est["age"],3)}
+
+    # ── datalink: the picture this aircraft fights on ─────────────────
+    # Error the datalink adds to a track it relays (registration and latency),
+    # added in quadrature to the sender's own position sigma.
+    DL_POS_SIGMA = 150.0
+    DL_AGE       = 0.2
+
+    def _dl_track(self):
+        """The wingman's firm radar track as received over the datalink, or None."""
+        wm=self._wingman
+        if wm is None or not wm._alive or wm._track.state!=TrackState.TRACK:
+            return None
+        e=wm._track.estimate()
+        if not e["valid"]: return None
+        e=dict(e)
+        e["pos_sigma"]=math.hypot(e["pos_sigma"],self.DL_POS_SIGMA)
+        e["age"]=e["age"]+self.DL_AGE
+        e["raw_rae"]=None
+        return e
+
+    def _est(self) -> dict:
+        """
+        The track this aircraft uses for everything (observation, shots,
+        missile support, commands): its own radar's when that is firm,
+        otherwise its wingman's over the datalink. With no wingman it is
+        always its own, exactly as in 1v1.
+        """
+        if self._wingman is None or self._track.state==TrackState.TRACK:
+            return self._track.estimate()
+        return self._dl_track() or self._track.estimate()
+
+    def _trk_state(self) -> int:
+        if self._wingman is None or self._track.state==TrackState.TRACK:
+            return self._track.state
+        return TrackState.TRACK if self._dl_track() is not None else self._track.state
+
+    def _dl_used(self) -> bool:
+        return (self._wingman is not None and self._track.state!=TrackState.TRACK
+                and self._dl_track() is not None)
+
+    @staticmethod
+    def _missiles_of(state, owner_label):
+        """(count, nearest tgo, any needs support) of live missiles with that owner label."""
+        n=0; tgo=None; sup=0.0
+        for m in state.get("missiles",[]) or []:
+            if m.get("state") in ("HIT","MISS","DUD") or m.get("owner")!=owner_label: continue
+            n+=1; t=float(m.get("tgo_est",0))
+            tgo=t if tgo is None else min(tgo,t)
+            sup=max(sup,float(m.get("needs_support",0)))
+        return n,(tgo or 0.0),sup
+
+    def _heading_obs(self) -> list:
+        """HDG_OBS_LABELS: the last heading choice and the turn still to fly."""
+        prev=self._prev_hdg_off*DEG2RAD
+        turn=_wrap_pi(self._cmd_hdg-self._state.get("psi",self._cmd_hdg))
+        return [math.cos(prev),math.sin(prev),math.cos(turn),math.sin(turn)]
+
+    def _wingman_obs(self) -> list:
+        """The wingman inputs (WM_OBS_LABELS): what the datalink tells us about him."""
+        wm=self._wingman
+        if wm is None or not wm._alive or not wm._state:
+            return [0.0]*len(WM_OBS_LABELS)
+        s,w=self._state,wm._state
+        d=wm._own_pos_enu()-self._own_pos_enu()
+        rng=float(np.linalg.norm(d))
+        brg=_wrap_pi(math.atan2(d[0],d[1])-s.get("psi",0))
+        hdg=_wrap_pi(w.get("psi",0)-s.get("psi",0))
+        n,tgo,sup=self._missiles_of(w,1)
+        wrwr=w.get("rwr",{}) or {}
+        _,thr_tgo,_=self._missiles_of(w,2)
+        west=wm._est()
+        r_thr=0.0
+        if west["valid"]:
+            rmt,_=wm._threat_envelope(west)
+            r_thr=wm._est_range(west)/max(rmt,1)
+        return [1.0,math.log10(max(rng,100)),math.cos(brg),math.sin(brg),
+                float(w.get("alt",9000))-float(s.get("alt",9000)),
+                math.cos(hdg),math.sin(hdg),float(w.get("speed",0)),
+                1.0 if wm._track.state==TrackState.TRACK else 0.0,
+                1.0 if self._dl_used() else 0.0,
+                float(w.get("wpn_remaining",0)),
+                float(n),sup,tgo,
+                float(wrwr.get("launch_warn",0)),thr_tgo,r_thr]
+
+    def _wingman_priv(self) -> list:
+        """The critic's truth about the wingman (WM_PRIV_LABELS)."""
+        wm=self._wingman
+        me_tgt=1.0 if self._bandit_targets_me else 0.0
+        if wm is None or not wm._alive or not wm._state:
+            return [0.0]*(len(WM_PRIV_LABELS)-1)+[me_tgt]
+        w=wm._state
+        aat=w.get("aa_deg_t",180)*DEG2RAD
+        _,thr_tgo,_=self._missiles_of(w,2)
+        _,own_tgo,_=self._missiles_of(w,1)
+        return [1.0,float(w.get("range",RANGE_MAX)),math.cos(aat),math.sin(aat),
+                float(w.get("range",RANGE_MAX))/max(wm._bandit_rmax(),1),
+                thr_tgo,own_tgo,me_tgt]
 
     # ── observation ────────────────────────────────────────────────────
     def _missile_summary(self):
@@ -562,11 +838,11 @@ class BvrEnv(gym.Env):
         return own,thr,n
 
     def _build_obs(self):
-        s=self._state; est=self._track.estimate(); op=self._own_pos_enu()
+        s=self._state; est=self._est(); op=self._own_pos_enu()
         speed=s.get("speed",280); alt=s.get("alt",9000)
         mach=s.get("mach",speed/A_SOUND); phi=s.get("phi",0)
         e_own=alt+speed**2/(2*G)
-        oh=[0.0]*4; oh[int(self._track.state)]=1.0
+        oh=[0.0]*4; oh[int(self._trk_state())]=1.0
 
         if est["valid"]:
             d=est["pos"]-op; rng_e=float(np.linalg.norm(d))
@@ -612,6 +888,8 @@ class BvrEnv(gym.Env):
             self._step_num/float(self.MAX_STEPS),
             min(self._t_sim-self._last_shot_t,120) if self._last_shot_t>-900 else 120,
             self._shot_cost,
+            *self._wingman_obs(),
+            *self._heading_obs(),
         ],dtype=np.float32)
         obs=self._norm(obs,self._obs_lo,self._obs_hi)
         if not self._privileged: return obs
@@ -636,6 +914,7 @@ class BvrEnv(gym.Env):
             float(tm.get("tgo_est",0)) if tm else 0,
             float(om.get("tgo_est",0)) if om else 0,
             rng/max(rmt,1),
+            *self._wingman_priv(),
         ],dtype=np.float32)
         return self._norm(p,self._priv_lo,self._priv_hi)
 
@@ -645,12 +924,13 @@ class BvrEnv(gym.Env):
 
     # ── potential ──────────────────────────────────────────────────────
     def _potential(self) -> float:
-        s=self._state; est=self._track.estimate(); rng=self._est_range(est)
+        s=self._state; est=self._est(); rng=self._est_range(est)
+        ts=self._trk_state()
         rm,rn=self._own_envelope(est); rmt,rnt=self._threat_envelope(est)
         pe=self.W_ENVELOPE*(_band(rng,rn,rm)-_band(rng,rnt,rmt))
-        if   self._track.state==TrackState.TRACK:     t=1.0
-        elif self._track.state==TrackState.COAST:     t=0.4*math.exp(-est["age"]/8)
-        elif self._track.state==TrackState.ACQUIRING: t=0.5
+        if   ts==TrackState.TRACK:     t=1.0
+        elif ts==TrackState.COAST:     t=0.4*math.exp(-est["age"]/8)
+        elif ts==TrackState.ACQUIRING: t=0.5
         else: t=0.0
         pt=self.W_TRACK*t
         eo=s.get("alt",9000)+s.get("speed",280)**2/(2*G)
@@ -658,10 +938,18 @@ class BvrEnv(gym.Env):
         pe2=self.W_ENERGY*math.tanh((eo-et)/4000)
         om,tm,_=self._missile_summary()
         ps=0.0
-        if om and om.get("needs_support",0) and self._track.state==TrackState.TRACK:
+        if om and om.get("needs_support",0) and ts==TrackState.TRACK:
             ps=self.W_SUPPORT*math.exp(-est["pos_sigma"]/600)
+        # Danger from the nearest inbound missile: near 0 while it is far or
+        # not closing, falling towards -W_DEFENCE as its time-to-go runs out,
+        # and back to 0 when it ends (a missile that hits drops out of the
+        # list on that step, so the outcome reward stands as it is). This was
+        # +W_DEFENCE*tanh(tgo/25): the same slope, but a distant missile then
+        # scored above no missile at all, paying ~+0.8 on the step the bandit
+        # fired and ~-0.8 on the step its missile ended far away.
         pd=0.0
-        if tm: pd=self.W_DEFENCE*math.tanh(float(tm.get("tgo_est",60))/25)
+        if tm and s.get("alive",1):
+            pd=-self.W_DEFENCE*(1.0-math.tanh(float(tm.get("tgo_est",60))/25))
         # Recorded from the very variables summed below, so the breakdown can
         # never drift from the potential it explains.
         self._phi_terms={"envelope":float(pe),"track":float(pt),
@@ -671,28 +959,54 @@ class BvrEnv(gym.Env):
 
     # ── action → command ───────────────────────────────────────────────
     def _encode_cmd(self,ih,ia,isp,ifire) -> dict:
-        s=self._state; est=self._track.estimate()
+        s=self._state; est=self._est()
         if est["valid"]:
-            d=est["pos"]-self._own_pos_enu(); base=math.atan2(d[0],d[1])
-        else: base=s.get("psi",0)
-        self._cmd_hdg=_wrap_2pi(base+HDG_OFFSETS_DEG[ih]*DEG2RAD)
-        self._cmd_alt=float(np.clip(s.get("alt",9000)+ALT_DELTAS_M[ia],ALT_MIN_OP,ALT_MAX_OP))
-        self._cmd_spd=float(SPEED_CMDS[isp])
+            d=est["pos"]-self._own_pos_enu()
+            self._hdg_ref=math.atan2(d[0],d[1])
+        elif self._hdg_ref is None:
+            self._hdg_ref=s.get("psi",0)
+        self._cmd_hdg=_wrap_2pi(self._hdg_ref+HDG_OFFSETS_DEG[ih]*DEG2RAD)
+        p=self._plat
+        self._cmd_alt=float(np.clip(s.get("alt",9000)+ALT_DELTAS_M[ia],p.alt_min,p.alt_max))
+        self._cmd_spd=float(p.speed_cmds[isp])
         return {"mode":0,"chiDot":0,"gamma":0,
                 "V":self._cmd_spd,"hdgCmd":self._cmd_hdg,"altTarget":self._cmd_alt,
-                "altFPA":25*DEG2RAD,"climbFPA":_climb_fpa(s.get("alt",9000)),"hdgTurnRate":12*DEG2RAD,
+                "altFPA":25*DEG2RAD,"climbFPA":p.climb_fpa(s.get("alt",9000)),"hdgTurnRate":12*DEG2RAD,
                 "maneuver":"NONE","task":"NONE","radar_cmd":1,"fire":0}
 
     # ── IC generator ───────────────────────────────────────────────────
     _SCENARIOS=["head_on","offset_left","offset_right","beam","stern_conversion"]
+    # The scenarios are drawn from AC1's side: AC1 always starts nose-on to
+    # AC2, while AC2 is offset, beaming or running away in four of the five.
+    # The agent flies AC1, so it always got the better start and never
+    # practised the worse one; a policy against itself scored 0.71 in the
+    # AC1 seat. This share of episodes swaps the two aircraft's starts.
+    MIRROR_START_FRAC=0.5
 
-    def _random_ic(self) -> dict:
-        sc=str(self._rng.choice(self._SCENARIOS))
+    def stern_starts(self, blue_top_speed=None) -> bool:
+        """Whether stern-conversion starts are drawn.
+
+        They start the bandit 45-75 km away, flying away. Against a bandit
+        with a higher top speed than blue's, blue can never close, so the
+        episode can't be won; they are left out then. blue_top_speed is the
+        fastest blue aircraft's (2v1); by default this aircraft's.
+        """
+        blue=self._plat.speed_cmds[-1] if blue_top_speed is None else blue_top_speed
+        return self._opp_plat.speed_cmds[-1] <= blue
+
+    def _random_ic(self, blue_top_speed=None) -> dict:
+        scenarios=(self._SCENARIOS if self.stern_starts(blue_top_speed)
+                   else [c for c in self._SCENARIOS if c!="stern_conversion"])
+        sc=str(self._rng.choice(scenarios))
         rm=float(self._rng.uniform(70000,110000))
         br=float(self._rng.uniform(0,2*math.pi))
         a1a=float(self._rng.uniform(6000,11000))
         a2a=float(np.clip(a1a+self._rng.uniform(-2500,2500),4000,12500))
-        a1s=float(self._rng.uniform(250,320)); a2s=float(self._rng.uniform(250,320))
+        # Start speeds are drawn for an F-16 (250-320 m/s) and scaled by each
+        # platform's fastest speed choice relative to the F-16's 400 m/s, so a
+        # slower aircraft starts at a speed it can actually fly.
+        a1s=float(self._rng.uniform(250,320))
+        a2s=float(self._rng.uniform(250,320))
         a1p=br
         if   sc=="head_on":      a2p=br+math.pi+float(self._rng.uniform(-0.15,0.15))
         elif sc=="offset_left":  a2p=br+math.pi+float(self._rng.uniform(0.25,0.70))
@@ -700,11 +1014,16 @@ class BvrEnv(gym.Env):
         elif sc=="beam":         a2p=br+math.pi/2+float(self._rng.uniform(-0.30,0.30))
         else:                    a2p=br+float(self._rng.uniform(-0.30,0.30)); rm=float(self._rng.uniform(45000,75000))
         dl=rm*math.cos(br)/R_EARTH; dlo=rm*math.sin(br)/(R_EARTH*math.cos(REF_LAT*DEG2RAD))
-        return dict(scenario=sc,
-                    ac1_lat=REF_LAT,ac1_lon=REF_LON,ac1_alt=a1a,ac1_psi=_wrap_2pi(a1p),ac1_spd=a1s,
-                    ac2_lat=REF_LAT+math.degrees(dl),ac2_lon=REF_LON+math.degrees(dlo),
-                    ac2_alt=a2a,ac2_psi=_wrap_2pi(a2p),ac2_spd=a2s,
-                    wpn=4,wpn_t=4,start_range=rm)
+        p1=(REF_LAT,REF_LON,a1a,a1p,a1s)
+        p2=(REF_LAT+math.degrees(dl),REF_LON+math.degrees(dlo),a2a,a2p,a2s)
+        mirrored=bool(self._rng.random()<self.MIRROR_START_FRAC)
+        if mirrored: p1,p2=p2,p1
+        # Speeds are drawn for an F-16 and scaled to the platform in each seat.
+        k1=self._plat.speed_cmds[-1]/400.0; k2=self._opp_plat.speed_cmds[-1]/400.0
+        return dict(scenario=sc,mirrored=mirrored,
+                    ac1_lat=p1[0],ac1_lon=p1[1],ac1_alt=p1[2],ac1_psi=_wrap_2pi(p1[3]),ac1_spd=p1[4]*k1,
+                    ac2_lat=p2[0],ac2_lon=p2[1],ac2_alt=p2[2],ac2_psi=_wrap_2pi(p2[3]),ac2_spd=p2[4]*k2,
+                    wpn=self._plat.wpn_count,wpn_t=self._opp_plat.wpn_count,start_range=rm)
 
     def close(self): pass
 
@@ -712,9 +1031,7 @@ class BvrEnv(gym.Env):
 def _wrap_pi(a):  return (a+math.pi)%(2*math.pi)-math.pi
 def _wrap_2pi(a): return a%(2*math.pi)
 def _wrap_deg(a): return (a+180.0)%360.0-180.0
-def _climb_fpa(alt):
-    f=min(max((alt-CLIMB_FPA_ALT_LO)/(CLIMB_FPA_ALT_HI-CLIMB_FPA_ALT_LO),0.0),1.0)
-    return (CLIMB_FPA_LO_DEG+f*(CLIMB_FPA_HI_DEG-CLIMB_FPA_LO_DEG))*DEG2RAD
+def _fmt_off(a): return "0" if a==0 else f"{a:+.0f}"
 def _band(r,rn,rm):
     if r<=rn: return 1.0
     if r>=rm: return 0.0

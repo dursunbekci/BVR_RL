@@ -1,19 +1,32 @@
 """
-train_bvr.py  —  MaskablePPO training for 1v1 BVR
-=================================================
+train_bvr.py  —  MaskablePPO training for 1v1 and 2v1 BVR
+=========================================================
 
     pip install sb3-contrib
 
     python train_bvr.py                            # curriculum from STRAIGHT
     python train_bvr.py --opponent shooter         # fixed opponent
     python train_bvr.py --resume models_bvr/latest
-    python train_bvr.py --n-envs 8                 # once C++ supports --instance
+    python train_bvr.py --n-envs 8                 # parallel environments
+    python train_bvr.py --platform GENERIC-UCAV --opponent-platform F-16C
+                                                   # library platforms (library/)
+    python train_bvr.py --format 2v1 --platform GENERIC-UCAV --opponent-platform F-16C
+                                                   # two agents (one shared policy) v one
+    python train_bvr.py --format 2v1 --resume models_bvr/archive/best_ADAPTIVE_SHOOTER_0.700
+                                                   # warm start 2v1 from a 1v1 checkpoint
+
+2v1 (bvr_team): both blue aircraft are flown by the same policy, each on its
+own observation, with their radar tracks shared over a datalink; red is the
+scripted curriculum opponent (self-play is 1v1 only for now). --platform is
+the lead's aircraft, --wingman-platform the wingman's (default: the same).
+With --n-envs N there are N fights and 2N agent slots.
 
 TensorBoard:
     bvr/win_rate            KILL fraction over last 50 TERMINAL episodes
     bvr/loss_rate           SHOT_DOWN fraction
     bvr/mutual_rate         MUTUAL_KILL fraction
-    bvr/exchange_ratio      kills / losses
+    bvr/exchange_ratio      enemy aircraft destroyed / own aircraft lost:
+                            (kills + mutual) / (losses + mutual), losses floored at 1
     bvr/realized_pk         kills / shots fired
     bvr/shots_per_episode
     bvr/mean_launch_range   km
@@ -22,8 +35,11 @@ TensorBoard:
     bvr/timeout_rate        watch this: a rising timeout rate means the
                             passivity collapse is starting
     bvr/bank_rev_per_min    wing-rocking: bank reversals per minute of flight
+    bvr/hdg_switch_per_min  heading-choice changes per minute of flight
     bvr/<DOCTRINE>_shots    shots per episode under each missile doctrine
     bvr/<DOCTRINE>_pk       (with --doctrine mixed, they should separate)
+    bvr/blue_losses_per_ep  2v1: blue aircraft lost per episode (0-2). MUTUAL_KILL
+                            is red killed at the cost of a blue aircraft
 
 Win rate is computed over TERMINAL episode outcomes only. Per-step outcome
 counting dilutes it by ~the episode length and makes the curriculum advance
@@ -47,9 +63,14 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFram
 
 from bvr_env import BvrEnv, REWARD_TERMS, DOCTRINES, DOCTRINE_MIXED
 from bvr_compat import load_model
+from bvr_library import (DEFAULT_PLATFORM, LibraryError, load_platform, scenario_record,
+                         scenario_of, scenario_drift)
 from bvr_opponents import BvrOpponentType, CURRICULUM, advance_curriculum
 from bvr_policy import AsymmetricMaskablePolicy
-from bvr_selfplay import snapshot as selfplay_snapshot
+from bvr_selfplay import (snapshot as selfplay_snapshot, clear_pool as clear_selfplay_pool,
+                          SCRIPTED_FRAC, NEWEST_FRAC, MAX_POOL)
+from bvr_team import TeamBvrEnv
+from bvr_team_vec import TeamVecEnv
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -87,20 +108,63 @@ PPO_KWARGS = dict(
 # first and only reach for RecurrentPPO if it plateaus.
 N_STACK = 8
 
+# Defaults for the auto-curriculum's advance gate; --advance-win-rate and
+# --advance-min-episodes set them per run. An outmatched platform may never
+# reach 65% (a slower aircraft can't catch a faster one that runs), so a
+# heterogeneous matchup can need a lower mark.
 ADVANCE_WIN_RATE = 0.65
 ADVANCE_MIN_EPISODES = 60
+# The win rate must stay at the mark for this many checks in a row (one check
+# every 10 episodes) before the stage advances. With a single check, an agent
+# whose true win rate is 55% passed a 65% mark within 1000 episodes 97% of the
+# time, on a lucky 50-episode window; with 5 checks, 29%. A real 65% agent
+# still passes, about 40 episodes later. --advance-hold-checks sets it per run.
+ADVANCE_HOLD_CHECKS = 5
+
+# Points kept in the GUI's chart history (one per 10 episodes, thinned evenly).
+HIST_MAX_POINTS = 600
 
 # While in SELF_PLAY, add the current policy to the opponent pool this often,
 # so the agent keeps meeting versions of itself only a little behind it.
 SELFPLAY_SNAPSHOT_STEPS = 250_000
 
 
+def heading_switch_stats(eps, top=3):
+    """(changes per minute, [[pair, share], ...]) over (switches, seconds, pairs) episodes.
+
+    A pair counts both directions ("+30<>-30" is +30 to -30 and back), so a
+    policy rocking between two choices shows as one pair near 100%.
+    """
+    flown = sum(t for _, t, _ in eps)
+    if not eps or flown <= 0:
+        return None, []
+    total = sum(n for n, _, _ in eps)
+    pairs = {}
+    for _, _, d in eps:
+        for k, v in d.items():
+            a, b = k.split(">")
+            key = "<>".join(sorted((a, b), key=lambda x: float(x)))
+            pairs[key] = pairs.get(key, 0) + v
+    ranked = sorted(pairs.items(), key=lambda kv: -kv[1])[:top]
+    return 60.0 * total / flown, [[k, round(v / max(total, 1), 3)] for k, v in ranked]
+
+
 # ═════════════════════════════════════════════════════════════════════
 class BvrCallback(BaseCallback):
 
     def __init__(self, vec_env, opponent_type, save_dir="models_bvr",
-                 auto_curriculum=True, selfplay_pool=None, verbose=1):
+                 auto_curriculum=True, selfplay_pool=None, allow_selfplay=True,
+                 no_selfplay_reason="the two sides fly different platforms, so self-play "
+                                    "does not apply", advance_win_rate=ADVANCE_WIN_RATE,
+                 advance_min_episodes=ADVANCE_MIN_EPISODES,
+                 advance_hold_checks=ADVANCE_HOLD_CHECKS,
+                 selfplay_snapshot_steps=SELFPLAY_SNAPSHOT_STEPS,
+                 selfplay_pool_size=MAX_POOL, verbose=1):
         super().__init__(verbose)
+        self.no_selfplay_reason = no_selfplay_reason
+        # False when the two sides fly different platforms: a snapshot of the
+        # agent was trained on the agent's platform and cannot fly the other.
+        self.allow_selfplay = allow_selfplay
         # The VecEnv itself, not a list of raw envs: with n_envs > 1 the envs
         # live in other processes, where a Python reference cannot reach them.
         # set_attr() is the only channel that works for both vec env types.
@@ -108,6 +172,10 @@ class BvrCallback(BaseCallback):
         self.opponent_type = opponent_type
         self.save_dir = save_dir
         self.auto_curriculum = auto_curriculum
+        self.advance_win_rate = float(advance_win_rate)
+        self.advance_min_episodes = int(advance_min_episodes)
+        self.advance_hold_checks = int(advance_hold_checks)
+        self.hold_run = 0          # checks in a row at or past the mark
 
         self.outcomes = deque(maxlen=50)
         self.shots = deque(maxlen=50)
@@ -124,6 +192,8 @@ class BvrCallback(BaseCallback):
         self.stage_episodes = 0
         self.best_win = -1.0
         self.selfplay_pool = selfplay_pool
+        self.selfplay_snapshot_steps = int(selfplay_snapshot_steps)
+        self.selfplay_pool_size = int(selfplay_pool_size)
         self.last_snapshot_step = 0
         # Opponent behind each of the last 50 outcomes, for the SELF_PLAY split
         # between policy snapshots and the scripted shooter in the mix.
@@ -133,11 +203,45 @@ class BvrCallback(BaseCallback):
         self.doctrine_eps = deque(maxlen=150)
         # (bank reversals, seconds flown) per episode.
         self.bank = deque(maxlen=50)
+        # (heading-choice changes, seconds flown, {"prev>new": count}) per episode.
+        self.hdg = deque(maxlen=50)
+        # 2v1: blue aircraft lost per episode.
+        self.blue_losses = deque(maxlen=50)
+        # Identifies this run in bvr_metrics.json, so its history is not
+        # mixed with a previous run's.
+        self.run_id = f"{int(time.time())}-{os.getpid()}"
+        # Chart history: one point per log, thinned evenly (see _log).
+        self.hist, self.hist_stride, self.n_logs = [], 1, 0
         os.makedirs(save_dir, exist_ok=True)
+
+    def curriculum_state(self) -> dict:
+        """What the auto-curriculum will do next, for the log and the GUI."""
+        nxt = advance_curriculum(self.opponent_type)
+        blocked = None
+        if not self.auto_curriculum:
+            blocked = "auto-curriculum is OFF"
+        elif nxt == self.opponent_type:
+            blocked = "this is the last stage"
+        elif nxt == BvrOpponentType.SELF_PLAY and not self.allow_selfplay:
+            blocked = self.no_selfplay_reason
+        return {"auto": bool(self.auto_curriculum), "stage": self.opponent_type.name,
+                "next": None if nxt == self.opponent_type else nxt.name,
+                "blocked": blocked, "stage_episodes": self.stage_episodes,
+                "min_episodes": self.advance_min_episodes, "win_rate": self.advance_win_rate,
+                "hold_checks": self.advance_hold_checks, "hold_run": self.hold_run}
+
+    def describe_curriculum(self) -> str:
+        c = self.curriculum_state()
+        if c["blocked"]:
+            return f"curriculum: stays on {c['stage']} ({c['blocked']})"
+        return (f"curriculum: ON, {c['stage']} -> {c['next']} once the win rate over the last 50 "
+                f"episodes stays at or above {self.advance_win_rate:.0%} for "
+                f"{self.advance_hold_checks} checks in a row (one every 10 episodes), after at "
+                f"least {self.advance_min_episodes} episodes at the stage")
 
     def _on_step(self) -> bool:
         if (self.opponent_type == BvrOpponentType.SELF_PLAY
-                and self.num_timesteps - self.last_snapshot_step >= SELFPLAY_SNAPSHOT_STEPS):
+                and self.num_timesteps - self.last_snapshot_step >= self.selfplay_snapshot_steps):
             self._snapshot()
         for info in self.locals.get("infos", []):
             if "track_state" in info:
@@ -163,6 +267,11 @@ class BvrCallback(BaseCallback):
                                       int(info.get("shots_fired", 0))))
             self.bank.append((int(info.get("bank_reversals", 0)),
                               float(info.get("flight_time", 0.0))))
+            if "hdg_switches" in info:
+                self.hdg.append((int(info["hdg_switches"]), float(info.get("flight_time", 0.0)),
+                                 dict(info.get("hdg_pairs", {}))))
+            if "blue_losses" in info:
+                self.blue_losses.append(int(info["blue_losses"]))
             for lg in info.get("launch_log", []):
                 self.launch_rngs.append(lg["range_true"] if lg["range_true"] > 0 else lg["range_est"])
                 self.launch_ratios.append(lg["r_over_rmax"])
@@ -184,6 +293,11 @@ class BvrCallback(BaseCallback):
         bandit_crashes = self.outcomes.count("BANDIT_CRASH")
 
         win_rate = kills / n
+        # A single window past the mark is not enough: each check is a fresh
+        # chance for a lucky 50 episodes, so the mark must hold for several.
+        # Counted here, before the metrics are written, so the GUI shows it.
+        at_mark = self.stage_episodes >= self.advance_min_episodes and win_rate >= self.advance_win_rate
+        self.hold_run = self.hold_run + 1 if at_mark else 0
         total_shots = max(sum(self.shots), 1)
 
         rec = self.logger.record
@@ -194,7 +308,11 @@ class BvrCallback(BaseCallback):
         rec("bvr/escape_rate", self.outcomes.count("ESCAPE") / n)
         rec("bvr/crash_rate", crashes / n)
         rec("bvr/bandit_crash_rate", bandit_crashes / n)
-        rec("bvr/exchange_ratio", kills / max(losses + mutual, 1))
+        # A mutual kill is one enemy destroyed and one own aircraft lost, so it
+        # counts on both sides. With no losses in the window this is the
+        # number of enemies destroyed.
+        exchange = (kills + mutual) / max(losses + mutual, 1)
+        rec("bvr/exchange_ratio", exchange)
         rec("bvr/realized_pk", (kills + mutual) / total_shots)
         rec("bvr/shots_per_episode", total_shots / n)
         if self.launch_rngs:
@@ -219,6 +337,12 @@ class BvrCallback(BaseCallback):
         flown = sum(t for _, t in self.bank)
         bank_rpm = 60.0 * sum(r for r, _ in self.bank) / flown if flown > 0 else 0.0
         rec("bvr/bank_rev_per_min", bank_rpm)
+        hdg_rpm, hdg_top = heading_switch_stats(self.hdg)
+        if hdg_rpm is not None:
+            rec("bvr/hdg_switch_per_min", hdg_rpm)
+        losses_ep = float(np.mean(self.blue_losses)) if self.blue_losses else None
+        if losses_ep is not None:
+            rec("bvr/blue_losses_per_ep", losses_ep)
         doctrine = {}
         for d in DOCTRINES:
             eps = [(o, sh) for dd, o, sh in self.doctrine_eps if dd == d]
@@ -243,22 +367,45 @@ class BvrCallback(BaseCallback):
                   f"win {win_rate:5.1%} loss {losses/n:5.1%} mut {mutual/n:5.1%} "
                   f"to {timeouts/n:5.1%} crash {crashes/n:5.1%} bcrash {bandit_crashes/n:5.1%} | "
                   f"Pk {(kills+mutual)/total_shots:4.2f} | "
-                  f"shots/ep {total_shots/n:4.2f} | rev/min {bank_rpm:4.1f}{split}{dline}")
+                  f"shots/ep {total_shots/n:4.2f} | rev/min {bank_rpm:4.1f}"
+                  f"{f' | hdg sw/min {hdg_rpm:4.1f}' if hdg_rpm is not None else ''}"
+                  f"{f' | lost/ep {losses_ep:4.2f}' if losses_ep is not None else ''}{split}{dline}")
 
         # Write metrics for the GUI. Appended to a rolling history list so
         # the browser can draw trend charts without accumulating unbounded data.
         try:
             mpath = os.path.join(self.save_dir, "..", "bvr_metrics.json")
             mpath = os.path.normpath(mpath)
-            prev = {}
-            if os.path.exists(mpath):
-                try: prev = json.loads(open(mpath).read())
-                except Exception: pass
-            hist = prev.get("history", [])
-            hist.append([self.ep_count, round(win_rate, 3),
-                         round((kills+mutual)/max(losses+mutual,1), 2)])
-            if len(hist) > 300: hist = hist[-300:]   # keep last 300 points
+            # One point per log (every 10 episodes) for the GUI's training
+            # dashboard, kept in memory: the history belongs to this run, so
+            # an earlier run's points in the same file are never continued.
+            r3 = lambda v: round(float(v), 3)
+            point = ({
+                "ep": self.ep_count, "steps": int(self.model.num_timesteps),
+                "win": r3(win_rate), "loss": r3(losses / n), "mut": r3(mutual / n),
+                "to": r3(timeouts / n),
+                "exch": round((kills + mutual) / max(losses + mutual, 1), 2),
+                "pk": r3((kills + mutual) / total_shots), "shots": r3(total_shots / n),
+                "rrmax": r3(np.mean(self.launch_ratios)) if self.launch_ratios else None,
+                "track": r3(np.mean(self.track_hits)) if self.track_hits else None,
+                "rev": round(bank_rpm, 2),
+                "lost": r3(losses_ep) if losses_ep is not None else None,
+                "stage": self.opponent_type.name})
+            # A long run keeps its whole shape at even spacing: a point is
+            # kept every `hist_stride` logs, and past 600 points every other
+            # one is dropped and the stride doubles. (It used to halve only
+            # the older points, again and again, so the start of a long run
+            # shrank to a few points drawn as straight lines.) The latest
+            # point is always shown.
+            if self.n_logs % self.hist_stride == 0:
+                self.hist.append(point)
+                if len(self.hist) > HIST_MAX_POINTS:
+                    self.hist = self.hist[::2]
+                    self.hist_stride *= 2
+            self.n_logs += 1
+            hist = self.hist + ([point] if not self.hist or self.hist[-1] is not point else [])
             metrics = {
+                "run":           self.run_id,
                 "episode":       self.ep_count,
                 "opponent":      self.opponent_type.name,
                 "win_rate":      round(win_rate, 3),
@@ -268,7 +415,7 @@ class BvrCallback(BaseCallback):
                 "escape_rate":   round(self.outcomes.count("ESCAPE")/n, 3),
                 "crash_rate":    round(crashes/n, 3),
                 "bandit_crash_rate": round(bandit_crashes/n, 3),
-                "exchange_ratio": round(kills/max(losses+mutual,1), 2),
+                "exchange_ratio": round(exchange, 2),
                 "realized_pk":   round((kills+mutual)/total_shots, 3),
                 "shots_per_ep":  round(total_shots/n, 2),
                 "mean_launch_km": round(float(np.mean(self.launch_rngs))/1000,2) if self.launch_rngs else 0,
@@ -278,7 +425,12 @@ class BvrCallback(BaseCallback):
                 "term_share":    {k: round(v/term_total, 4) if term_total > 0 else 0.0
                                   for k, v in term_mean.items()},
                 "bank_rev_per_min": round(bank_rpm, 2),
+                "hdg_switch_per_min": round(hdg_rpm, 2) if hdg_rpm is not None else None,
+                "hdg_top_pairs": hdg_top,
+                "blue_losses_per_ep": round(losses_ep, 3) if losses_ep is not None else None,
                 "doctrine":      doctrine,
+                "curriculum":    self.curriculum_state(),
+                "run_notes":     getattr(self, "run_notes", []),
                 "history":       hist,
                 "steps_done":    int(self.model.num_timesteps),
             }
@@ -298,13 +450,26 @@ class BvrCallback(BaseCallback):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.model.save(path)
 
-        if (self.auto_curriculum and self.stage_episodes >= ADVANCE_MIN_EPISODES
-                and win_rate >= ADVANCE_WIN_RATE):
-            self._advance()
+        if at_mark and self.hold_run >= self.advance_hold_checks:
+            if self.auto_curriculum:
+                self._advance()
+            elif self.ep_count - getattr(self, "_last_hold_note", -10**9) >= 200:
+                # Said again every 200 episodes: a one-off line scrolls out of
+                # the GUI's log long before anyone wonders why nothing moved.
+                self._last_hold_note = self.ep_count
+                print(f"[bvr] win rate {win_rate:.0%} is past the {self.advance_win_rate:.0%} "
+                      f"advance mark, but the auto-curriculum is OFF: staying on "
+                      f"{self.opponent_type.name}")
 
     def _advance(self):
         nxt = advance_curriculum(self.opponent_type)
         if nxt == self.opponent_type:
+            return
+        if nxt == BvrOpponentType.SELF_PLAY and not self.allow_selfplay:
+            # Repeated every 200 episodes, as for the OFF case above.
+            if self.ep_count - getattr(self, "_last_hold_note", -10**9) >= 200:
+                self._last_hold_note = self.ep_count
+                print(f"[bvr] curriculum ends at ADAPTIVE_SHOOTER: {self.no_selfplay_reason}")
             return
         self.model.save(os.path.join(self.save_dir, "archive",
                                      f"pre_{nxt.name}"))
@@ -321,26 +486,40 @@ class BvrCallback(BaseCallback):
         self.shots.clear()
         self.opp_kinds.clear()
         self.doctrine_eps.clear()
+        self.blue_losses.clear()
         self.stage_episodes = 0
+        self.hold_run = 0
         self.best_win = -1.0
 
 
     def _snapshot(self):
-        path = selfplay_snapshot(self.model, self.selfplay_pool)
+        path = selfplay_snapshot(self.model, self.selfplay_pool, self.selfplay_pool_size)
         self.last_snapshot_step = self.num_timesteps
         print(f"[bvr] self-play snapshot -> {path}")
 
 
 # ═════════════════════════════════════════════════════════════════════
 def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool,
-             doctrine):
+             doctrine, platform, opponent_platform, sp_scripted_frac=None, sp_newest_frac=None):
     def _init():
         return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
                       privileged_critic=privileged,
                       enable_viz=(viz and idx == 0),
                       envelope_table=envelope_table,
-                      selfplay_pool=selfplay_pool, doctrine=doctrine)
+                      selfplay_pool=selfplay_pool, doctrine=doctrine,
+                      platform=platform, opponent_platform=opponent_platform,
+                      sp_scripted_frac=sp_scripted_frac, sp_newest_frac=sp_newest_frac)
+    return _init
+
+
+def make_team_env(idx, opponent, seed, privileged, envelope_table, gamma, doctrine,
+                  blue_platforms, red_platform):
+    def _init():
+        return TeamBvrEnv(opponent_type=opponent, gamma_discount=gamma, seed=seed + idx,
+                          instance_id=idx, privileged_critic=privileged,
+                          envelope_table=envelope_table, doctrine=doctrine,
+                          blue_platforms=blue_platforms, red_platform=red_platform)
     return _init
 
 
@@ -352,6 +531,26 @@ def main():
     ap.add_argument("--resume", type=str, default=None)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-curriculum", action="store_true")
+    ap.add_argument("--advance-win-rate", type=float, default=ADVANCE_WIN_RATE,
+                    help="auto-curriculum: win rate over the last 50 episodes needed to "
+                         "move to the next opponent, 0-1 (default %(default)s)")
+    ap.add_argument("--advance-min-episodes", type=int, default=ADVANCE_MIN_EPISODES,
+                    help="auto-curriculum: episodes to play at a stage before it can "
+                         "advance (default %(default)s)")
+    ap.add_argument("--advance-hold-checks", type=int, default=ADVANCE_HOLD_CHECKS,
+                    help="auto-curriculum: checks in a row (one every 10 episodes) the win rate "
+                         "must stay at the mark before advancing (default %(default)s)")
+    ap.add_argument("--sp-scripted-frac", type=float, default=SCRIPTED_FRAC,
+                    help="self-play: share of episodes against the scripted ADAPTIVE_SHOOTER "
+                         "instead of a snapshot, 0-1 (default 1/3)")
+    ap.add_argument("--sp-newest-frac", type=float, default=NEWEST_FRAC,
+                    help="self-play: share of snapshot episodes against the newest snapshot; "
+                         "the rest draw uniformly from the pool, 0-1 (default %(default)s)")
+    ap.add_argument("--sp-snapshot-steps", type=int, default=SELFPLAY_SNAPSHOT_STEPS,
+                    help="self-play: steps between snapshots of the policy (default %(default)s)")
+    ap.add_argument("--sp-pool-size", type=int, default=MAX_POOL,
+                    help="self-play: snapshots kept; the oldest is deleted beyond this "
+                         "(default %(default)s)")
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
     ap.add_argument("--save-dir", type=str, default="models_bvr")
@@ -365,11 +564,32 @@ def main():
                     choices=[DOCTRINE_MIXED.lower()] + [d.lower() for d in DOCTRINES],
                     help="missile doctrine; 'mixed' draws one per episode, which the "
                          "policy sees, so one model learns all three")
-    ap.add_argument("--envelope-table", type=str, default="envelope.npz",
-                     help="calibrated Rmax/Rnez table from sweep_envelope.py. "
-                          "Falls back to the (uncalibrated, ~1.5-3x optimistic) "
-                          "analytic model if the file is missing.")
+    ap.add_argument("--platform", default=DEFAULT_PLATFORM,
+                    help="library platform the agent flies (see library/)")
+    ap.add_argument("--opponent-platform", default=DEFAULT_PLATFORM,
+                    help="library platform the opponent flies")
+    ap.add_argument("--format", default="1v1", choices=["1v1", "2v1"],
+                    help="1v1, or 2v1: two agents on one shared policy against one opponent")
+    ap.add_argument("--wingman-platform", default=None,
+                    help="2v1: the wingman's platform (default: the same as --platform)")
+    ap.add_argument("--envelope-table", type=str, default="library",
+                    help="'library' (default): each missile's calibrated table from "
+                         "library/envelopes; or a path to one table used for every missile")
     args = ap.parse_args()
+    if not 0.0 < args.advance_win_rate <= 1.0:
+        ap.error("--advance-win-rate is a fraction: between 0 and 1 (e.g. 0.5 for 50%)")
+    if args.advance_min_episodes < 1:
+        ap.error("--advance-min-episodes must be at least 1")
+    if args.advance_hold_checks < 1:
+        ap.error("--advance-hold-checks must be at least 1")
+    for flag, v in (("--sp-scripted-frac", args.sp_scripted_frac),
+                    ("--sp-newest-frac", args.sp_newest_frac)):
+        if not 0.0 <= v <= 1.0:
+            ap.error(f"{flag} is a fraction: between 0 and 1 (e.g. 0.5 for 50%)")
+    if args.sp_snapshot_steps < 1000:
+        ap.error("--sp-snapshot-steps must be at least 1000")
+    if args.sp_pool_size < 1:
+        ap.error("--sp-pool-size must be at least 1")
 
     opponent = BvrOpponentType[args.opponent.upper()]
     if opponent not in CURRICULUM:
@@ -377,11 +597,47 @@ def main():
                  f"{', '.join(o.name.lower() for o in CURRICULUM)}")
     privileged = not args.no_privileged
 
-    envelope_table = args.envelope_table if os.path.exists(args.envelope_table) else None
-    if envelope_table is None:
-        print(f"[bvr] WARNING: {args.envelope_table} not found — training against the "
-              f"UNCALIBRATED analytic envelope model. Run sweep_envelope.py first; "
-              f"see bvr_envelope.py's module docstring for why this matters.")
+    team = args.format == "2v1"
+    wingman = (args.wingman_platform or args.platform) if team else None
+    # Startup facts worth keeping in view: printed as usual and also written to
+    # bvr_metrics.json, where the GUI's CURRENT RUN panel shows them for the
+    # whole run instead of letting them scroll out of the log.
+    run_notes = []
+    def note(msg):
+        print(f"[bvr] {msg}")
+        run_notes.append(msg)
+    if args.wingman_platform and not team:
+        ap.error("--wingman-platform needs --format 2v1")
+
+    # Resolve every platform now, so a missing item, an invalid value or an
+    # uncalibrated missile stops the run here with a clear message.
+    try:
+        for pid in (args.platform, args.opponent_platform, wingman):
+            if pid:
+                load_platform(pid)
+        from bvr_env import BvrEnv as _probe
+        for pid in {args.platform, wingman} - {None}:
+            _probe(opponent_type=BvrOpponentType.STRAIGHT, platform=pid,
+                   opponent_platform=args.opponent_platform, envelope_table=args.envelope_table)
+    except LibraryError as e:
+        ap.error(str(e))
+    heterogeneous = args.platform != args.opponent_platform
+    if heterogeneous and opponent == BvrOpponentType.SELF_PLAY:
+        ap.error(f"self-play needs both sides on the same platform (here {args.platform} v "
+                 f"{args.opponent_platform}): a snapshot of the agent cannot fly the other side")
+    if team and opponent == BvrOpponentType.SELF_PLAY:
+        ap.error("2v1 has no self-play stage yet: choose a scripted opponent")
+    envelope_table = args.envelope_table
+    if team:
+        note(f"2v1: agents {args.platform} + {wingman} v opponent {args.opponent_platform}")
+    else:
+        note(f"platforms: agent {args.platform} v opponent {args.opponent_platform}")
+    blue_top = max(load_platform(p).speed_cmds[-1] for p in ([args.platform, wingman] if team
+                                                            else [args.platform]))
+    red_top = load_platform(args.opponent_platform).speed_cmds[-1]
+    if red_top > blue_top:
+        note(f"stern starts skipped: the opponent's top speed ({red_top:.0f} m/s) is above "
+             f"blue's ({blue_top:.0f} m/s), so blue could never catch it running away")
 
     # gamma MUST match the value PPO trains with (passed below via kwargs) —
     # potential-based shaping (bvr_env._potential / step()'s `gamma*phi -
@@ -390,10 +646,24 @@ def main():
     # PPO_KWARGS["gamma"] here, the module DEFAULT, so a --gamma override on
     # the CLI silently desynced the two and broke that guarantee.
     selfplay_pool = os.path.join(args.save_dir, "selfplay_pool")
-    fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
-                    selfplay_pool, args.doctrine.upper())
-           for i in range(args.n_envs)]
-    vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
+    # Every run starts with an empty pool: snapshots left by an earlier run
+    # would otherwise be drawn as opponents until pruned. Cleared before the
+    # envs start, which read the pool on reset.
+    n_old = clear_selfplay_pool(selfplay_pool)
+    if n_old:
+        note(f"self-play pool cleared: {n_old} snapshot{'s' if n_old != 1 else ''} "
+             f"from an earlier run deleted")
+    if team:
+        fns = [make_team_env(i, opponent, args.seed, privileged, envelope_table, args.gamma,
+                             args.doctrine.upper(), (args.platform, wingman), args.opponent_platform)
+               for i in range(args.n_envs)]
+        vec = TeamVecEnv(fns, in_process=(args.n_envs == 1))
+    else:
+        fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
+                        selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform,
+                        args.sp_scripted_frac, args.sp_newest_frac)
+               for i in range(args.n_envs)]
+        vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
     # VecFrameStack over a Dict space stacks every sub-key, which is what we
     # want — the critic benefits from privileged history too.
@@ -415,18 +685,48 @@ def main():
         # inputs were added (bvr_compat), widening them without changing a choice.
         model = load_model(args.resume, env=vec, **{
             k: v for k, v in kwargs.items() if k not in ("policy_kwargs",)})
-        print(f"[bvr] resumed from {args.resume}")
+        note(f"resumed from {args.resume}")
+        prev = scenario_of(model)
+        was = (prev["format"], prev["platform"], prev.get("wingman_platform"), prev["opponent_platform"])
+        now = (args.format, args.platform, wingman, args.opponent_platform)
+        if was != now:
+            desc = lambda f, p, w, o: f"{f} {p}{' + ' + w if w else ''} v {o}"
+            note(f"NOTE: this checkpoint was trained as {desc(*was)}; continuing as "
+                 f"{desc(*now)} (a warm start, not a continuation)")
+        for msg in scenario_drift(prev):
+            note(f"NOTE: {msg}")
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
+    # Saved inside every checkpoint this run writes, self-play snapshots included.
+    model.bvr_scenario = scenario_record(args.platform, args.opponent_platform,
+                                         wingman_platform_id=wingman, fmt=args.format)
 
     if opponent == BvrOpponentType.SELF_PLAY:
         # learn() resets every env before any callback runs, and a SELF_PLAY
         # reset needs a snapshot in the pool — seed it with this policy now.
-        print(f"[bvr] self-play snapshot -> {selfplay_snapshot(model, selfplay_pool)}")
+        print(f"[bvr] self-play snapshot -> "
+              f"{selfplay_snapshot(model, selfplay_pool, args.sp_pool_size)}")
 
     cb = BvrCallback(vec, opponent, save_dir=args.save_dir, selfplay_pool=selfplay_pool,
-                     auto_curriculum=not args.no_curriculum)
+                     auto_curriculum=not args.no_curriculum,
+                     advance_win_rate=args.advance_win_rate,
+                     advance_min_episodes=args.advance_min_episodes,
+                     advance_hold_checks=args.advance_hold_checks,
+                     selfplay_snapshot_steps=args.sp_snapshot_steps,
+                     selfplay_pool_size=args.sp_pool_size,
+                     allow_selfplay=not (heterogeneous or team),
+                     **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
+    note(cb.describe_curriculum())
+    if not (heterogeneous or team) and (opponent == BvrOpponentType.SELF_PLAY
+                                        or not args.no_curriculum):
+        note(f"self-play settings: scripted ADAPTIVE_SHOOTER in {args.sp_scripted_frac:.0%} of "
+             f"episodes, newest snapshot in {args.sp_newest_frac:.0%} of the rest, a snapshot "
+             f"every {args.sp_snapshot_steps:,} steps, pool of {args.sp_pool_size}")
+    cb.run_notes = run_notes
+    # One machine-readable line for the GUI server, which shows these notes
+    # at once rather than waiting for the first metrics write.
+    print("[bvr] run-notes: " + json.dumps(run_notes), flush=True)
     failure = None
     try:
         model.learn(total_timesteps=args.steps, callback=cb,
