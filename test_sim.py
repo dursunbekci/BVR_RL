@@ -752,6 +752,31 @@ def test_team_red_targeting():
     print(f"  2v1 red targeting ........... OK  (opened on {sorted(opened)}, both shot at in {both}/8)")
 
 
+def test_team_roles_far_target():
+    """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
+    from team_roles import FarTargetTeamEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = FarTargetTeamEnv(opponent_type=T.SHOOTER, seed=3, doctrine="AGGRESSIVE")
+    fired_at_far = 0
+    for ep in range(4):
+        e.reset()
+        w = e._world
+        red = w.pos(e.RED)
+        d = [float(np.linalg.norm(w.pos(i) - red)) for i in (1, 2)]
+        far = 1 + int(d[1] > d[0])
+        assert e._red_tgt == far, (e._red_tgt, d)
+        done = False
+        while not done:                                   # both fly at red, never fire
+            if not any(m.owner == e.RED for m in w.missiles):
+                assert e._red_tgt == far or not e._obs[far - 1]._alive
+            _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+        reds = sorted((m for m in w.missiles if m.owner == e.RED), key=lambda m: m.t_launch)
+        fired_at_far += bool(reds) and reds[0].target == far
+    assert fired_at_far >= 1, "red never fired its first missile at the farther aircraft"
+    print(f"  2v1 red opens on rear ........ OK  (first missile at it in {fired_at_far}/4)")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -1037,6 +1062,7 @@ if __name__ == "__main__":
         ("2v1 datalink",            test_team_datalink),
         ("2v1 losses",              test_team_losses),
         ("2v1 red targeting",       test_team_red_targeting),
+        ("2v1 red opens on rear",   test_team_roles_far_target),
         ("DCS round trip",          test_dcs_round_trip),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
