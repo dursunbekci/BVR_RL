@@ -141,7 +141,8 @@ C:\Users\<you>\Saved Games\DCS\Missions\
 ```
 
 Options: `--range-km 70`, `--bearing 45` (direction blue → red),
-`--alt-blue 8000`, `--alt-red 10000`, `--speed 250`, `--red-type Su-27`.
+`--alt-blue 8000`, `--alt-red 10000`, `--speed 250`, `--speed-red 250`, `--red-type Su-27`,
+`--defender` (you in the free Su-25T, see below).
 Keep `--blue-type F-16C` for a policy trained as the F-16C.
 
 `pydcs` prints *Couldn't detect any installed DCS World version* if it can't
@@ -260,6 +261,40 @@ its limit more often than the simulator did. Each flag is either a bridge
 mistake (a unit, sign or axis error, to be fixed) or a real difference
 between DCS and the simulator (speeds, turn rates, missile ranges) to
 decide on. Several recordings can be given at once.
+
+## Fly against the policy yourself (free Su-25T)
+
+You fly RED-1 in the free **Su-25T** and defend: it has no air-to-air radar
+and only two short-range R-73s, so you can't shoot back beyond visual
+range. The question: can the policy shoot down a human who evades?
+
+```
+python dcs\make_mission.py --defender          # -> dcs\bvr_rl_defender.miz, copy to Saved Games\DCS\Missions\
+python dcs_live.py models_bvr\latest_selfplay_v6.zip --episodes 5
+```
+
+Then *Mission* → `bvr_rl_defender` → *Fly*: you start in the cockpit, in
+the air, at 6000 m and 200 m/s, 90 km from BLUE-1. Keep time acceleration
+at 1×; restart the mission after each fight (Esc → Quit → FLY AGAIN).
+
+Defending: watch the radar warning receiver (it may warn of a missile only
+late, when the missile's radar switches on); beam the missile (put it at
+your 3 or 9 o'clock), release chaff, descend; or turn away early so the
+missile runs out of energy. Within a few kilometres your R-73s can hit
+BLUE-1.
+
+| Outcome | Means |
+|---|---|
+| KILL | the policy shot you down |
+| TIMEOUT | you survived the time limit (300 s by default) |
+| ESCAPE | you got more than 150 km away |
+| SHOT_DOWN | you shot BLUE-1 down with an R-73 |
+| BANDIT_CRASH | you crashed or ejected |
+
+The policy only knows the F-16C, so it assumes you carry AIM-120s and
+defends against shots you can't make; a slow Su-25T at low altitude is
+also outside its training. Read these fights as a check of how it
+tracks, shoots and follows up, not as a fair score.
 
 ---
 

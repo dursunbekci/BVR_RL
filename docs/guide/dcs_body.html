@@ -23,13 +23,14 @@
   <li>7. Step 5 · Shadow run: the policy only watches<span class="pg">10</span></li>
   <li>8. Step 6 · Let the policy fly<span class="pg">11</span></li>
   <li>9. Step 7 · Read the results<span class="pg">12</span></li>
+  <li>10. Fly against the policy yourself (free)<span class="pg">13</span></li>
   <li class="ph">Part 3 · When things go wrong, and reference</li>
-  <li>10. Troubleshooting<span class="pg">14</span></li>
-  <li>11. How DCS differs from training<span class="pg">14</span></li>
-  <li>12. What the bridge does to the DCS AI<span class="pg">15</span></li>
-  <li>13. Commands and options<span class="pg">16</span></li>
-  <li>14. Protocol and files<span class="pg">17</span></li>
-  <li>15. Undoing everything<span class="pg">18</span></li>
+  <li>11. Troubleshooting<span class="pg">16</span></li>
+  <li>12. How DCS differs from training<span class="pg">16</span></li>
+  <li>13. What the bridge does to the DCS AI<span class="pg">17</span></li>
+  <li>14. Commands and options<span class="pg">18</span></li>
+  <li>15. Protocol and files<span class="pg">19</span></li>
+  <li>16. Undoing everything<span class="pg">20</span></li>
 </ul>
 
 <div class="box"><h4>How to use this guide</h4>
@@ -159,7 +160,7 @@ Each step adds one new thing. If Step 2 works and Step 5 doesn't, the problem is
 </ol>
 
 <div class="box"><h4>What is free, and why it is enough</h4>
-The free game includes the Caucasus map and two aircraft you can fly yourself (Su-25T, TF-51D). What matters here: <b>every aircraft type can be placed in a mission as an AI unit without buying it</b>, including the F-16C. The policy's aircraft and its opponent are both AI units: the policy steers its aircraft through the AI. Buy a module (such as the F-16C) only if you want to fly the red aircraft yourself (<code>--red-player</code>, Step 4).</div>
+The free game includes the Caucasus map and two aircraft you can fly yourself (Su-25T, TF-51D). What matters here: <b>every aircraft type can be placed in a mission as an AI unit without buying it</b>, including the F-16C. The policy's aircraft and its opponent are both AI units: the policy steers its aircraft through the AI. Buy a module (such as the F-16C) only if you want to fly a fair fight against the policy yourself; Chapter 10 shows how to fly against it for free, as a defender in the Su-25T.</div>
 
 <div class="done"><b>Done when</b> DCS starts, you are logged in, and an Instant Action mission flies.</div>
 </div>
@@ -246,8 +247,9 @@ copy it to Saved Games\DCS\Missions\ (or open it from anywhere in DCS)</pre>
 <tr><td class="k"><code>--bearing 45</code></td><td>Direction from blue to red, degrees from map north (default 90).</td></tr>
 <tr><td class="k"><code>--alt-blue 8000 --alt-red 10000</code></td><td>Start altitudes in metres (defaults 9000 and 9500).</td></tr>
 <tr><td class="k"><code>--speed 250</code></td><td>Start speed, m/s (default 280).</td></tr>
-<tr><td class="k"><code>--red-type Su-27</code></td><td>Red's aircraft: F-16C, F-15C, Su-27, MiG-29S, FA-18C. Tell <code>dcs_live.py</code> with <code>--opp-platform</code> which library platform's missile envelopes to assume for it.</td></tr>
+<tr><td class="k"><code>--red-type Su-27</code></td><td>Red's aircraft: F-16C, F-15C, Su-27, MiG-29S, FA-18C, Su-25T. Tell <code>dcs_live.py</code> with <code>--opp-platform</code> which library platform's missile envelopes to assume for it.</td></tr>
 <tr><td class="k"><code>--red-player</code></td><td>You fly RED-1 (needs that module).</td></tr>
+<tr><td class="k"><code>--defender</code></td><td>You fly RED-1 in the free Su-25T and defend (Chapter 10).</td></tr>
 <tr><td class="k"><code>--out my.miz</code></td><td>Another file name, to keep several missions.</td></tr>
 </table>
 <div class="box"><h4>Building it by hand instead</h4>
@@ -342,6 +344,50 @@ episode 1: KILL after 97 s, 1 shots (0 fire requests not answered by a launch)
 The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a shadow run and one from a live run, and <code>Saved Games\DCS\Logs\dcs.log</code> if anything went wrong. That is enough to find what needs adjusting.</div>
 </div>
 
+
+<div class="chap first">
+<h1>10 · Fly against the policy yourself (free)</h1>
+<p>You fly RED-1 in the <b>Su-25T</b>, which comes free with DCS. It is a ground-attack jet: no air-to-air radar, and only two short-range heat-seeking R-73s. You can't shoot back beyond visual range, so you <b>defend</b>. The question this answers: can the policy shoot down a human who knows a missile is coming and evades it?</p>
+<ol class="steps">
+<li><span class="where py">TERMINAL</span> Build the defender mission and copy it to <code>Saved Games\DCS\Missions\</code>:
+<pre>python dcs\make_mission.py --defender</pre>
+<pre class="out">written dcs\bvr_rl_defender.miz: BLUE-1 (F-16C, policy) v RED-1 (Su-25T, you), 90 km apart</pre>
+It puts you in RED-1 at 6000 m and 200 m/s (the Su-25T is slow: about 950 km/h at most), 90 km from BLUE-1, flying towards it. BLUE-1 is unchanged: an F-16C with four AIM-120Cs. The mission's briefing screen repeats the essentials.</li>
+<li><span class="where py">TERMINAL</span> Start the policy, for several fights:
+<pre>python dcs_live.py models_bvr\latest_selfplay_v6.zip --episodes 5</pre></li>
+<li><span class="where dcs">DCS</span> <i>Mission</i> → <code>bvr_rl_defender</code> → <i>Fly</i>. You start in the cockpit, in the air. Keep time acceleration at 1×.</li>
+<li>Survive. BLUE-1 will turn towards you and shoot from long range.</li>
+<li>After each fight: <span class="kbd">Esc</span> → <i>Quit</i> → <i>FLY AGAIN</i>. The terminal starts the next episode by itself.</li>
+</ol>
+
+<h2>Defending</h2>
+<ul>
+<li><b>Watch the radar warning receiver.</b> It shows BLUE-1's radar. It may warn of a missile only late, when the missile's own radar switches on, so treat a radar lock as a possible launch.</li>
+<li><b>Beam the missile:</b> turn so the threat is at your 3 or 9 o'clock. A radar missile loses its target when the target moves across its line of sight.</li>
+<li><b>Release chaff</b> while beaming, and <b>descend</b>. Find the countermeasures key in <i>Options → Controls</i>, Su-25T, "Countermeasures".</li>
+<li><b>Or turn away early,</b> so the missile has to chase you and runs out of energy. You can't outrun the F-16 itself.</li>
+<li>If the policy lets you get within a few kilometres, your R-73s can hit it.</li>
+</ul>
+<div class="tip"><h4>New to the Su-25T?</h4>DCS has simplified "game" flight and avionics modes in <i>Options → Gameplay</i> that make it easier to fly. Practise once in an Instant Action mission first.</div>
+
+<h2>Reading the result</h2>
+<table>
+<tr><th>Outcome in the terminal</th><th>Means</th></tr>
+<tr><td class="k">KILL</td><td>The policy shot you down.</td></tr>
+<tr><td class="k">TIMEOUT</td><td>You survived until the time limit (300 s by default): your win.</td></tr>
+<tr><td class="k">ESCAPE</td><td>You got more than 150 km from BLUE-1.</td></tr>
+<tr><td class="k">SHOT_DOWN</td><td>You shot BLUE-1 down with an R-73.</td></tr>
+<tr><td class="k">BANDIT_CRASH</td><td>You crashed or ejected.</td></tr>
+</table>
+<p><code>python dcs\inspect_run.py dcs_runs\live_…_ep1.jsonl</code> shows when each missile was fired, at what range, and how it ended.</p>
+<div class="warn"><h4>What the policy doesn't know</h4>
+<ul>
+<li>It only knows the F-16C, so it <b>assumes you carry AIM-120s</b>. It will defend against shots you can't make, and keep more distance than it needs.</li>
+<li>A slow Su-25T at low altitude is outside anything it trained on.</li>
+</ul>
+So read these fights as a check of how it tracks, shoots and follows up against a human who evades, not as a fair score.</div>
+</div>
+
 <!-- ═══════════════════════ PART 3 ═══════════════════════ -->
 <div class="part">
   <div class="pn">PART 3</div>
@@ -350,7 +396,7 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 </div>
 
 <div class="chap first">
-<h1>10 · Troubleshooting</h1>
+<h1>11 · Troubleshooting</h1>
 <p>Errors inside the bridge go to <code>Saved Games\DCS\Logs\dcs.log</code>, as lines containing <code>bvr_bridge</code>. Search the file for that word first.</p>
 <table>
 <tr><th style="width:34%">Symptom</th><th>Cause and fix</th></tr>
@@ -361,7 +407,7 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 <tr><td class="k">Python keeps printing <code>waiting for DCS</code></td><td>DCS isn't sending: look for the bridge message; make sure the mission isn't paused. A firewall that blocks Python on <i>private</i> networks can also stop it.</td></tr>
 <tr><td class="k"><code>cannot listen on UDP port 15301</code> in Python</td><td>Another <code>dcs_live.py</code> (or <code>fake_dcs.py</code> test) is still running. Close it.</td></tr>
 <tr><td class="k"><code>fire timeout</code> in the terminal</td><td>The DCS AI did not launch within 8 s. Its radar may not have RED-1 yet, or RED-1 is outside the AI's own launch range. If it never fires, open <code>bvr_bridge.lua</code>, set <code>fire_weapon = nil</code> (the AI picks the missile itself), and rebuild the mission.</td></tr>
-<tr><td class="k">BLUE-1 turns and climbs more slowly than in training</td><td>The DCS AI flies the route its own way. This is a real difference (Chapter 11), not a fault.</td></tr>
+<tr><td class="k">BLUE-1 turns and climbs more slowly than in training</td><td>The DCS AI flies the route its own way. This is a real difference (Chapter 12), not a fault.</td></tr>
 <tr><td class="k"><code>… behind DCS</code></td><td>Lower the time acceleration (<span class="kbd">Alt</span>+<span class="kbd">Z</span>).</td></tr>
 <tr><td class="k">The next episode doesn't start</td><td>Restart the mission in DCS; <code>dcs_live.py</code> waits for mission time to go back to the start.</td></tr>
 <tr><td class="k"><code>this checkpoint was trained for 2v1</code></td><td>The DCS link is 1v1 only for now. Use a 1v1 checkpoint.</td></tr>
@@ -370,7 +416,7 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 </div>
 
 <div class="chap">
-<h1>11 · How DCS differs from training</h1>
+<h1>12 · How DCS differs from training</h1>
 <p>Expect the policy to do worse in DCS than in training at first. These are the reasons, and where to see each one.</p>
 <table>
 <tr><th>Difference</th><th>What it means</th><th>Where to see it</th></tr>
@@ -384,7 +430,7 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 </div>
 
 <div class="chap">
-<h1>12 · What the bridge does to the DCS AI</h1>
+<h1>13 · What the bridge does to the DCS AI</h1>
 <p>Nothing changes until the first command arrives, which is why a shadow run leaves the fight to the DCS AI.</p>
 <table>
 <tr><th>When</th><th>What the bridge sets</th></tr>
@@ -412,7 +458,7 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 </div>
 
 <div class="chap">
-<h1>13 · Commands and options</h1>
+<h1>14 · Commands and options</h1>
 <h2>dcs_live.py</h2>
 <pre>python dcs_live.py CHECKPOINT [options]</pre>
 <table>
@@ -434,8 +480,10 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 <tr><td class="k"><code>--alt-blue</code> / <code>--alt-red</code></td><td class="n">9000 / 9500</td><td>Start altitudes, m</td></tr>
 <tr><td class="k"><code>--speed</code></td><td class="n">280</td><td>Start speed, m/s</td></tr>
 <tr><td class="k"><code>--blue-type</code></td><td class="n">F-16C</td><td>F-16C, F-15C, FA-18C. Keep F-16C for an F-16C policy</td></tr>
-<tr><td class="k"><code>--red-type</code></td><td class="n">F-16C</td><td>F-16C, F-15C, Su-27, MiG-29S, FA-18C</td></tr>
+<tr><td class="k"><code>--red-type</code></td><td class="n">F-16C</td><td>F-16C, F-15C, Su-27, MiG-29S, FA-18C, Su-25T</td></tr>
 <tr><td class="k"><code>--red-player</code></td><td class="n">off</td><td>You fly RED-1</td></tr>
+<tr><td class="k"><code>--defender</code></td><td class="n">off</td><td>You in the free Su-25T, defending; writes <code>bvr_rl_defender.miz</code></td></tr>
+<tr><td class="k"><code>--speed-red</code></td><td class="n">--speed</td><td>Red's start speed, m/s (200 for the Su-25T)</td></tr>
 <tr><td class="k"><code>--out</code></td><td class="n">dcs\bvr_rl_1v1.miz</td><td>Mission file</td></tr>
 </table>
 <h2>dcs/setup_dcs.py (as administrator)</h2>
@@ -471,7 +519,7 @@ python dcs\test_bridge.py       (bvr_bridge.lua and the setup patch, in Lua 5.1)
 </div>
 
 <div class="chap">
-<h1>14 · Protocol and files</h1>
+<h1>15 · Protocol and files</h1>
 <h2>DCS → Python (UDP 15301)</h2>
 <p>One JSON object per message: the same lines <code>bvr_logger.lua</code> writes (state samples, shots, hits, deaths, ammunition), plus:</p>
 <pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":1, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
@@ -495,7 +543,7 @@ STOP</pre>
 </div>
 
 <div class="chap">
-<h1>15 · Undoing everything</h1>
+<h1>16 · Undoing everything</h1>
 <ol class="steps">
 <li><span class="where admin">ADMIN TERMINAL</span> Remove the patch: <code>python dcs\setup_dcs.py --undo</code>. The file is put back exactly as it was. (The backup <code>MissionScripting.lua.bvr_rl_backup</code> stays next to it; delete it if you like.)</li>
 <li>Delete <code>bvr_rl_1v1.miz</code> from <code>Saved Games\DCS\Missions\</code>.</li>
