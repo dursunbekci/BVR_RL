@@ -348,6 +348,9 @@ def main(argv=None):
     ap.add_argument("--episodes", type=int, default=1, help="episodes before quitting (default 1)")
     ap.add_argument("--agent", help="DCS unit name the policy flies (default: from the bridge)")
     ap.add_argument("--red", help="DCS unit name of the opponent (default: from the bridge)")
+    ap.add_argument("--platform", help="library platform the policy is told it flies, for its own "
+                                        "missile's envelopes (default: the checkpoint's); also red's, "
+                                        "unless --opp-platform says otherwise")
     ap.add_argument("--opp-platform", help="library platform for red's envelopes "
                                             "(default: the checkpoint's training opponent)")
     ap.add_argument("--doctrine", default="BALANCED")
@@ -363,6 +366,11 @@ def main(argv=None):
     scen = scenario_of(model)
     if scen.get("format", "1v1") != "1v1":
         raise SystemExit("this checkpoint was trained for 2v1; the DCS link is 1v1 only")
+    if args.platform:
+        # e.g. F-16C-DCS: the same aircraft with the missile fitted to DCS, so
+        # the policy's range inputs match the missiles DCS actually flies.
+        scen = dict(scen, platform=args.platform)
+        args.opp_platform = args.opp_platform or args.platform
     print(f"policy: {args.checkpoint} ({scen['platform']} v "
           f"{args.opp_platform or scen['opponent_platform']}), {args.doctrine} doctrine")
     link = UdpLink(port_in=args.port_in, port_out=args.port_out)

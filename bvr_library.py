@@ -143,6 +143,13 @@ SCHEMA = {
         P("SUPPORT_TIMEOUT", "Datalink support timeout", "s", "Datalink", 0.5, 60,
           help="Before hand-off, a missile left without datalink updates this long misses."),
         P("MAX_FLIGHT", "Maximum flight time", "s", "Datalink", 5, 600),
+        P("LOFT_ANGLE", "Loft: climb angle", "deg", "Guidance", 0, 60, advanced=True, default=0.0,
+          help="A long shot first climbs at this angle into thinner air, before guiding on "
+               "the target. 0 (items saved before this parameter existed): no loft."),
+        P("LOFT_DIVE", "Loft: dive when the target is this far below", "deg", "Guidance", 0, 60,
+          advanced=True, default=0.0,
+          help="The climb ends, for good, when the target is this many degrees below the "
+               "missile, or within 5 km horizontally."),
     ],
     "radar": [
         P("MAX_RANGE", "Detection range", "m", "Detection", 1000, 400_000,
@@ -185,6 +192,7 @@ SCHEMA = {
 # Stored in degrees (or mrad), used in radians by the models.
 _TO_SI = {("airframe", "PHI_MAX"): DEG2RAD, ("airframe", "ROLL_MAX"): DEG2RAD,
           ("airframe", "GAMMA_MAX"): DEG2RAD, ("missile", "SEEKER_FOV"): DEG2RAD,
+          ("missile", "LOFT_ANGLE"): DEG2RAD, ("missile", "LOFT_DIVE"): DEG2RAD,
           ("radar", "FOV_AZ"): DEG2RAD, ("radar", "FOV_EL"): DEG2RAD,
           ("platform", "CLIMB_FPA_LO"): 1.0, ("platform", "CLIMB_FPA_HI"): 1.0}
 _TO_SI_DIV = {("radar", "SIG_AZ_REF"): 1000.0, ("radar", "SIG_EL_REF"): 1000.0,

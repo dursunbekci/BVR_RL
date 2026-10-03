@@ -296,6 +296,36 @@ defends against shots you can't make; a slow Su-25T at low altitude is
 also outside its training. Read these fights as a check of how it
 tracks, shoots and follows up, not as a fair score.
 
+## Fitting the missile model to DCS
+
+Every recording holds each DCS missile's flight ten times a second.
+`missile_fit.py` fits a library missile to them: the drag curve comes
+straight from the coast (after burn-out), then thrust, burn time and a
+loft (climb angle, and how far below the target must be before the dive)
+are searched until the model, fired from each recorded launch at the
+recorded target, matches DCS's speed and altitude over time.
+
+```
+python dcs\missile_fit.py dcs_runs\live_*.jsonl                                   # compare only
+python dcs\missile_fit.py dcs_runs\live_*.jsonl --save AIM-120C-DCS --platform-id F-16C-DCS
+python sweep_envelope.py --missile AIM-120C-DCS                                     # its launch ranges
+```
+
+`AIM-120C-DCS` (and the platform `F-16C-DCS`, an F-16C carrying it) is in
+the library, fitted to three recorded fights (six missile flights) with its
+envelope calibrated: about twice the head-on reach of the original AIM-120.
+To fly an existing policy in DCS with those ranges (no retraining):
+
+```
+python dcs_live.py models_bvr\latest_selfplay_v6.zip --platform F-16C-DCS
+```
+
+and to train with it, warm-started from a model trained on the F-16C:
+
+```
+python train_bvr.py --platform F-16C-DCS --opponent-platform F-16C-DCS --resume models_bvr\latest_selfplay_v6.zip
+```
+
 ---
 
 ## Troubleshooting

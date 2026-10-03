@@ -777,6 +777,34 @@ def test_team_roles_far_target():
     print(f"  2v1 red opens on rear ........ OK  (first missile at it in {fired_at_far}/4)")
 
 
+def test_missile_loft():
+    """A missile with LOFT_ANGLE climbs before diving on the target and still hits;
+    without it (the default) it does not climb."""
+    import copy, math
+    from bvr_library import missile_config
+    from missile_sim import AIM120, MslPhase
+    base = missile_config("AIM-120")
+    assert base.LOFT_ANGLE == 0.0
+    loft = copy.copy(base); loft.LOFT_ANGLE, loft.LOFT_DIVE = math.radians(25), math.radians(5)
+    out = {}
+    for name, cfg in (("flat", base), ("loft", loft)):
+        m = AIM120(1, 2, np.array([0.0, 0.0, 9000.0]), np.array([0.0, 400.0, 0.0]), 12000.0, cfg=cfg)
+        tp, tv = np.array([0.0, 35000.0, 9000.0]), np.array([0.0, -250.0, 0.0])
+        top = 0.0
+        for _ in range(int(80 / 0.02)):
+            tp = tp + tv * 0.02
+            m.update_guidance({"valid": 1, "tgt_pos": tp, "tgt_vel": tv})
+            m.step(0.02, tp, tv)
+            top = max(top, m.pos[2])
+            if m.phase in (MslPhase.HIT, MslPhase.MISS):
+                break
+        out[name] = (m.phase, top - 9000.0, m.t_flight)
+    assert out["flat"][1] < 200.0, out
+    assert out["loft"][1] > 1500.0 and out["loft"][0] == MslPhase.HIT, out
+    print(f"  missile loft ................ OK  (climbs {out['loft'][1]:.0f} m, hits after "
+          f"{out['loft'][2]:.1f} s; without loft {out['flat'][1]:.0f} m)")
+
+
 def test_dcs_live_link():
     """dcs_live.py flies a policy through the UDP link against dcs/fake_dcs.py."""
     import os, sys, tempfile, threading
@@ -1106,6 +1134,7 @@ if __name__ == "__main__":
         ("2v1 red opens on rear",   test_team_roles_far_target),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
+        ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
