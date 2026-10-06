@@ -57,6 +57,7 @@ class FakeDcs:
         self.rx.bind((host, port_in))
         self.rx.setblocking(False)
         self.commands = []             # every CMD received: (mission t, seq, hdg, alt, spd, fire)
+        self.destroyed = []            # missiles removed by DESTROY
 
     def send(self, obj):
         self.tx.sendto(json.dumps(obj).encode(), (self.host, self.port_out))
@@ -107,6 +108,9 @@ class FakeDcs:
                         hold = (float(st.get("psi", 0)), float(st.get("alt", 9000)),
                                 float(st.get("speed", 280)))
                         continue
+                    if msg[0] == "DESTROY" and len(msg) > 1:
+                        self.destroy(int(msg[1]))
+                        continue
                     if msg[0] != "CMD" or len(msg) < 6:
                         continue
                     seq, hdg, alt, spd, fire = int(msg[1]), float(msg[2]), float(msg[3]), \
@@ -152,6 +156,21 @@ class FakeDcs:
         finally:
             w.step = orig_step
         return env._outcome
+
+    def destroy(self, wid):
+        """As the bridge: remove a missile in flight, and say so."""
+        from missile_sim import MslPhase
+        w = self.env._world
+        m = next((m for m in w.missiles if m.id == wid
+                  and m.phase not in (MslPhase.HIT, MslPhase.MISS)), None)
+        if m is not None:
+            m.phase = MslPhase.MISS
+            self.destroyed.append((wid, m.owner))
+        self.send({"ev": "support_lost", "t": self.T(), "id": wid,
+                   "shooter": self.names[m.owner - 1] if m else None,
+                   "status": "destroyed" if m else "gone"})
+        if m is not None:
+            self.send({"ev": "weapon_gone", "t": self.T(), "id": wid})
 
     def close(self):
         self.tx.close(); self.rx.close()

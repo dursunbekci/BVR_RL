@@ -28,6 +28,8 @@ policy only watches.
 Commands (UDP datagrams to CFG.port_in, plain text):
   CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1>
   STOP          give the aircraft back to the AI (end of an episode)
+  DESTROY <id>  remove missile <id> (as numbered in the shot events): dcs_live.py's
+                support rule says it has had no guidance for too long
 
 Needs LuaSocket in the mission scripting environment: dcs/setup_dcs.py adds
 it to <DCS install>\Scripts\MissionScripting.lua as the global bvr_rl_socket,
@@ -278,8 +280,31 @@ local function request_fire(seq)
   if not ok then fire_done("refused") end
 end
 
+local weapons = {}       -- key -> {obj, id, shooter, type}
+local next_id = 1
+local function weapon_key(w) return w and tostring(w.id_) or nil end
+
+-- DESTROY <id>: dcs_live.py's support rule (as in training) says this missile
+-- has had no guidance from its shooter for too long before its seeker took over.
+local function destroy_missile(id)
+  local status, shooter = "gone", nil
+  for _, w in pairs(weapons) do
+    if w.id == id then
+      shooter = w.shooter
+      if w.obj:isExist() then
+        local ok = pcall(function() w.obj:destroy() end)
+        status = ok and "destroyed" or "failed"
+      end
+      break
+    end
+  end
+  send({ev = "support_lost", t = timer.getTime(), id = id, shooter = shooter, status = status})
+end
+
 local function on_command(msg)
   if msg:match("^STOP") then release_control(); return end
+  local did = msg:match("^DESTROY%s+(%d+)")
+  if did then destroy_missile(tonumber(did)); return end
   local seq, hdg, alt, spd, fire = msg:match("^CMD%s+(%d+)%s+([%-%d%.eE]+)%s+([%-%d%.eE]+)%s+([%-%d%.eE]+)%s+(%d)")
   if not seq or not agent:isExist() then return end
   local cmd = {seq = tonumber(seq), hdg = tonumber(hdg) % 360, alt = tonumber(alt),
@@ -299,9 +324,6 @@ local function on_command(msg)
 end
 
 -- ── events ───────────────────────────────────────────────────────────
-local weapons = {}       -- key -> {obj, id, shooter, type}
-local next_id = 1
-local function weapon_key(w) return w and tostring(w.id_) or nil end
 
 local E = world.event
 local DEAD_EVENTS = {}

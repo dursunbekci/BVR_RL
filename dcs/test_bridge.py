@@ -120,6 +120,45 @@ def test_bridge():
     print(f"  bridge in Lua 5.1 ........... OK  ({len(lines)} lines sent, fire {fires})")
 
 
+def test_bridge_destroy():
+    """DESTROY <id> removes a missile in flight: no hit, and the bridge reports it."""
+    L = lua()
+    sent, inbox = [], []
+
+    class Udp:
+        def settimeout(self, t): pass
+        def setsockname(self, h, p): return 1
+        def sendto(self, data, h, p): sent.append((p, data)); return len(data)
+        def receive(self, *a): return inbox.pop(0) if inbox else None
+
+    class Sock:
+        def udp(self): return Udp()
+
+    plan = {5.0: ["CMD 1 90 10000 300 0"], 20.0: ["CMD 2 90 10000 300 1"],
+            40.0: ["DESTROY 1"], 41.0: ["DESTROY 1"]}
+
+    def on_tick(T):
+        for t in list(plan):
+            if T >= t - 1e-9:
+                inbox.extend(plan.pop(t))
+
+    with open(os.path.join(HERE, "mock", "dcs_api_mock.lua")) as fh:
+        L.execute(fh.read())
+    L.globals().bvr_rl_socket = Sock()
+    L.globals().RUN(os.path.join(HERE, "bvr_bridge.lua"), 130.0, on_tick)
+    lines = [json.loads(d) for p, d in sent if p == 15301]
+    lost = [d for d in lines if d.get("ev") == "support_lost"]
+    assert [d["status"] for d in lost] == ["destroyed", "gone"] and lost[0]["id"] == 1 \
+        and lost[0]["shooter"] == "Viper-1", lost
+    gone = [d for d in lines if d.get("ev") == "weapon_gone" and d["id"] == 1]
+    assert gone and gone[0]["t"] >= lost[0]["t"], gone
+    assert not any(d.get("ev") in ("hit", "kill", "dead") for d in lines), "the removed missile hit"
+    from dcs_world import DcsRecording
+    rec = DcsRecording([json.dumps(d) for d in lines])
+    assert rec.weapons[1]["support_lost"] is not None and rec.weapons[1]["t_hit"] is None
+    print(f"  bridge DESTROY .............. OK  (removed at {lost[0]['t']:.1f} s, no hit)")
+
+
 def test_setup_patch():
     import setup_dcs
     L = lua()
@@ -141,5 +180,6 @@ if __name__ == "__main__":
         print("lupa is not installed (pip install lupa): skipped")
         sys.exit(0)
     test_bridge()
+    test_bridge_destroy()
     test_setup_patch()
-    print("2/2 passed")
+    print("3/3 passed")

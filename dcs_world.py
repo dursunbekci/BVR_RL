@@ -184,6 +184,10 @@ class DcsRecording:
                 d["type"] = e.get("type", d["type"])
             elif kind == "weapon_gone":
                 self._weapon(e["id"])["t_gone"] = t
+            elif kind == "support_lost":
+                # dcs_live.py had the bridge remove it: no support for too long.
+                if e.get("status") == "destroyed":
+                    self._weapon(e["id"])["support_lost"] = t
             elif kind == "hit":
                 self.hits.append(e)
                 if int(e.get("id", -1)) >= 0 and e.get("target"):
@@ -245,7 +249,7 @@ class DcsRecording:
         return self.weapons.setdefault(int(wid), {
             "id": int(wid), "type": "?", "shooter": None, "target": None,
             "t": [], "pos": [], "vel": [], "t_shot": None, "t_gone": None,
-            "t_hit": None, "hit_target": None, "t_end": None})
+            "t_hit": None, "hit_target": None, "t_end": None, "support_lost": None})
 
     # ── queries ──────────────────────────────────────────────────────
     def death_cause(self, name) -> dict:
@@ -522,7 +526,8 @@ class DcsReplayWorld:
                     pass                # a hit: the target's death, below, decides what it did
                 elif tgt in self.labels:
                     out.append({"type": "MISSILE_MISS", "id": d["id"], "owner": owner,
-                                "cause": "DCS", "t_sim": rel(d["t_end"])})
+                                "cause": "SUPPORT_LOST" if d["support_lost"] is not None else "DCS",
+                                "t_sim": rel(d["t_end"])})
         # One event per death, as the simulator's reach the env (BvrEnv would
         # count a second event for the same death as a new kill), sent once,
         # when the death is known: DCS can report it well after the hit, and

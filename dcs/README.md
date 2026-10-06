@@ -366,10 +366,15 @@ worse at first, for reasons that are useful to know:
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot
   until the launch is seen. Unanswered requests are counted.
-- **Missile guidance after the launch.** The policy keeps flying after a
-  shot. Whether DCS keeps the missile guided while the AI isn't in an
-  attack task is one of the first things to check in the recordings
-  (hits and misses in `results.csv` and the `.jsonl`).
+- **Missile support.** In training a missile misses after 3 s without
+  guidance from its shooter, until its own seeker takes over: the policy's
+  missiles need its radar track, a scripted opponent's only need it to be
+  alive. DCS is more forgiving (a missile that loses its shooter's lock
+  usually flies on and goes active). By default `dcs_live.py` applies the
+  training rule: it has the bridge remove such a missile (`DESTROY`), which
+  counts as a SUPPORT_LOST miss and is shown in the terminal and in
+  `results.csv` (`missiles_removed`). `--support-rule dcs` leaves every
+  missile to DCS.
 - **Radar.** The track the policy sees comes from BVR_RL's own radar model
   running on DCS's true positions, exactly as in training. DCS's radar is
   not used.
@@ -410,6 +415,7 @@ Python → DCS, UDP 15302, plain text:
 ```
 CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1>
 STOP
+DESTROY <missile id>      (the support rule; answered with {"ev":"support_lost", "id", "status"})
 ```
 
 Commands are re-sent every second; the bridge re-issues the AI's route only

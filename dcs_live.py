@@ -93,7 +93,7 @@ class DcsLiveWorld(DcsReplayWorld):
     BEHIND_WARN_S = 2.0     # warn when DCS's data is this far ahead of the policy
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
-                 shadow=False, log=print):
+                 shadow=False, log=print, support_rule="training"):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
         self.link, self.shadow, self.log = link, bool(shadow), log
@@ -105,6 +105,12 @@ class DcsLiveWorld(DcsReplayWorld):
         self.mission_ended = False
         self.last_cmd = None
         self.t_behind_warned = -math.inf
+        # The support rule (see _check_support): "training" applies the
+        # simulator's, "dcs" leaves every missile to DCS.
+        self.support_rule = support_rule
+        self._supported = {}                 # missile id -> last time it had support
+        self._destroy_sent = {}              # missile id -> last DESTROY sent
+        self.support_log = []                # (t_sim, missile id, shooter, status)
 
     @property
     def finished(self) -> bool:
@@ -139,6 +145,11 @@ class DcsLiveWorld(DcsReplayWorld):
                 if st != "launched" and st != "requested":
                     self.log(f"  fire {st} at {float(d['t']) - self.t0:.1f} s"
                              + (f": {d.get('reason')}" if d.get("reason") else ""))
+            elif d.get("ev") == "support_lost":
+                self.support_log.append((round(float(d["t"]) - self.t0, 1), d.get("id"),
+                                         d.get("shooter"), d.get("status")))
+                if d.get("status") not in ("destroyed", "gone"):
+                    self.log(f"  missile {d.get('id')}: could not be removed ({d.get('status')})")
             elif d.get("ev") == "mission_end":
                 self.mission_ended = True
         # Frames from before this episode (a restarted mission) are not ours.
@@ -180,7 +191,45 @@ class DcsLiveWorld(DcsReplayWorld):
         self.t = min(t_new, self.rec.t_end) if self.mission_ended else t_new
         self.events = self._events_between(self._t_prev, self.t)
         self._t_prev = self.t
-        return self.telemetry()
+        tlm = self.telemetry()                 # also latches which seekers are active
+        self._check_support(cmd1)
+        return tlm
+
+    def _check_support(self, cmd1):
+        """The simulator's support rule, applied to DCS missiles: a missile whose
+        own seeker has not taken over yet misses after the missile's support
+        timeout (3 s) without guidance from its shooter. As in training:
+          the policy's missiles are supported while its radar track gives a
+            guidance estimate (BvrEnv._guidance_packet) and it is alive;
+          the opponent's while it is alive (scripted opponents guide on the
+            target itself in training; only a dead shooter stops guiding).
+        A missile past its timeout is removed in DCS (DESTROY), which counts as a
+        SUPPORT_LOST miss. Seeker take-over is estimated, as for the inputs:
+        inside the missile's mean hand-off range of its target."""
+        if self.shadow or self.support_rule != "training":
+            return
+        blue, red = self.names[1], self.names[2]
+        guided = bool(cmd1) and bool((cmd1.get("msl_guidance") or {}).get("valid", 0))
+        ok = {1: guided and self.rec.alive(blue, self.t), 2: self.rec.alive(red, self.t)}
+        for d, _tgt, owner in self._in_flight():
+            wid = d["id"]
+            if wid in self._seeker:
+                continue
+            last = self._supported.setdefault(wid, self.t)
+            if ok[owner]:
+                self._supported[wid] = self.t
+                continue
+            plat = self.plats.get(d["shooter"])
+            timeout = getattr(getattr(plat, "missile", None), "SUPPORT_TIMEOUT", 3.0)
+            if self.t - last <= timeout or self.t - self._destroy_sent.get(wid, -math.inf) < 1.0:
+                continue
+            if wid not in self._destroy_sent:
+                why = "the policy's radar lost the track" if owner == 1 and self.rec.alive(blue, self.t) \
+                    else f"{d['shooter']} is down"
+                self.log(f"  missile {wid} ({d['shooter']}): no support for {timeout:.0f} s "
+                         f"({why}): removed in DCS")
+            self.link.send(f"DESTROY {wid}")
+            self._destroy_sent[wid] = self.t
 
 
 class DcsLiveEnv(BvrEnv):
@@ -278,8 +327,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     link.sink = lambda line: raw_fh.write(line + "\n")
 
     privileged = isinstance(model.observation_space, spaces.Dict)
+    rule = getattr(args, "support_rule", "training")
     env = DcsLiveEnv(lambda bp, rp: DcsLiveWorld(link, rec, agent, red, bp, rp,
-                                                 shadow=args.shadow, log=log),
+                                                 shadow=args.shadow, log=log, support_rule=rule),
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
@@ -325,7 +375,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            "start_range_km": round(ic["start_range"] / 1000, 1),
            "shots": info.get("shots_fired", 0),
            "fire_requests": sum(1 for _, s in world.fire_log if s == "requested"),
-           "fire_timeouts": sum(1 for _, s in world.fire_log if s in ("timeout", "refused"))}
+           "fire_timeouts": sum(1 for _, s in world.fire_log if s in ("timeout", "refused")),
+           "missiles_removed": sum(1 for *_, st in world.support_log if st == "destroyed"),
+           "support_losses": info.get("support_losses", 0)}
     path = os.path.join(args.out, "results.csv")
     new = not os.path.exists(path)
     with open(path, "a", newline="") as fh:
@@ -353,6 +405,10 @@ def main(argv=None):
                                         "unless --opp-platform says otherwise")
     ap.add_argument("--opp-platform", help="library platform for red's envelopes "
                                             "(default: the checkpoint's training opponent)")
+    ap.add_argument("--support-rule", choices=["training", "dcs"], default="training",
+                    help="training (default): a missile without support from its shooter for 3 s "
+                         "before its seeker takes over is removed, as in the simulator; dcs: DCS "
+                         "decides (its missiles usually fly on and go active)")
     ap.add_argument("--doctrine", default="BALANCED")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)
@@ -375,6 +431,10 @@ def main(argv=None):
           f"{args.opp_platform or scen['opponent_platform']}), {args.doctrine} doctrine")
     link = UdpLink(port_in=args.port_in, port_out=args.port_out)
     print(f"listening for DCS on UDP {args.port_in}, commands to {args.port_out}")
+    if not args.shadow:
+        print("support rule: " + ("as in training (3 s without support before the seeker takes "
+                                  "over: the missile is removed)" if args.support_rule == "training"
+                                  else "DCS's own"))
     last_t, rows = None, []
     try:
         for ep in range(1, args.episodes + 1):

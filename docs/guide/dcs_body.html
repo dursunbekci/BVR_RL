@@ -422,7 +422,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><th>Difference</th><th>What it means</th><th>Where to see it</th></tr>
 <tr><td class="k">Flying</td><td>BLUE-1 is flown by the DCS AI along the commanded route, with DCS's F-16 flight model. Turns, climbs and speed changes differ from the training autopilot.</td><td><code>_steps.csv</code>: commanded vs flown heading; obs check on rates and speeds.</td></tr>
 <tr><td class="k">Shooting</td><td>"Fire" is a request. The AI launches when its own logic agrees (set to shoot at maximum range), usually within a second or two. No second shot is allowed until the launch is seen.</td><td><code>results.csv</code>: fire timeouts.</td></tr>
-<tr><td class="k">Guidance after the launch</td><td>The policy keeps flying after a shot. Whether DCS keeps the missile guided while the AI is not in an attack task is one of the first things to check.</td><td>Hits and misses in <code>results.csv</code> and the <code>.jsonl</code>.</td></tr>
+<tr><td class="k">Missile support</td><td>In training a missile misses after 3 s without guidance from its shooter, until its own seeker takes over (the policy's missiles need its radar track; a scripted opponent's only need it alive). DCS is more forgiving. By default <code>dcs_live.py</code> applies the training rule and has the bridge remove such a missile; <code>--support-rule dcs</code> leaves it to DCS.</td><td>Terminal; <code>missiles_removed</code> in <code>results.csv</code>.</td></tr>
 <tr><td class="k">Radar</td><td>The track comes from BVR_RL's radar model on DCS's true positions, as in training. DCS's radar is not used, so this part matches training by design.</td><td>—</td></tr>
 <tr><td class="k">Opponent</td><td>RED-1 is the DCS AI, which none of the training opponents imitate exactly.</td><td>Outcomes; the <code>.jsonl</code> replay.</td></tr>
 <tr><td class="k">Missiles</td><td>DCS's AIM-120 reaches differently from the envelope tables the policy trained with.</td><td>Shot ranges vs outcomes.</td></tr>
@@ -439,6 +439,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k">Each command</td><td>A two-point route from BLUE-1's position along the commanded heading (3 km and 60 km out) at the commanded altitude and speed. Re-issued only when the command moves by 2° of heading, 50 m or 1 m/s, or every 10 s.</td></tr>
 <tr><td class="k">Fire</td><td>Weapons <b>open fire</b>, and an attack task on RED-1 for one active-radar missile. While it waits, the route is not changed.</td></tr>
 <tr><td class="k">Launch seen (or 8 s without one)</td><td>Weapons hold again, the attack task removed, the route re-issued. Python is told <code>launched</code> or <code>timeout</code>.</td></tr>
+<tr><td class="k">Support lost (<code>DESTROY</code>)</td><td>The missile is removed in DCS: a miss, as in training. Python is told <code>destroyed</code> (or <code>gone</code> if it had already ended).</td></tr>
 <tr><td class="k">End of episode (<code>STOP</code>)</td><td>BLUE-1's tasks cleared; reaction to threats back to evading fire; weapons free. It carries on as an ordinary AI aircraft.</td></tr>
 </table>
 <h2>Settings at the top of bvr_bridge.lua</h2>
@@ -468,6 +469,8 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k"><code>--max-steps N</code></td><td class="n">300</td><td>Episode length in seconds; match training</td></tr>
 <tr><td class="k"><code>--doctrine D</code></td><td class="n">BALANCED</td><td>Shot doctrine the policy is told</td></tr>
 <tr><td class="k"><code>--opp-platform P</code></td><td class="n">checkpoint's</td><td>Library platform assumed for red's envelopes</td></tr>
+<tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (e.g. <code>F-16C-DCS</code>)</td></tr>
+<tr><td class="k"><code>--support-rule R</code></td><td class="n">training</td><td><code>training</code>: 3 s without support before the seeker takes over removes the missile; <code>dcs</code>: DCS decides</td></tr>
 <tr><td class="k"><code>--agent</code> / <code>--red</code></td><td class="n">from bridge</td><td>DCS unit names, if not the bridge's choice</td></tr>
 <tr><td class="k"><code>--port-in</code> / <code>--port-out</code></td><td class="n">15301 / 15302</td><td>UDP ports</td></tr>
 <tr><td class="k"><code>--out DIR</code></td><td class="n">dcs_runs</td><td>Output folder</td></tr>
@@ -525,10 +528,13 @@ python dcs\test_bridge.py       (bvr_bridge.lua and the setup patch, in Lua 5.1)
 <pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":1, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
 {"ev":"fire", "t":..., "status":"requested|launched|timeout|refused", "seq":...}
 {"ev":"bridge", "t":..., "status":"control|released", "agent":...}
+{"ev":"support_lost", "t":..., "id":..., "status":"destroyed|gone|failed"}
+{"ev":"kill", "t":..., "unit":..., "killer":..., "id":...}
 {"ev":"mission_end", "t":...}</pre>
 <h2>Python → DCS (UDP 15302)</h2>
 <pre>CMD &lt;seq&gt; &lt;heading deg, map north, clockwise&gt; &lt;altitude m&gt; &lt;speed m/s&gt; &lt;fire 0|1&gt;
-STOP</pre>
+STOP
+DESTROY &lt;missile id&gt;</pre>
 <p>Commands are re-sent every second, so a lost message costs at most a second.</p>
 <h2>Where things are</h2>
 <table>

@@ -91,6 +91,7 @@ local function step_blue(dt)
       function msl:getTarget() return red end
       function msl:getPoint() return {x = self.x, y = self.y, z = self.z} end
       function msl:getVelocity() return self.v end
+      function msl:destroy() self.alive = false end
       blue.ammo = blue.ammo - 1
       HANDLER:onEvent({id = world.event.S_EVENT_SHOT, initiator = blue, weapon = msl, time = T})
     end

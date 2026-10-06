@@ -846,6 +846,54 @@ def test_dcs_live_link():
           f"{row['shots']} shots, {row['outcome']})")
 
 
+def test_dcs_support_rule():
+    """dcs_live.py removes the policy's missile 3 s after its guidance stops
+    (before the seeker takes over), and leaves a live opponent's missiles alone."""
+    import os, sys, tempfile, threading
+    from types import SimpleNamespace
+    from gymnasium import spaces
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import dcs_live
+    from fake_dcs import FakeDcs
+    from bvr_env import BvrEnv, OBS_DIM, PRIV_DIM, HDG_OFFSETS_DEG
+
+    class Scripted:          # straight at the bandit, fire whenever allowed
+        observation_space = spaces.Dict({"obs": spaces.Box(-1, 1, (OBS_DIM,)),
+                                         "priv": spaces.Box(-1, 1, (PRIV_DIM,))})
+        def predict(self, obs, deterministic=True, action_masks=None):
+            return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 3, int(action_masks[-1])]), None
+
+    orig = BvrEnv._guidance_packet
+    cut = {}
+    def no_guidance_after_first_shot(self):
+        if self._shots_fired >= 1:
+            cut.setdefault("t", self._t_sim)
+            return {"valid": 0}
+        return orig(self)
+    dcs_live.DcsLiveEnv._guidance_packet = no_guidance_after_first_shot
+    fake = FakeDcs(opponent="SHOOTER", seed=2, speed=8.0, max_time=250.0)
+    th = threading.Thread(target=fake.run, daemon=True)
+    link = dcs_live.UdpLink()
+    th.start()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=250,
+                                   doctrine="AGGRESSIVE", support_rule="training")
+            rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
+            row, _ = dcs_live.run_episode(link, Scripted(), args,
+                                          {"platform": "F-16C", "opponent_platform": "F-16C"},
+                                          rec, agent, red, 1, log=lambda m: None)
+    finally:
+        del dcs_live.DcsLiveEnv._guidance_packet
+        th.join(timeout=120)
+        link.close(); fake.close()
+    assert fake.destroyed, ("no missile removed", row)
+    assert all(owner == 1 for _, owner in fake.destroyed), fake.destroyed
+    assert row["missiles_removed"] >= 1 and row["support_losses"] >= 1, row
+    print(f"  DCS support rule ............ OK  ({len(fake.destroyed)} of the policy's missiles "
+          f"removed, guidance cut at {cut.get('t', 0):.0f} s; {row['outcome']})")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -1134,6 +1182,7 @@ if __name__ == "__main__":
         ("2v1 red opens on rear",   test_team_roles_far_target),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
+        ("DCS support rule",        test_dcs_support_rule),
         ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
