@@ -449,25 +449,39 @@ class _Cfg:
             setattr(self, p.key, v)
 
 
+# Curves are small classes, not closures, so an env (which holds them) can be
+# pickled: older stable-baselines3 sends env attributes between processes.
+class _InterpCurve:
+    def __init__(self, table):
+        t = np.asarray(table, dtype=float)
+        self.xs, self.ys = t[:, 0].copy(), t[:, 1].copy()
+
+    def __call__(self, m):
+        return float(np.interp(float(m), self.xs, self.ys))
+
+
+class _CdRise:
+    def __init__(self, m0, m1, m2, peak, decay):
+        self.m0, self.m1, self.m2, self.peak, self.decay = m0, m1, m2, peak, decay
+
+    def __call__(self, mach):
+        m0, m1, m2, peak, decay = self.m0, self.m1, self.m2, self.peak, self.decay
+        if mach < m0: return 0.0
+        if mach < m1: return peak * math.sin(0.5 * math.pi * (mach - m0) / (m1 - m0))
+        if mach < m2: return peak * math.exp(-decay * (mach - m1))
+        return peak * math.exp(-decay * (m2 - m1))          # supersonic wave drag
+
+
 def _interp_curve(table):
-    t = np.asarray(table, dtype=float)
-    xs, ys = t[:, 0].copy(), t[:, 1].copy()
-    return lambda m: float(np.interp(float(m), xs, ys))
+    return _InterpCurve(table)
 
 
 def airframe_config(item_id: str) -> _Cfg:
     it = get_item("airframe", item_id)
     c = _Cfg("airframe", it)
     c.thrust_mach_factor = _interp_curve(c.THRUST_MACH_TABLE)
-    m0, m1, m2 = c.DRAG_RISE_M0, c.DRAG_RISE_M1, c.DRAG_RISE_M2
-    peak, decay = c.DRAG_RISE_PEAK, c.DRAG_RISE_DECAY
-
-    def cd_rise(mach):
-        if mach < m0: return 0.0
-        if mach < m1: return peak * math.sin(0.5 * math.pi * (mach - m0) / (m1 - m0))
-        if mach < m2: return peak * math.exp(-decay * (mach - m1))
-        return peak * math.exp(-decay * (m2 - m1))          # supersonic wave drag
-    c.cd_rise = cd_rise
+    c.cd_rise = _CdRise(c.DRAG_RISE_M0, c.DRAG_RISE_M1, c.DRAG_RISE_M2,
+                        c.DRAG_RISE_PEAK, c.DRAG_RISE_DECAY)
     return c
 
 

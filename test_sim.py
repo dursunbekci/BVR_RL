@@ -977,6 +977,25 @@ def test_dcs_red_support():
           f"removed; cranking: none)")
 
 
+def test_env_pickles():
+    """The envs pickle: older stable-baselines3 (before 2.x has_attr) sends
+    env.action_masks, and with it the whole env, from each worker process."""
+    import pickle
+    import bvr_env as E
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    for plat in ("F-16C", "F-16C-DCS"):
+        env = E.BvrEnv(opponent_type=T.SHOOTER, seed=1, platform=plat, opponent_platform=plat)
+        env.reset()
+        for _ in range(5):
+            env.step(env.action_space.sample())
+        pickle.loads(pickle.dumps(env.action_masks))
+    team = TeamBvrEnv(opponent_type=T.SHOOTER, seed=1)
+    team.reset()
+    pickle.loads(pickle.dumps(team))
+    print("  envs pickle ................. OK")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -1275,6 +1294,7 @@ if __name__ == "__main__":
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),
+        ("envs pickle",             test_env_pickles),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)
