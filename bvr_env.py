@@ -18,7 +18,7 @@ from sim_world        import SimWorld
 from bvr_track_adapter import RadarTrackAdapter, TrackState, body_to_enu_matrix
 from bvr_envelope     import Aim120Envelope, aspect_deg_from_vectors
 from bvr_radar_sim    import RadarSim
-from bvr_opponents    import BvrOpponent, BvrOpponentType
+from bvr_opponents    import BvrOpponent, BvrOpponentType, ShooterOpponent
 from bvr_library      import (load_platform, envelope_path, LibraryError,
                               DEFAULT_PLATFORM)
 
@@ -219,6 +219,15 @@ class BvrEnv(gym.Env):
     # on a wingman's datalink track (2v1), which had no angle limit.
     MAX_OFF_BORESIGHT_DEG = 60.0
 
+    # Scripted shooters fight under the agent's rules (SIM_REV 9): their
+    # missiles are guided on their own radar track, not on the agent's true
+    # position, so the 3-second support rule binds them too, and they may only
+    # fire when the agent's fire mask would allow it from their side (firm
+    # track, inside R-max, within 60 deg of the nose, 3 s between shots). Their
+    # radar and track are the agent's own code run from their side, as for a
+    # self-play snapshot. False: the old truth-guided opponents.
+    OPPONENT_RADAR = True
+
     RADAR_OMEGA_COMPENSATED = False
     TRACK_CONVERT_HZ        = 10.0
 
@@ -335,6 +344,11 @@ class BvrEnv(gym.Env):
         else:
             self._opponent = BvrOpponent.create(self._opponent_type,rng=self._rng)
         self._opponent.reset(ic)
+        self._opp_radar = None
+        if (self.OPPONENT_RADAR and isinstance(self._opponent, ShooterOpponent)
+                and self._radar_model == "sim"):
+            self._opp_radar = self._opponent_radar()
+            self._opponent.fire_gate = self._opp_radar._can_fire
         self._world.reset(ic, episode_id=self._episode_id)
         self._cmd_hdg=float(ic["ac1_psi"]); self._cmd_alt=float(ic["ac1_alt"])
         self._cmd_spd=float(ic["ac1_spd"])
@@ -493,6 +507,8 @@ class BvrEnv(gym.Env):
             try:    opp = self._opponent.act(self._state, self._t_sim)
             except Exception as e:
                 raise OpponentError(self, e) from e
+            if self._opp_radar is not None:
+                opp = self._opponent_radar_frame(opp)
 
             tlm = self._world.step(pkt, opp)
             self._ingest(tlm)
@@ -612,6 +628,44 @@ class BvrEnv(gym.Env):
             o._env_own, o._env_thr = self._env_thr, self._env_own
             self._sp_observers[privileged]=o
         return o
+
+    def _opponent_radar(self) -> "BvrEnv":
+        """The scripted opponent's radar and track (OPPONENT_RADAR): the agent's
+        own sensor and guidance code run from AC2's side, reset per episode."""
+        o=self._sp_observers.get("opponent_radar")
+        if o is None:
+            o=BvrEnv(seed=self._instance*7919+29, instance_id=self._instance,
+                     privileged_critic=False, radar_model=self._radar_model,
+                     envelope_table=None, platform=self._opp_platform_id,
+                     opponent_platform=self._platform_id)
+            o._env_own, o._env_thr = self._env_thr, self._env_own
+            self._sp_observers["opponent_radar"]=o
+        o._track.reset()
+        if o._radar is not None: o._radar.reset()
+        o._state={}; o._t_sim=0.0
+        o._last_shot_t=-999.0; o._last_convert_t=-1e9
+        return o
+
+    def _opponent_radar_frame(self, opp:dict) -> dict:
+        """One frame of the opponent's sensor, as for the agent: the track ticks
+        every frame, the radar converts at TRACK_CONVERT_HZ. Its missiles are
+        guided on its own estimate (the key must be present, or the world falls
+        back to truth)."""
+        o, w = self._opp_radar, self._world
+        o._track.tick(w.SIM_DT)
+        o._t_sim = self._t_sim
+        if (o._track.t_now - o._last_convert_t) >= 1.0/self.TRACK_CONVERT_HZ:
+            conv_dt = min(o._track.t_now - o._last_convert_t, 1.0)
+            o._last_convert_t = o._track.t_now
+            o._state = w.telemetry(2)
+            o._radar_update(dt=conv_dt)
+        opp = dict(opp)
+        if opp.get("fire"):
+            o._last_shot_t = self._t_sim
+        # (A DCS world has no missile list here: always send the estimate.)
+        mine = any(m.owner == 2 for m in w.missiles) if hasattr(w, "missiles") else True
+        opp["msl_guidance"] = o._guidance_packet() if mine else {"valid": 0}
+        return opp
 
     def _pick_doctrine(self) -> None:
         """This episode's doctrine: the configured one, or a random one."""

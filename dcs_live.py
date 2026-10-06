@@ -192,17 +192,18 @@ class DcsLiveWorld(DcsReplayWorld):
         self.events = self._events_between(self._t_prev, self.t)
         self._t_prev = self.t
         tlm = self.telemetry()                 # also latches which seekers are active
-        self._check_support(cmd1)
+        self._check_support(cmd1, cmd2)
         return tlm
 
-    def _check_support(self, cmd1):
+    def _check_support(self, cmd1, cmd2=None):
         """The simulator's support rule, applied to DCS missiles: a missile whose
         own seeker has not taken over yet misses after the missile's support
         timeout (3 s) without guidance from its shooter. As in training:
           the policy's missiles are supported while its radar track gives a
             guidance estimate (BvrEnv._guidance_packet) and it is alive;
-          the opponent's while it is alive (scripted opponents guide on the
-            target itself in training; only a dead shooter stops guiding).
+          the opponent's while its own radar track (the same model, run for it
+            on DCS's positions) gives one and it is alive, as for a scripted
+            opponent in training since SIM_REV 9.
         A missile past its timeout is removed in DCS (DESTROY), which counts as a
         SUPPORT_LOST miss. Seeker take-over is estimated, as for the inputs:
         inside the missile's mean hand-off range of its target."""
@@ -210,7 +211,13 @@ class DcsLiveWorld(DcsReplayWorld):
             return
         blue, red = self.names[1], self.names[2]
         guided = bool(cmd1) and bool((cmd1.get("msl_guidance") or {}).get("valid", 0))
-        ok = {1: guided and self.rec.alive(blue, self.t), 2: self.rec.alive(red, self.t)}
+        # Red: its own radar and track (BvrEnv's opponent radar, run on DCS's
+        # true positions) when the env set it up, as for a scripted opponent in
+        # training since SIM_REV 9; without one, alive is enough.
+        g2 = (cmd2 or {}).get("msl_guidance")
+        red_guided = True if g2 is None else bool(g2.get("valid", 0))
+        ok = {1: guided and self.rec.alive(blue, self.t),
+              2: red_guided and self.rec.alive(red, self.t)}
         for d, _tgt, owner in self._in_flight():
             wid = d["id"]
             if wid in self._seeker:
@@ -251,6 +258,14 @@ class DcsLiveEnv(BvrEnv):
 
     def _random_ic(self, blue_top_speed=None) -> dict:
         return self._world.initial_ic()
+
+    def reset(self, seed=None, options=None):
+        out = super().reset(seed=seed, options=options)
+        w = self._world
+        # Red's own radar and track, for the support rule on its missiles.
+        if w.support_rule == "training" and not w.shadow and self._radar_model == "sim":
+            self._opp_radar = self._opponent_radar()
+        return out
 
     def _can_fire(self) -> bool:
         # One shot at a time: the DCS AI takes a moment to launch, and the

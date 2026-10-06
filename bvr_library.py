@@ -391,7 +391,7 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 8
+SIM_REV = 9
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -412,6 +412,12 @@ _SIM_REV_NOTES = {
     8: "half the episodes now start mirrored: the opponent gets the start the "
        "agent always had (nose on while the other is offset, beaming or running), "
        "so the agent also practises the worse start; expect a lower win rate",
+    9: "scripted shooters fight under the agent's rules: their missiles are guided "
+       "on their own radar track (not the agent's true position), so the 3-second "
+       "support rule binds them too, and they fire only when the agent's fire mask "
+       "would allow it from their side; they crank at most 45 deg (SHOOTER 45, was "
+       "50; ADAPTIVE 30-45, was 35-70) so they keep their own track. 1v1 only: "
+       "2v1 red is unchanged",
 }
 
 

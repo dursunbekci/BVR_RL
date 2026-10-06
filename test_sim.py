@@ -894,6 +894,89 @@ def test_dcs_support_rule():
           f"removed, guidance cut at {cut.get('t', 0):.0f} s; {row['outcome']})")
 
 
+def test_dcs_red_support():
+    """dcs_live.py (training rule): a red that fires and turns away loses its own
+    radar track, and its missile is removed before its seeker takes over; with
+    --support-rule dcs, or a red that keeps its radar on, nothing is removed."""
+    import json, os, sys, tempfile
+    import bvr_env as E
+    import bvr_opponents as O
+    import dcs_live
+    from bvr_opponents import BvrOpponentType as T
+    from dcs_world import write_sim_recording
+
+    class FireAndRun(O.ShooterOpponent):   # fires once, then turns cold for good
+        def act(self, state, t_sim):
+            cmd = super().act(state, t_sim)
+            if self._phase == "COMMIT":
+                return cmd
+            if not hasattr(self, "_cold"):     # the firing frame: remember the way out
+                self._cold = (cmd["hdgCmd"] + math.pi) % (2 * math.pi)
+                return cmd
+            return dict(cmd, hdgCmd=self._cold, fire=0)
+
+    from bvr_env import HDG_OFFSETS_DEG
+    from sim_world import _enu_to_latlon
+    hot = [list(HDG_OFFSETS_DEG).index(0), 2, 1, 0]   # straight at red, never firing
+
+    def head_on(env):                       # 70 km head-on at 9 km: red fires within ~10 s
+        ic = env.__class__._random_ic(env)
+        lat1, lon1, _ = _enu_to_latlon(0.0, 0.0, 9000.0)
+        lat2, lon2, _ = _enu_to_latlon(0.0, 70_000.0, 9000.0)
+        ic.update(ac1_lat=lat1, ac1_lon=lon1, ac1_alt=9000.0, ac1_psi=0.0, ac1_spd=280.0,
+                  ac2_lat=lat2, ac2_lon=lon2, ac2_alt=9000.0, ac2_psi=math.pi, ac2_spd=280.0,
+                  start_range=70_000.0, scenario="head_on", mirrored=False)
+        return ic
+
+    def recording(path, run_away):
+        E.BvrEnv.OPPONENT_RADAR = False        # the source fight: truth-guided red
+        try:
+            sim = E.BvrEnv(opponent_type=T.SHOOTER, seed=5, doctrine="AGGRESSIVE",
+                           platform="F-16C-DCS", opponent_platform="F-16C-DCS")
+            sim.MAX_STEPS = 60
+            sim._random_ic = lambda blue_top_speed=None: head_on(sim)
+            if run_away:
+                sim._opponent_factory = lambda env: FireAndRun(rng=env._rng)
+            write_sim_recording(sim, lambda e: hot, path)
+        finally:
+            E.BvrEnv.OPPONENT_RADAR = True
+        return [json.loads(l) for l in open(path)]
+
+    class FakeLink:
+        def __init__(self, objs):
+            self.objs = sorted(objs, key=lambda d: d.get("t", -1) if "format" not in d else -1)
+            self.i, self.sink, self.sent = 0, None, []
+        def poll(self, timeout=0.2):
+            out = self.objs[self.i:self.i + 4]; self.i += 4; return out
+        def send(self, text): self.sent.append(text)
+
+    def destroyed(lines, rule):
+        link = FakeLink(lines)
+        rec, a, r = dcs_live.wait_for_fight(link, log=lambda m: None)
+        env = dcs_live.DcsLiveEnv(lambda bp, rp: dcs_live.DcsLiveWorld(
+            link, rec, a, r, bp, rp, log=lambda m: None, support_rule=rule),
+            "F-16C-DCS", "F-16C-DCS")
+        env.reset()
+        while link.i < len(link.objs) - 4:
+            _, _, te, tr, _ = env.step(hot)
+            if te or tr:
+                break
+        red_ids = {d["id"] for d in lines if d.get("ev") == "shot" and d["shooter"] == "RED-1"}
+        gone = {int(t.split()[1]) for t in link.sent if t.startswith("DESTROY")}
+        return red_ids, gone
+
+    with tempfile.TemporaryDirectory() as d:
+        run = recording(os.path.join(d, "run.jsonl"), run_away=True)
+        crank = recording(os.path.join(d, "crank.jsonl"), run_away=False)
+    red_ids, gone = destroyed(run, "training")
+    assert red_ids and red_ids <= gone, (red_ids, gone)
+    assert not destroyed(run, "dcs")[1]
+    red_ids2, gone2 = destroyed(crank, "training")
+    assert red_ids2 and not (red_ids2 & gone2), (red_ids2, gone2)
+    print(f"  DCS red support ............. OK  (fire and turn away: {len(red_ids)} red missile(s) "
+          f"removed; cranking: none)")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -1183,6 +1266,7 @@ if __name__ == "__main__":
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS support rule",        test_dcs_support_rule),
+        ("DCS red support",         test_dcs_red_support),
         ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),

@@ -548,9 +548,12 @@ class DcsReplayWorld:
         return out
 
     # ── telemetry packet ─────────────────────────────────────────────
-    def telemetry(self) -> dict:
+    def telemetry(self, me: int = 1) -> dict:
+        """The packet aircraft `me` gets (1 = blue, the default; 2 = red, for red's
+        radar in dcs_live.py): its own state, the other's as *_t, and missiles
+        labelled from its side (1 = its own, 2 = aimed at it)."""
         t = self.t
-        blue, red = self.names[1], self.names[2]
+        blue, red = self.names[me], self.names[3 - me]          # "blue" is `me` below
         a1, a2 = self._kin(blue, t), self._kin(red, t)
         lat1, lon1, alt1 = _enu_to_latlon(*a1["pos"])
         lat2, lon2, alt2 = _enu_to_latlon(*a2["pos"])
@@ -572,8 +575,11 @@ class DcsReplayWorld:
             m = self._missile_dict(dw, tgt, owner)
             if m is None:
                 continue
+            if me != 1:                                   # relabel from red's side
+                m["owner"] = 1 if owner == me else 2
+                m["target"] = 1 if tgt == blue else 2
             msl.append(m)
-            if owner == 2 and tgt == blue:
+            if owner != me and tgt == blue:
                 inbound.append((dw, m))
         if inbound:
             dw, m = min(inbound, key=lambda x: float(np.linalg.norm(

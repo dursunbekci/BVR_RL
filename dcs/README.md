@@ -367,14 +367,20 @@ worse at first, for reasons that are useful to know:
   second or two, and the policy is not allowed to request another shot
   until the launch is seen. Unanswered requests are counted.
 - **Missile support.** In training a missile misses after 3 s without
-  guidance from its shooter, until its own seeker takes over: the policy's
-  missiles need its radar track, a scripted opponent's only need it to be
-  alive. DCS is more forgiving (a missile that loses its shooter's lock
-  usually flies on and goes active). By default `dcs_live.py` applies the
-  training rule: it has the bridge remove such a missile (`DESTROY`), which
-  counts as a SUPPORT_LOST miss and is shown in the terminal and in
-  `results.csv` (`missiles_removed`). `--support-rule dcs` leaves every
-  missile to DCS.
+  guidance from its shooter's radar track, until its own seeker takes
+  over. Since SIM_REV 9 this holds for both sides: scripted opponents fly
+  with their own copy of the radar model, aim their missiles at their own
+  track and shoot only when the policy would be allowed to. DCS is more
+  forgiving (a missile that loses its shooter's lock usually flies on and
+  goes active). By default `dcs_live.py` applies the training rule to both
+  aircraft: blue's support comes from the policy's track, red's from the
+  same radar model run from red's side on DCS's true positions (DCS's own
+  radar state is not readable). A missile that loses support is removed by
+  the bridge (`DESTROY`); this counts as a SUPPORT_LOST miss, is shown in
+  the terminal and in `results.csv` (`missiles_removed`). So a DCS AI that
+  fires and turns away before its missile goes active loses that missile,
+  as a scripted opponent would in training. `--support-rule dcs` leaves
+  every missile to DCS.
 - **Radar.** The track the policy sees comes from BVR_RL's own radar model
   running on DCS's true positions, exactly as in training. DCS's radar is
   not used.
