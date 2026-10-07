@@ -93,7 +93,7 @@ class DcsLiveWorld(DcsReplayWorld):
     BEHIND_WARN_S = 2.0     # warn when DCS's data is this far ahead of the policy
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
-                 shadow=False, log=print, support_rule="training"):
+                 shadow=False, log=print, support_rule="training", speed_boost=None):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
         self.link, self.shadow, self.log = link, bool(shadow), log
@@ -108,6 +108,12 @@ class DcsLiveWorld(DcsReplayWorld):
         # The support rule (see _check_support): "training" applies the
         # simulator's, "dcs" leaves every missile to DCS.
         self.support_rule = support_rule
+        # --speed-boost: while BLUE-1 is well below the policy's speed, ask DCS for
+        # this much more (the DCS AI on a route will not light its afterburner for
+        # the speed it is actually asked for); the real speed again once close.
+        self.speed_boost = None if speed_boost is None else float(speed_boost)
+        self._boosting = False
+        self.boost_steps = 0
         self._supported = {}                 # missile id -> last time it had support
         self._destroy_sent = {}              # missile id -> last DESTROY sent
         self.support_log = []                # (t_sim, missile id, shooter, status)
@@ -161,9 +167,31 @@ class DcsLiveWorld(DcsReplayWorld):
             self.log(f"  this computer is {behind:.1f} s of mission time behind DCS: the policy's "
                      f"commands arrive late (lower DCS time acceleration)")
 
+    BOOST_ON_MPS = 20.0      # start boosting this far below the policy's speed
+    BOOST_OFF_MPS = 5.0      # back to the real speed once within this
+
+    def _flown_speed(self):
+        try:
+            s = self.rec.state(self.names[1], min(self.t, self.rec.t_end))
+            return float(np.linalg.norm(s["vel"]))
+        except Exception:
+            return None
+
+    def _speed_to_send(self, spd):
+        if self.speed_boost is None:
+            return spd
+        v = self._flown_speed()
+        if v is not None:
+            if v < spd - self.BOOST_ON_MPS:
+                self._boosting = True
+            elif v >= spd - self.BOOST_OFF_MPS:
+                self._boosting = False
+        self.boost_steps += int(self._boosting)
+        return max(spd, self.speed_boost) if self._boosting else spd
+
     def send_command(self, cmd, fire):
         hdg = (math.degrees(float(cmd["hdgCmd"])) % 360.0)
-        alt, spd = float(cmd["altTarget"]), float(cmd["V"])
+        alt, spd = float(cmd["altTarget"]), self._speed_to_send(float(cmd["V"]))
         self.last_cmd = (round(hdg, 2), round(alt, 1), round(spd, 1))
         if self.shadow:
             return
@@ -372,7 +400,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     privileged = isinstance(model.observation_space, spaces.Dict)
     rule = getattr(args, "support_rule", "training")
     env = DcsLiveEnv(lambda bp, rp: DcsLiveWorld(link, rec, agent, red, bp, rp,
-                                                 shadow=args.shadow, log=log, support_rule=rule),
+                                                 shadow=args.shadow, log=log, support_rule=rule,
+                                                 speed_boost=getattr(args, "speed_boost", None)),
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
@@ -428,7 +457,10 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     short = [c - f > SPEED_SHORT_MPS for c, f in spd]
     row.update(speed_cmd_mean=round(float(np.mean([c for c, _ in spd])), 1) if spd else "",
                speed_flown_mean=round(float(np.mean([f for _, f in spd])), 1) if spd else "",
-               speed_short_pct=round(100.0 * sum(short) / len(short), 1) if short else "")
+               speed_short_pct=round(100.0 * sum(short) / len(short), 1) if short else "",
+               speed_boost=world.speed_boost or "",
+               speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
+               if spd and world.speed_boost else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
     log(f"episode {ep}: {outcome} after {env._t_sim:.0f} s, {row['shots']} shots "
         f"({row['fire_timeouts']} fire requests not answered by a launch)")
@@ -437,6 +469,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             f"{row['speed_flown_mean']:.0f}; more than {SPEED_SHORT_MPS:.0f} m/s short "
             f"{row['speed_short_pct']:.0f}% of the time"
             + ("  <- DCS is not flying the commanded speed" if row["speed_short_pct"] > 30 else ""))
+        if world.speed_boost:
+            log(f"  speed boost: asked DCS for {world.speed_boost:.0f} m/s "
+                f"{row['speed_boosted_pct']:.0f}% of the time")
     log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv")
     return row, rec.t_end
 
@@ -459,6 +494,9 @@ def main(argv=None):
                     help="training (default): a missile without support from its shooter for 3 s "
                          "before its seeker takes over is removed, as in the simulator; dcs: DCS "
                          "decides (its missiles usually fly on and go active)")
+    ap.add_argument("--speed-boost", type=float, nargs="?", const=550.0, default=None, metavar="M_S",
+                    help="while BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for "
+                         "this speed instead (default 550 m/s), to make the DCS AI use afterburner")
     ap.add_argument("--doctrine", default="BALANCED")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)

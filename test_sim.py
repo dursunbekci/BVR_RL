@@ -903,6 +903,22 @@ def test_dcs_support_rule():
           f"removed, guidance cut at {cut.get('t', 0):.0f} s; {row['outcome']})")
 
 
+def test_dcs_speed_boost():
+    """dcs_live.py --speed-boost: while BLUE-1 is more than 20 m/s below the
+    policy's speed, DCS is asked for the boost speed; within 5 m/s, the real one."""
+    import dcs_live
+    w = dcs_live.DcsLiveWorld.__new__(dcs_live.DcsLiveWorld)
+    w.speed_boost, w._boosting, w.boost_steps = 550.0, False, 0
+    flown = iter([280.0, 300.0, 330.0, 336.0, 320.0, 300.0, 400.0])
+    w._flown_speed = lambda: next(flown)
+    sent = [w._speed_to_send(340.0) for _ in range(7)]
+    assert sent == [550.0, 550.0, 550.0, 340.0, 340.0, 550.0, 340.0], sent
+    assert w.boost_steps == 4
+    w.speed_boost = None
+    assert w._speed_to_send(340.0) == 340.0
+    print("  DCS speed boost ............. OK")
+
+
 def test_dcs_red_support():
     """dcs_live.py (training rule): a red that fires and turns away loses its own
     radar track, and its missile is removed before its seeker takes over; with
@@ -1400,6 +1416,7 @@ if __name__ == "__main__":
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS support rule",        test_dcs_support_rule),
+        ("DCS speed boost",         test_dcs_speed_boost),
         ("DCS red support",         test_dcs_red_support),
         ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),

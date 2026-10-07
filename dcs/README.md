@@ -371,6 +371,11 @@ worse at first, for reasons that are useful to know:
   `dcs_live.py` prints how often BLUE-1 flew more than 30 m/s below the
   commanded speed (`speed_short_pct` in `results.csv`); above 30% it says
   DCS is not flying the commanded speed.
+  `--speed-boost` tries one more way round it: while BLUE-1 is more than
+  20 m/s slow, DCS is asked for 550 m/s instead (`--speed-boost 450` for
+  another value), and for the real speed again once within 5 m/s. If that
+  gets BLUE-1 to its commanded speeds, train as F-16C-DCS (with
+  afterburner) and always fly with `--speed-boost`.
 - **Shooting.** "Fire" is a request. The DCS AI launches when its own
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot
