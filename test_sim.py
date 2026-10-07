@@ -915,7 +915,16 @@ def test_dcs_speed_boost():
     assert sent == [550.0, 550.0, 550.0, 340.0, 340.0, 550.0, 340.0], sent
     w.speed_boost = None
     assert w._speed_to_send(340.0) == 340.0
-    print("  DCS speed boost ............. OK")
+    # --eta-lock: each command is preceded by the bridge option.
+    class Link:
+        def __init__(self): self.lines = []
+        def send(self, text): self.lines.append(text)
+    for lock, first in ((None, "CMD"), ("mission", "OPT eta mission"), ("abs", "OPT eta abs")):
+        w.link, w.eta_lock = Link(), lock
+        w.shadow, w.sent, w.t, w.t_sent, w.seq, w.fire_pending = False, None, 0.0, 0.0, 0, None
+        w.send_command({"hdgCmd": 0.0, "altTarget": 9000.0, "V": 340.0}, False)
+        assert w.link.lines[0].startswith(first) and w.link.lines[-1].startswith("CMD 1 "), w.link.lines
+    print("  DCS speed boost ............. OK  (and --eta-lock)")
 
 
 def test_dcs_red_support():

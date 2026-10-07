@@ -375,7 +375,12 @@ worse at first, for reasons that are useful to know:
   20 m/s slow, DCS is asked for 550 m/s instead (`--speed-boost 450` for
   another value), and for the real speed again once within 5 m/s. If that
   gets BLUE-1 to its commanded speeds, train as F-16C-DCS (with
-  afterburner) and always fly with `--speed-boost`.
+  afterburner) and always fly with `--speed-boost`. It did not (BLUE-1
+  averaged 268 m/s against 315 asked). `--eta-lock` tries the one thing
+  the DCS AI is known to use afterburner for outside combat: making a
+  locked arrival time. The bridge then gives the route's points arrival
+  times from the commanded speed (`--eta-lock abs` if DCS reads them as
+  time of day rather than mission time). Rebuild the mission first.
 - **Shooting.** "Fire" is a request. The DCS AI launches when its own
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot
@@ -437,6 +442,7 @@ CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1
                           (the time is dcs_live.py's; the bridge ignores it)
 STOP
 DESTROY <missile id>      (the support rule; answered with {"ev":"support_lost", "id", "status"})
+OPT eta <off|mission|abs> (--eta-lock: locked arrival times on the route's points)
 ```
 
 Commands are re-sent every second; the bridge re-issues the AI's route only

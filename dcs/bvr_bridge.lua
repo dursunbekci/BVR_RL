@@ -27,6 +27,7 @@ policy only watches.
 
 Commands (UDP datagrams to CFG.port_in, plain text):
   CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1>
+  OPT eta <off|mission|abs>   locked arrival times on the route (see route_point)
   STOP          give the aircraft back to the AI (end of an episode)
   DESTROY <id>  remove missile <id> (as numbered in the shot events): dcs_live.py's
                 support rule says it has had no guidance for too long
@@ -235,12 +236,16 @@ local function release_control()
   send({ev = "bridge", t = timer.getTime(), status = "released", agent = AGENT})
 end
 
-local function route_point(p, hdg, d, alt, spd)
+-- eta: nil, or the time this point must be reached. A DCS AI on a route
+-- will not light its afterburner for a speed, but does to make a locked
+-- arrival time (OPT eta, from dcs_live.py --eta-lock); the time then rules
+-- and the speed is not locked.
+local function route_point(p, hdg, d, alt, spd, eta)
   return {
     type = "Turning Point", action = "Turning Point",
     x = p.x + d * math.cos(hdg), y = p.z + d * math.sin(hdg),
-    alt = alt, alt_type = "BARO", speed = spd, speed_locked = true,
-    ETA = 0, ETA_locked = false,
+    alt = alt, alt_type = "BARO", speed = spd, speed_locked = eta == nil,
+    ETA = eta or 0, ETA_locked = eta ~= nil,
     task = {id = "ComboTask", params = {tasks = {}}},
   }
 end
@@ -248,9 +253,15 @@ end
 local function issue_route(cmd)
   local p = agent:getPoint()
   local hdg = math.rad(cmd.hdg)
+  local eta1, eta2 = nil, nil
+  if S.eta_clock then                 -- "mission": timer.getTime(); "abs": timer.getAbsTime()
+    local now = (S.eta_clock == "abs") and timer.getAbsTime() or timer.getTime()
+    eta1 = now + CFG.near_m / math.max(cmd.spd, 50)
+    eta2 = now + CFG.far_m / math.max(cmd.spd, 50)
+  end
   local task = {id = "Mission", params = {airborne = true, route = {points = {
-    route_point(p, hdg, CFG.near_m, cmd.alt, cmd.spd),
-    route_point(p, hdg, CFG.far_m, cmd.alt, cmd.spd),
+    route_point(p, hdg, CFG.near_m, cmd.alt, cmd.spd, eta1),
+    route_point(p, hdg, CFG.far_m, cmd.alt, cmd.spd, eta2),
   }}}}
   local ok, err = pcall(function() ctrl_of(agent):setTask(task) end)
   if not ok then env.info("bvr_bridge route error: " .. tostring(err)) end
@@ -311,6 +322,12 @@ local function on_command(msg)
   if msg:match("^STOP") then release_control(); return end
   local did = msg:match("^DESTROY%s+(%d+)")
   if did then destroy_missile(tonumber(did)); return end
+  local clock = msg:match("^OPT%s+eta%s+(%a+)")
+  if clock then
+    local new = (clock == "mission" or clock == "abs") and clock or nil
+    if new ~= S.eta_clock then S.eta_clock = new; S.issued = nil end   -- re-route now
+    return
+  end
   local seq, hdg, alt, spd, fire = msg:match("^CMD%s+(%d+)%s+([%-%d%.eE]+)%s+([%-%d%.eE]+)%s+([%-%d%.eE]+)%s+(%d)")
   if not seq or not agent:isExist() then return end
   local cmd = {seq = tonumber(seq), hdg = tonumber(hdg) % 360, alt = tonumber(alt),

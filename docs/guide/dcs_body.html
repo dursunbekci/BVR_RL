@@ -470,6 +470,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k"><code>--doctrine D</code></td><td class="n">BALANCED</td><td>Shot doctrine the policy is told</td></tr>
 <tr><td class="k"><code>--opp-platform P</code></td><td class="n">checkpoint's</td><td>Library platform assumed for red's envelopes</td></tr>
 <tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (for DCS: <code>F-16C-DCS-MIL</code>, the F-16C without afterburner, as the DCS AI flies BLUE-1)</td></tr>
+<tr><td class="k"><code>--eta-lock [C]</code></td><td class="n">off</td><td>Give the route's points locked arrival times from the commanded speed: the DCS AI uses afterburner to make a time. C: <code>mission</code> (default) or <code>abs</code> (time of day). Needs a rebuilt mission.</td></tr>
 <tr><td class="k"><code>--speed-boost [V]</code></td><td class="n">off</td><td>While BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for V m/s (default 550) instead, to make the DCS AI use afterburner; the real speed again once within 5 m/s</td></tr>
 <tr><td class="k"><code>--support-rule R</code></td><td class="n">training</td><td><code>training</code>: 3 s without support before the seeker takes over removes the missile (blue's and red's); <code>dcs</code>: DCS decides</td></tr>
 <tr><td class="k"><code>--agent</code> / <code>--red</code></td><td class="n">from bridge</td><td>DCS unit names, if not the bridge's choice</td></tr>
@@ -535,7 +536,8 @@ python dcs\test_bridge.py       (bvr_bridge.lua and the setup patch, in Lua 5.1)
 <h2>Python → DCS (UDP 15302)</h2>
 <pre>CMD &lt;seq&gt; &lt;heading deg, map north, clockwise&gt; &lt;altitude m&gt; &lt;speed m/s&gt; &lt;fire 0|1&gt; &lt;mission time, ignored by the bridge&gt;
 STOP
-DESTROY &lt;missile id&gt;</pre>
+DESTROY &lt;missile id&gt;
+OPT eta &lt;off|mission|abs&gt;</pre>
 <p>Commands are re-sent every second, so a lost message costs at most a second.</p>
 <h2>Where things are</h2>
 <table>

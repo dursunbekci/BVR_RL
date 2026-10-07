@@ -161,6 +161,49 @@ def test_bridge_destroy():
     print(f"  bridge DESTROY .............. OK  (removed at {lost[0]['t']:.1f} s, no hit)")
 
 
+def test_bridge_eta():
+    """OPT eta: the route's points get locked arrival times from the commanded
+    speed (speed not locked), on the mission or the day clock; OPT eta off ends it."""
+    L = lua()
+    sent, inbox = [], []
+
+    class Udp:
+        def settimeout(self, t): pass
+        def setsockname(self, h, p): return 1
+        def sendto(self, data, h, p): sent.append((p, data)); return len(data)
+        def receive(self, *a): return inbox.pop(0) if inbox else None
+
+    class Sock:
+        def udp(self): return Udp()
+
+    plan = {5.0: ["CMD 1 90 10000 300 0"],
+            10.0: ["OPT eta mission", "CMD 2 90 10000 340 0"],
+            20.0: ["OPT eta abs", "CMD 3 90 10000 340 0"],
+            30.0: ["OPT eta off", "CMD 4 90 10000 340 0"]}
+
+    def on_tick(T):
+        for t in list(plan):
+            if T >= t - 1e-9:
+                inbox.extend(plan.pop(t))
+
+    with open(os.path.join(HERE, "mock", "dcs_api_mock.lua")) as fh:
+        L.execute(fh.read())
+    L.globals().bvr_rl_socket = Sock()
+    L.globals().RUN(os.path.join(HERE, "bvr_bridge.lua"), 40.0, on_tick)
+    log = L.globals().LOG
+    LOG = [tuple(log[i].values()) for i in range(1, len(log) + 1)]
+    routes = [x[2].params.route.points for x in LOG if x[0] == "Viper-1" and x[1] == "setTask"]
+    import re
+    near = float(re.search(r"near_m\s*=\s*([\d.]+)", open(os.path.join(HERE, "bvr_bridge.lua")).read()).group(1))
+    plain, mission, absolute, off = routes[0], routes[1], routes[2], routes[-1]
+    assert plain[1].speed_locked and not plain[1].ETA_locked
+    assert mission[1].ETA_locked and not mission[1].speed_locked
+    assert abs(mission[1].ETA - (10.0 + near / 340.0)) < 0.2, mission[1].ETA
+    assert absolute[1].ETA_locked and abs(absolute[1].ETA - (43200.0 + 20.0 + near / 340.0)) < 0.2
+    assert off[1].speed_locked and not off[1].ETA_locked
+    print(f"  bridge ETA lock ............. OK  (point 1 due {mission[1].ETA:.1f} s at 340 m/s)")
+
+
 def test_setup_patch():
     import setup_dcs
     L = lua()
@@ -183,5 +226,6 @@ if __name__ == "__main__":
         sys.exit(0)
     test_bridge()
     test_bridge_destroy()
+    test_bridge_eta()
     test_setup_patch()
-    print("3/3 passed")
+    print("4/4 passed")

@@ -93,7 +93,8 @@ class DcsLiveWorld(DcsReplayWorld):
     BEHIND_WARN_S = 2.0     # warn when DCS's data is this far ahead of the policy
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
-                 shadow=False, log=print, support_rule="training", speed_boost=None):
+                 shadow=False, log=print, support_rule="training", speed_boost=None,
+                 eta_lock=None):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
         self.link, self.shadow, self.log = link, bool(shadow), log
@@ -114,6 +115,9 @@ class DcsLiveWorld(DcsReplayWorld):
         self.speed_boost = None if speed_boost is None else float(speed_boost)
         self._boosting = False
         self.boost_steps = 0     # decisions with the boost on (counted by run_episode)
+        # --eta-lock: the bridge gives the route's points locked arrival times
+        # from the commanded speed; a DCS AI uses afterburner to make a time.
+        self.eta_lock = eta_lock
         self._supported = {}                 # missile id -> last time it had support
         self._destroy_sent = {}              # missile id -> last DESTROY sent
         self.support_log = []                # (t_sim, missile id, shooter, status)
@@ -198,6 +202,8 @@ class DcsLiveWorld(DcsReplayWorld):
         if not (new or fire or self.t - self.t_sent >= self.RESEND_S):
             return
         self.seq += 1
+        if self.eta_lock:            # sent with every command: UDP may lose one
+            self.link.send(f"OPT eta {self.eta_lock}")
         # The trailing mission time is ignored by the bridge; fake_dcs.py --lockstep
         # uses it to wait for us.
         self.link.send(f"CMD {self.seq} {hdg:.2f} {alt:.1f} {spd:.1f} {1 if fire else 0} {self.t:.1f}")
@@ -400,7 +406,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     rule = getattr(args, "support_rule", "training")
     env = DcsLiveEnv(lambda bp, rp: DcsLiveWorld(link, rec, agent, red, bp, rp,
                                                  shadow=args.shadow, log=log, support_rule=rule,
-                                                 speed_boost=getattr(args, "speed_boost", None)),
+                                                 speed_boost=getattr(args, "speed_boost", None),
+                                                 eta_lock=getattr(args, "eta_lock", None)),
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
@@ -458,7 +465,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     row.update(speed_cmd_mean=round(float(np.mean([c for c, _ in spd])), 1) if spd else "",
                speed_flown_mean=round(float(np.mean([f for _, f in spd])), 1) if spd else "",
                speed_short_pct=round(100.0 * sum(short) / len(short), 1) if short else "",
-               speed_boost=world.speed_boost or "",
+               speed_boost=world.speed_boost or "", eta_lock=world.eta_lock or "",
                speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
                if spd and world.speed_boost else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
@@ -497,6 +504,10 @@ def main(argv=None):
     ap.add_argument("--speed-boost", type=float, nargs="?", const=550.0, default=None, metavar="M_S",
                     help="while BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for "
                          "this speed instead (default 550 m/s), to make the DCS AI use afterburner")
+    ap.add_argument("--eta-lock", nargs="?", const="mission", default=None, choices=["mission", "abs"],
+                    help="give the route's points locked arrival times from the commanded speed, "
+                         "so the DCS AI uses afterburner to make them (rebuild the mission first). "
+                         "mission (default): times on the mission clock; abs: on the time of day")
     ap.add_argument("--doctrine", default="BALANCED")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)
