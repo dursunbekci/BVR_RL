@@ -171,7 +171,9 @@ class DcsLiveWorld(DcsReplayWorld):
         if not (new or fire or self.t - self.t_sent >= self.RESEND_S):
             return
         self.seq += 1
-        self.link.send(f"CMD {self.seq} {hdg:.2f} {alt:.1f} {spd:.1f} {1 if fire else 0}")
+        # The trailing mission time is ignored by the bridge; fake_dcs.py --lockstep
+        # uses it to wait for us.
+        self.link.send(f"CMD {self.seq} {hdg:.2f} {alt:.1f} {spd:.1f} {1 if fire else 0} {self.t:.1f}")
         self.sent, self.t_sent = self.last_cmd, self.t
         if fire:
             self.fire_pending = self.t

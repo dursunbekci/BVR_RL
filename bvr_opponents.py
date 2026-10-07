@@ -224,6 +224,17 @@ class ShooterOpponent(BvrOpponent):
     # Set by the 2v1 env: red keeps truth guidance there, so it keeps the old,
     # wider cranks (50 deg; ADAPTIVE 35-70 deg).
     legacy_crank = False
+    # Defence against an inbound missile (SIM_REV 10):
+    #   "shallow"   beam and descend 1.5 km, 4 km in the last 12 s (SHOOTER)
+    #   "deep_beam" beam and dive to DIVE_FLOOR, as the DCS AI does
+    #   "deep_cold" turn away and dive to DIVE_FLOOR
+    # ADAPTIVE draws one per episode. Against a level, supporting AIM-120C-DCS
+    # shot head-on at 9 km, red escaped from 35 km in 10/12 runs with shallow,
+    # 12/12 with deep_beam; deep_cold escaped from 29 km in 10/12, where both
+    # beams were always hit. No ground clutter is modelled, so the dive helps
+    # only through the thicker air draining the coasting missile.
+    DEFENCE = "shallow"
+    DIVE_FLOOR = 1000.0
 
     def reset(self, ic):
         super().reset(ic)
@@ -257,6 +268,11 @@ class ShooterOpponent(BvrOpponent):
         # ── DEFEND overrides everything ─────────────────────────────
         if inbound is not None:
             tgo = float(inbound.get("tgo_est", 60.0))
+            if self.DEFENCE == "deep_cold":
+                return self._cmd(brg + math.pi, self.DIVE_FLOOR, 400.0)
+            if self.DEFENCE == "deep_beam":
+                off = 100.0 if tgo < 12.0 else 90.0
+                return self._cmd(brg + self._crank_side * off * DEG2RAD, self.DIVE_FLOOR, 400.0)
             if tgo < 12.0:
                 # Last-ditch: hard beam and dive, maximum energy
                 hdg = brg + self._crank_side * (100.0 * DEG2RAD)
@@ -331,3 +347,7 @@ class AdaptiveShooterOpponent(ShooterOpponent):
         self.CRANK_ANGLE = float(self.rng.uniform(lo, hi)) * DEG2RAD
         self.REATTACK_RANGE = float(self.rng.uniform(30_000.0, 55_000.0))
         self.MIN_SHOT_INTERVAL = float(self.rng.uniform(8.0, 20.0))
+        if not self.legacy_crank:          # 2v1 keeps the shallow defence
+            u = float(self.rng.random())
+            self.DEFENCE = "shallow" if u < 0.5 else ("deep_beam" if u < 0.75 else "deep_cold")
+            self.DIVE_FLOOR = float(self.rng.uniform(1000.0, 2500.0))

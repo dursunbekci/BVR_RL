@@ -821,7 +821,7 @@ def test_dcs_live_link():
         def predict(self, obs, deterministic=True, action_masks=None):
             return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 3, int(action_masks[-1])]), None
 
-    fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=250.0)
+    fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=250.0, lockstep=True)
     res = {}
     th = threading.Thread(target=lambda: res.setdefault("out", fake.run()), daemon=True)
     link = dcs_live.UdpLink()
@@ -871,7 +871,7 @@ def test_dcs_support_rule():
             return {"valid": 0}
         return orig(self)
     dcs_live.DcsLiveEnv._guidance_packet = no_guidance_after_first_shot
-    fake = FakeDcs(opponent="SHOOTER", seed=2, speed=8.0, max_time=250.0)
+    fake = FakeDcs(opponent="SHOOTER", seed=2, speed=8.0, max_time=250.0, lockstep=True)
     th = threading.Thread(target=fake.run, daemon=True)
     link = dcs_live.UdpLink()
     th.start()
@@ -975,6 +975,37 @@ def test_dcs_red_support():
     assert red_ids2 and not (red_ids2 & gone2), (red_ids2, gone2)
     print(f"  DCS red support ............. OK  (fire and turn away: {len(red_ids)} red missile(s) "
           f"removed; cranking: none)")
+
+
+def test_adaptive_defence():
+    """ADAPTIVE draws its defence per episode (half shallow, a quarter each deep
+    beam and deep cold); 2v1 keeps the shallow one; a deep defence dives to its
+    floor, beaming or turning away."""
+    import collections
+    from bvr_opponents import AdaptiveShooterOpponent, ShooterOpponent
+    ic = {"ac2_psi": math.pi, "ac2_alt": 9000.0, "ac2_spd": 280.0, "ac1_psi": 0.0}
+    o = AdaptiveShooterOpponent(rng=np.random.default_rng(3))
+    counts = collections.Counter()
+    for _ in range(400):
+        o.reset(ic)
+        counts[o.DEFENCE] += 1
+        assert 1000.0 <= o.DIVE_FLOOR <= 2500.0
+    assert 160 <= counts["shallow"] <= 240 and counts["deep_beam"] >= 70 and counts["deep_cold"] >= 70, counts
+    two = AdaptiveShooterOpponent(rng=np.random.default_rng(3)); two.legacy_crank = True
+    for _ in range(50):
+        two.reset(ic)
+        assert two.DEFENCE == "shallow"
+    assert ShooterOpponent.DEFENCE == "shallow"
+    state = {"range": 40_000.0, "aa_deg_t": 0.0, "psi_t": math.pi, "wpn_remaining_t": 4,
+             "missiles": [{"owner": 1, "state": "MIDCOURSE", "tgo_est": 30.0}]}
+    for style in ("deep_beam", "deep_cold"):
+        o.reset(ic); o.DEFENCE = style
+        cmd = o.act(state, 10.0)
+        assert cmd["altTarget"] == o.DIVE_FLOOR, cmd["altTarget"]
+        off = math.degrees(abs((cmd["hdgCmd"] - o._bearing_to_ac1(state) + math.pi) % (2 * math.pi) - math.pi))
+        assert abs(off - (90.0 if style == "deep_beam" else 180.0)) < 1.0, (style, off)
+    print(f"  ADAPTIVE defence ............ OK  ({counts['shallow']}/{counts['deep_beam']}/"
+          f"{counts['deep_cold']} shallow/beam/cold of 400)")
 
 
 def test_env_pickles():
@@ -1295,6 +1326,7 @@ if __name__ == "__main__":
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),
         ("envs pickle",             test_env_pickles),
+        ("ADAPTIVE defence",        test_adaptive_defence),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

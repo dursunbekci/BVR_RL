@@ -391,7 +391,7 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 9
+SIM_REV = 10
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -418,6 +418,10 @@ _SIM_REV_NOTES = {
        "would allow it from their side; they crank at most 45 deg (SHOOTER 45, was "
        "50; ADAPTIVE 30-45, was 35-70) so they keep their own track. 1v1 only: "
        "2v1 red is unchanged",
+    10: "ADAPTIVE defends deep in half its episodes: against an inbound missile it "
+        "dives to 1-2.5 km, beaming (as the DCS AI does) or turning away, instead "
+        "of beaming and descending 1.5 km (4 km in the last 12 s). SHOOTER and "
+        "2v1 red are unchanged",
 }
 
 

@@ -419,7 +419,8 @@ DCS → Python, UDP 15301, one JSON object per datagram, the same lines
 Python → DCS, UDP 15302, plain text:
 
 ```
-CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1>
+CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1> <mission time>
+                          (the time is dcs_live.py's; the bridge ignores it)
 STOP
 DESTROY <missile id>      (the support rule; answered with {"ev":"support_lost", "id", "status"})
 ```

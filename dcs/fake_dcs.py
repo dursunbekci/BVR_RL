@@ -17,6 +17,8 @@ guidance. A policy that does well here and badly in DCS points at those.
 --speed 4 runs four mission seconds per real second (DCS runs at 1, or
 faster with time acceleration). dcs_live.py keeps up at 10 or more on most
 computers; if it cannot, its commands arrive late, as they would in DCS.
+--lockstep makes the fake wait instead, so its fight does not depend on the
+computer's speed: the tests use it.
 """
 
 import argparse
@@ -42,15 +44,19 @@ class FakeDcs:
     RATE = 0.1            # s of mission time between samples
     T_MISSION0 = 100.0    # mission time at the start
     AFTER_END_S = 20.0    # mission seconds flown on after the fight is decided
+    # lockstep: while controlled, wait when the mission is this far ahead of the
+    # time dcs_live.py put on its last command, but never longer than WAIT_MAX_S.
+    LOCKSTEP_LEAD = 3.0
+    WAIT_MAX_S = 30.0
 
     def __init__(self, opponent="SHOOTER", seed=0, speed=4.0, platform=DEFAULT_PLATFORM,
                  opp_platform=DEFAULT_PLATFORM, names=("BLUE-1", "RED-1"), host="127.0.0.1",
                  port_out=PORT_TO_LIVE, port_in=PORT_FROM_LIVE, fire_delay=1.0,
-                 max_time=900.0, log=print):
+                 max_time=900.0, lockstep=False, log=print):
         self.env = BvrEnv(opponent_type=BvrOpponentType[opponent], seed=seed, platform=platform,
                           opponent_platform=opp_platform, doctrine="AGGRESSIVE")
         self.names, self.speed, self.fire_delay = names, float(speed), float(fire_delay)
-        self.max_time, self.log = float(max_time), log
+        self.max_time, self.log, self.lockstep = float(max_time), log, bool(lockstep)
         self.host, self.port_out = host, port_out
         self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -91,6 +97,7 @@ class FakeDcs:
         t_end = None
         wall0, t0 = time.perf_counter(), w.t_sim
         t_resend = w.t_sim
+        t_ctrl, waited, lockstep = None, 0.0, self.lockstep
         try:
             while stop_evt is None or not stop_evt.is_set():
                 # commands
@@ -118,11 +125,25 @@ class FakeDcs:
                     if seq <= last_seq:
                         continue
                     last_seq, controlled = seq, True
+                    if len(msg) > 6:             # dcs_live.py's mission time
+                        try:
+                            t_ctrl = float(msg[6])
+                        except ValueError:
+                            pass
                     cmd = (hdg * DEG2RAD, alt, spd)
                     self.commands.append((self.T(), seq, hdg, alt, spd, fire))
                     if fire and fire_at is None and fired_seq != seq:
                         fired_seq, fire_at = seq, w.t_sim + self.fire_delay
                         self.send({"ev": "fire", "t": self.T(), "status": "requested", "seq": seq})
+                if (lockstep and controlled and t_ctrl is not None
+                        and self.T() - t_ctrl > self.LOCKSTEP_LEAD):
+                    if waited < self.WAIT_MAX_S:
+                        time.sleep(0.002)        # dcs_live.py is behind: let it catch up
+                        waited += 0.002
+                        wall0 += 0.002
+                        continue
+                    lockstep = False             # it has stopped talking: fly on
+                waited = 0.0
                 hdg, alt, spd = cmd if controlled else hold
                 pkt = env._encode_cmd(0, 2, 0, 0)
                 pkt.update({"hdgCmd": hdg % (2 * math.pi), "altTarget": alt, "V": spd})
@@ -186,10 +207,13 @@ def main():
     ap.add_argument("--speed", type=float, default=4.0, help="mission seconds per real second")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--missions", type=int, default=1, help="missions to fly one after another")
+    ap.add_argument("--lockstep", action="store_true",
+                    help="wait for dcs_live.py when it falls behind, instead of flying on")
     args = ap.parse_args()
     for i in range(args.missions):
         fake = FakeDcs(opponent=args.opponent, seed=args.seed + i, speed=args.speed,
-                       platform=args.platform, opp_platform=args.opp_platform)
+                       platform=args.platform, opp_platform=args.opp_platform,
+                       lockstep=args.lockstep)
         print(f"fake DCS mission {i + 1}: {fake.names[0]} v {fake.names[1]} ({args.opponent}), "
               f"sending to UDP {PORT_TO_LIVE}, listening on {PORT_FROM_LIVE}")
         out = fake.run()
