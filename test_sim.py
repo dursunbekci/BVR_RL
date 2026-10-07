@@ -913,7 +913,6 @@ def test_dcs_speed_boost():
     w._flown_speed = lambda: next(flown)
     sent = [w._speed_to_send(340.0) for _ in range(7)]
     assert sent == [550.0, 550.0, 550.0, 340.0, 340.0, 550.0, 340.0], sent
-    assert w.boost_steps == 4
     w.speed_boost = None
     assert w._speed_to_send(340.0) == 340.0
     print("  DCS speed boost ............. OK")

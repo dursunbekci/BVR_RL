@@ -113,7 +113,7 @@ class DcsLiveWorld(DcsReplayWorld):
         # the speed it is actually asked for); the real speed again once close.
         self.speed_boost = None if speed_boost is None else float(speed_boost)
         self._boosting = False
-        self.boost_steps = 0
+        self.boost_steps = 0     # decisions with the boost on (counted by run_episode)
         self._supported = {}                 # missile id -> last time it had support
         self._destroy_sent = {}              # missile id -> last DESTROY sent
         self.support_log = []                # (t_sim, missile id, shooter, status)
@@ -186,7 +186,6 @@ class DcsLiveWorld(DcsReplayWorld):
                 self._boosting = True
             elif v >= spd - self.BOOST_OFF_MPS:
                 self._boosting = False
-        self.boost_steps += int(self._boosting)
         return max(spd, self.speed_boost) if self._boosting else spd
 
     def send_command(self, cmd, fire):
@@ -426,6 +425,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             obs, _, term, trunc, info = env.step(action)
             sobs = stacker.update(obs)
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
+            world.boost_steps += int(world._boosting)    # once per decision, not per frame
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
             wr.writerow([round(env._t_sim, 1), HDG_OFFSETS_DEG[a[0]], ALT_DELTAS_M[a[1]],
