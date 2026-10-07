@@ -25,8 +25,9 @@ that run shows mean_launch_km=68.3, launch_r_rmax=1.06 — shots fired right
 at (and past) the analytic model's edge, nowhere near the missile's real one.
 
 WHAT THIS SCRIPT DOES
-    For a grid of (launch mach, launch altitude, target aspect), fires the
-    REAL AIM120 (missile_sim.py) at a target flying a constant course, under
+    For a grid of (launch mach, launch altitude, target altitude, target
+    aspect), fires the REAL AIM120 (missile_sim.py) at a target flying a
+    constant, level course, under
     IDEALISED guidance (perfect datalink every frame — this measures the
     missile's physical reach, not radar quality, matching what
     Aim120Envelope is supposed to represent). Bisects on launch range to
@@ -43,6 +44,11 @@ WHAT THIS SCRIPT DOES
                for the same (mach, alt) — the standard conservative NEZ
                definition, and cheap to compute here. Clipped to <=
                r_max(aspect) per point.
+
+    Both are tabulated over target altitude too: against a target far below,
+    the missile's last miles are in thick air (SIM_REV 11). At launch from
+    9 km, Mach 0.9, head-on, AIM-120C-DCS reaches 84 km against a level
+    target and 58 km against one at 1 km.
 
     target_mach is held at the table's reference (0.9) — bvr_envelope.py
     already applies a post-hoc f_tgt correction for other target speeds
@@ -63,6 +69,8 @@ be used for it: the environment refuses to start until it is calibrated.
 
 import argparse
 import math
+import multiprocessing as mp
+import os
 import time
 
 import numpy as np
@@ -72,13 +80,18 @@ from bvr_library import missile_config, envelope_path
 
 # Set in main(): the library missile being calibrated.
 _MSL = None
+# When the shortest range misses (a target steeply above or below), look for
+# a hit further out in these steps, this far.
+MIN_RANGE_STEP = 2_000.0
+MIN_RANGE_SCAN = 30_000.0
 
 
 def _fly(launch_range, shooter_mach, alt, aspect_deg, target_mach,
-         dt=0.02, max_t=130.0, reactive=False):
+         dt=0.02, max_t=130.0, reactive=False, target_alt=None):
     """
     One idealised engagement. Shooter at origin flying +Y at shooter_mach.
-    Target placed `launch_range` up the Y axis.
+    Target placed `launch_range` (slant range) up the Y axis, at target_alt
+    (default: the shooter's altitude), flying level at target_mach.
 
     Aspect convention (matches aspect_deg_from_vectors in bvr_envelope.py):
     0 deg = target flying AT the shooter (nose-on, head-on shot), 180 deg =
@@ -86,13 +99,14 @@ def _fly(launch_range, shooter_mach, alt, aspect_deg, target_mach,
     to a 180 deg (running) course from t=0 regardless of the nominal aspect
     — used to bound r_nez.
     """
-    a_snd = _isa_a(alt)
-    v_s = shooter_mach * a_snd
-    v_t = target_mach * a_snd
+    t_alt = alt if target_alt is None else float(target_alt)
+    v_s = shooter_mach * _isa_a(alt)
+    v_t = target_mach * _isa_a(t_alt)
 
     shooter_pos = np.array([0.0, 0.0, alt])
     shooter_vel = np.array([0.0, v_s, 0.0])
-    target_pos = np.array([0.0, launch_range, alt])
+    dz = t_alt - alt
+    target_pos = np.array([0.0, math.sqrt(max(launch_range ** 2 - dz ** 2, 0.0)), t_alt])
 
     eff_aspect_deg = 180.0 if reactive else aspect_deg
     th = math.radians(eff_aspect_deg)
@@ -116,21 +130,54 @@ def _fly(launch_range, shooter_mach, alt, aspect_deg, target_mach,
 
 
 def _bisect_max_range(shooter_mach, alt, aspect_deg, target_mach, reactive=False,
-                       lo=2_000.0, hi=160_000.0, iters=7):
+                       lo=2_000.0, hi=160_000.0, iters=7, target_alt=None):
     """Largest range in [lo,hi] that still HITs. Monotonic: hit at short
     range, miss at long range (checked with --verify)."""
-    if not _fly(lo, shooter_mach, alt, aspect_deg, target_mach, reactive=reactive):
-        return lo  # even point-blank misses (shouldn't happen; floor it)
-    if _fly(hi, shooter_mach, alt, aspect_deg, target_mach, reactive=reactive):
+    if target_alt is not None:            # a slant range can't be below the height gap
+        lo = max(lo, abs(float(target_alt) - alt) + 500.0)
+    fly = lambda r: _fly(r, shooter_mach, alt, aspect_deg, target_mach,
+                         reactive=reactive, target_alt=target_alt)
+    if not fly(lo):
+        # Close in, a target far above or below is too steep an angle for the
+        # missile to turn onto, so it can miss there and hit further out:
+        # step out to the first hit before bisecting.
+        r = lo + MIN_RANGE_STEP
+        while r <= min(hi, lo + MIN_RANGE_SCAN) and not fly(r):
+            r += MIN_RANGE_STEP
+        if r > min(hi, lo + MIN_RANGE_SCAN):
+            return lo  # no hit anywhere close in: floor it
+        lo = r
+    if fly(hi):
         return hi  # whole bracket hits; missile is stronger than our range cap
     a, b = lo, hi
     for _ in range(iters):
         mid = 0.5 * (a + b)
-        if _fly(mid, shooter_mach, alt, aspect_deg, target_mach, reactive=reactive):
+        if fly(mid):
             a = mid
         else:
             b = mid
     return a
+
+
+def _cell(job):
+    """One (launch Mach, launch altitude) cell: r_max and r_nez over every
+    target altitude and aspect. Runs in a worker process."""
+    missile_id, mach, alt, talt_grid, aspect_grid, target_mach = job
+    global _MSL
+    if _MSL is None or _MSL.id != missile_id:
+        _MSL = missile_config(missile_id)
+    r_max = np.zeros((len(talt_grid), len(aspect_grid)))
+    r_nez = np.zeros_like(r_max)
+    for it, talt in enumerate(talt_grid):
+        # NEZ proxy for this (mach, alt, target alt): r_max at aspect=180 with
+        # an instant-reactive target (see _fly's `reactive` branch).
+        nez_ceiling = _bisect_max_range(mach, alt, 180.0, target_mach, reactive=True,
+                                        target_alt=talt)
+        for ip, asp in enumerate(aspect_grid):
+            rm = _bisect_max_range(mach, alt, asp, target_mach, target_alt=talt)
+            r_max[it, ip] = rm
+            r_nez[it, ip] = min(nez_ceiling, rm)
+    return r_max, r_nez
 
 
 def main():
@@ -140,6 +187,8 @@ def main():
                     help="output file (default: the library path for this missile)")
     ap.add_argument("--quick", action="store_true", help="coarse grid, fast sanity run")
     ap.add_argument("--target-mach", type=float, default=0.9)
+    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1),
+                    help="processes to fly the grid with")
     args = ap.parse_args()
     global _MSL
     _MSL = missile_config(args.missile)
@@ -149,51 +198,47 @@ def main():
     if args.quick:
         mach_grid = np.array([0.7, 1.1])
         alt_grid = np.array([3000.0, 9000.0])
+        talt_grid = np.array([3000.0, 9000.0])
         aspect_grid = np.array([0.0, 90.0, 180.0])
     else:
-        # Coarse but monotonic beats the previous constant-formula guess by a
-        # wide margin — this is the resolution that fits a reasonable wall
-        # clock budget for this pure-Python missile sim (~1.2s/simulated
-        # engagement). Tighten later with more grid points / GPU batching if
-        # the trilinear interpolation proves too coarse near the NEZ.
-        # 0.5 covers slow launchers such as a subsonic UCAV.
+        # 0.5 covers slow launchers such as a subsonic UCAV. Launch and target
+        # altitudes share one grid: 1 km is where a defending target ends up
+        # after a deep dive (SIM_REV 10), and where it may shoot back from.
         mach_grid = np.array([0.5, 0.7, 1.0, 1.3])
-        alt_grid = np.array([3000.0, 9000.0, 13000.0])
+        alt_grid = np.array([1000.0, 3000.0, 6000.0, 9000.0, 13000.0])
+        talt_grid = alt_grid.copy()
         aspect_grid = np.array([0.0, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0])
 
-    Nm, Na, Np = len(mach_grid), len(alt_grid), len(aspect_grid)
-    r_max = np.zeros((Nm, Na, Np))
-    r_nez = np.zeros((Nm, Na, Np))
+    Nm, Na, Nt, Np = len(mach_grid), len(alt_grid), len(talt_grid), len(aspect_grid)
+    r_max = np.zeros((Nm, Na, Nt, Np))
+    r_nez = np.zeros((Nm, Na, Nt, Np))
 
     t0 = time.time()
-    total = Nm * Na
-    done = 0
+    cells = [(im, ia) for im in range(Nm) for ia in range(Na)]
+    jobs = [(_MSL.id, float(mach_grid[im]), float(alt_grid[ia]), talt_grid, aspect_grid,
+             args.target_mach) for im, ia in cells]
     ib = int(np.argmin(np.abs(aspect_grid - 90)))
-    for im, mach in enumerate(mach_grid):
-        for ia, alt in enumerate(alt_grid):
-            # NEZ proxy for this (mach,alt): r_max at aspect=180 with an
-            # instant-reactive target (see _fly's `reactive` branch).
-            nez_ceiling = _bisect_max_range(mach, alt, 180.0, args.target_mach, reactive=True)
-            for ip, asp in enumerate(aspect_grid):
-                rm = _bisect_max_range(mach, alt, asp, args.target_mach, reactive=False)
-                r_max[im, ia, ip] = rm
-                r_nez[im, ia, ip] = min(nez_ceiling, rm)
-            done += 1
-            print(f"  [{done}/{total}] mach={mach:.2f} alt={alt:.0f}m  "
-                  f"r_max(head-on)={r_max[im,ia,0]/1000:.1f}km "
-                  f"r_max(beam)={r_max[im,ia,ib]/1000:.1f}km "
-                  f"r_max(tail)={r_max[im,ia,-1]/1000:.1f}km  "
-                  f"[{time.time()-t0:.0f}s]", flush=True)
+    it_lvl = lambda ia: int(np.argmin(np.abs(talt_grid - alt_grid[ia])))
+    with mp.Pool(min(args.workers, len(jobs))) as pool:
+        for done, ((im, ia), (rm, rn)) in enumerate(zip(cells, pool.imap(_cell, jobs)), 1):
+            r_max[im, ia], r_nez[im, ia] = rm, rn
+            lv = it_lvl(ia)
+            print(f"  [{done}/{len(cells)}] mach={mach_grid[im]:.2f} alt={alt_grid[ia]:.0f}m  "
+                  f"level target: r_max(head-on)={rm[lv, 0]/1000:.1f}km "
+                  f"r_max(beam)={rm[lv, ib]/1000:.1f}km r_max(tail)={rm[lv, -1]/1000:.1f}km  "
+                  f"head-on vs {talt_grid[0]:.0f}-{talt_grid[-1]:.0f}m: "
+                  f"{rm[0, 0]/1000:.1f}-{rm[-1, 0]/1000:.1f}km  [{time.time()-t0:.0f}s]", flush=True)
 
-    import os
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     np.savez(out,
-             mach_grid=mach_grid, alt_grid=alt_grid, aspect_grid=aspect_grid,
-             r_max=r_max, r_nez=r_nez, target_mach_ref=args.target_mach,
-             missile=_MSL.id, fingerprint=_MSL.fingerprint)
+             mach_grid=mach_grid, alt_grid=alt_grid, target_alt_grid=talt_grid,
+             aspect_grid=aspect_grid, r_max=r_max, r_nez=r_nez,
+             target_mach_ref=args.target_mach, missile=_MSL.id, fingerprint=_MSL.fingerprint)
     print(f"\nWrote {out}  ({time.time()-t0:.0f}s total)")
-    print(f"Head-on r_max range across grid: "
-          f"{r_max[:,:,0].min()/1000:.1f}-{r_max[:,:,0].max()/1000:.1f} km")
+    lv = np.array([it_lvl(ia) for ia in range(Na)])
+    level = r_max[:, np.arange(Na), lv, 0]
+    print(f"Head-on r_max range across grid (level target): "
+          f"{level.min()/1000:.1f}-{level.max()/1000:.1f} km")
 
 
 if __name__ == "__main__":

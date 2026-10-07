@@ -700,7 +700,7 @@ class BvrEnv(gym.Env):
         tp=self._to_enu(s.get("lat_t",REF_LAT),s.get("lon_t",REF_LON),s.get("alt_t",9000))
         ua=aspect_deg_from_vectors(tp,self._own_pos_enu(),self._own_vel_enu())
         rmt,_=self._env_thr.compute(s.get("speed_t",280)/A_SOUND,s.get("alt_t",9000),ua,
-                                    s.get("speed",280)/A_SOUND)
+                                    s.get("speed",280)/A_SOUND,target_alt=s.get("alt",9000))
         return float(rmt)
 
     def _own_pos_enu(self) -> np.ndarray:
@@ -760,9 +760,13 @@ class BvrEnv(gym.Env):
         return aspect_deg_from_vectors(self._own_pos_enu(),est["pos"],est["vel"])
 
     def _own_envelope(self,est) -> tuple:
+        # Against the target's estimated altitude (SIM_REV 11): a target far
+        # below cuts the missile's reach, which the level-target table missed.
         s=self._state; mach=s.get("mach",s.get("speed",280)/A_SOUND)
         tgt_mach=est["speed"]/A_SOUND if est["valid"] else 0.9
-        return self._env_own.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach)
+        tgt_alt=float(est["pos"][2]) if est["valid"] else None
+        return self._env_own.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach,
+                                     target_alt=tgt_alt)
 
     def _threat_envelope(self,est) -> tuple:
         if not est["valid"]: return 60_000.0,25_000.0
@@ -770,7 +774,8 @@ class BvrEnv(gym.Env):
         own_vel=self._own_vel_enu()
         our_asp=aspect_deg_from_vectors(est["pos"],self._own_pos_enu(),own_vel)
         own_mach=s.get("mach",s.get("speed",280)/A_SOUND)
-        return self._env_thr.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach)
+        return self._env_thr.compute(tgt_mach,float(est["pos"][2]),our_asp,own_mach,
+                                     target_alt=s.get("alt",9000))
 
     def _guidance_packet(self) -> dict:
         est=self._est()

@@ -391,7 +391,7 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 10
+SIM_REV = 11
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -422,6 +422,11 @@ _SIM_REV_NOTES = {
         "dives to 1-2.5 km, beaming (as the DCS AI does) or turning away, instead "
         "of beaming and descending 1.5 km (4 km in the last 12 s). SHOOTER and "
         "2v1 red are unchanged",
+    11: "launch envelopes depend on the target's altitude: the tables add a target "
+        "altitude axis (1-13 km) and launch altitudes 1 and 6 km, and the fire mask, "
+        "the range/R-max inputs and scripted red's shot range use the target's "
+        "estimated altitude. AIM-120C-DCS from 9 km head-on reaches 84 km against a "
+        "level target but 58 km against one at 1 km, which the old tables allowed",
 }
 
 

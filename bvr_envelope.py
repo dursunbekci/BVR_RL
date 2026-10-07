@@ -25,8 +25,12 @@ Envelope shape drivers, in order of importance:
   1. Target aspect   — head-on doubles reach vs a tail chase (closure adds
                        range, and the target runs INTO the missile)
   2. Launch altitude — thinner air, less drag; roughly linear in this band
-  3. Launch Mach     — the missile inherits the launch aircraft's energy
-  4. Target speed    — a fast retreating target eats the missile's margin
+  3. Target altitude — a target far below makes the missile end its flight
+                       in thick air: AIM-120C-DCS from 9 km reaches 84 km
+                       head-on against a level target, 58 km against one at
+                       1 km (calibrated tables only; SIM_REV 11)
+  4. Launch Mach     — the missile inherits the launch aircraft's energy
+  5. Target speed    — a fast retreating target eats the missile's margin
 """
 
 import math
@@ -58,32 +62,43 @@ class Aim120Envelope:
     def load_table(self, path: str):
         """
         Expects an .npz produced by sweep_envelope.py with:
-            mach_grid   (Nm,)      launch aircraft Mach
-            alt_grid    (Na,)      launch altitude, m
-            aspect_grid (Np,)      target aspect, deg (0 = head-on)
-            r_max       (Nm,Na,Np) m
-            r_nez       (Nm,Na,Np) m
+            mach_grid       (Nm,)          launch aircraft Mach
+            alt_grid        (Na,)          launch altitude, m
+            target_alt_grid (Nt,)          target altitude, m
+            aspect_grid     (Np,)          target aspect, deg (0 = head-on)
+            r_max           (Nm,Na,Nt,Np)  m
+            r_nez           (Nm,Na,Nt,Np)  m
+        Older tables have no target_alt_grid (and 3-D r_max, r_nez): they
+        were flown against a target at the launch altitude, and are read so.
         """
         d = np.load(path)
         self._table = {
             "mach": d["mach_grid"], "alt": d["alt_grid"], "aspect": d["aspect_grid"],
+            "talt": d["target_alt_grid"] if "target_alt_grid" in d.files else None,
             "r_max": d["r_max"], "r_nez": d["r_nez"],
         }
 
+    @property
+    def target_altitude_aware(self) -> bool:
+        return self._table is not None and self._table["talt"] is not None
+
     # ── main entry ──────────────────────────────────────────────────
     def compute(self, mach: float, alt: float, aspect_deg: float,
-                target_mach: float = 0.9) -> tuple:
+                target_mach: float = 0.9, target_alt: float = None) -> tuple:
         """
         mach        : launch aircraft Mach
         alt         : launch altitude, m
         aspect_deg  : TARGET aspect — 0 = target nose-on to shooter (head-on),
                       180 = target tail-on (running away)
         target_mach : target Mach
+        target_alt  : target altitude, m (None: level with the shooter). The
+                      analytic model and older tables ignore it.
 
         Returns (r_max, r_nez) in metres.
         """
         if self._table is not None:
-            return self._interp_table(mach, alt, aspect_deg, target_mach)
+            return self._interp_table(mach, alt, aspect_deg, target_mach,
+                                      alt if target_alt is None else target_alt)
         return self._analytic(mach, alt, aspect_deg, target_mach)
 
     def _analytic(self, mach, alt, aspect_deg, target_mach):
@@ -119,7 +134,7 @@ class Aim120Envelope:
         r_nez = float(np.clip(r_nez, 1_500.0, r_max * 0.85))
         return r_max, r_nez
 
-    def _interp_table(self, mach, alt, aspect_deg, target_mach):
+    def _interp_table(self, mach, alt, aspect_deg, target_mach, target_alt):
         t = self._table
         aspect = abs(float(aspect_deg))
 
@@ -130,20 +145,26 @@ class Aim120Envelope:
             w = (v - grid[j]) / max(grid[j + 1] - grid[j], 1e-9)
             return j, w
 
-        im, wm = lin(t["mach"], mach)
-        ia, wa = lin(t["alt"], alt)
-        ip, wp = lin(t["aspect"], aspect)
+        # Multilinear interpolation over (mach, alt[, target alt], aspect).
+        axes = [lin(t["mach"], mach), lin(t["alt"], alt)]
+        if t["talt"] is not None:
+            axes.append(lin(t["talt"], target_alt))
+        axes.append(lin(t["aspect"], aspect))
 
-        def tri(cube):
+        def interp(cube):
             c = 0.0
-            for dm, fm in ((0, 1 - wm), (1, wm)):
-                for da, fa in ((0, 1 - wa), (1, wa)):
-                    for dp, fp in ((0, 1 - wp), (1, wp)):
-                        c += fm * fa * fp * cube[im + dm, ia + da, ip + dp]
+            for corner in range(1 << len(axes)):
+                f, idx = 1.0, []
+                for k, (j, w) in enumerate(axes):
+                    hi = (corner >> k) & 1
+                    f *= w if hi else 1.0 - w
+                    idx.append(j + hi)
+                if f:
+                    c += f * cube[tuple(idx)]
             return float(c)
 
-        r_max = tri(t["r_max"])
-        r_nez = tri(t["r_nez"])
+        r_max = interp(t["r_max"])
+        r_nez = interp(t["r_nez"])
 
         # Table is built at a nominal target speed; apply the same correction.
         ca = math.cos(aspect * DEG2RAD)

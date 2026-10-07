@@ -616,11 +616,19 @@ def main():
             if pid:
                 load_platform(pid)
         from bvr_env import BvrEnv as _probe
+        old_tables = set()
         for pid in {args.platform, wingman} - {None}:
-            _probe(opponent_type=BvrOpponentType.STRAIGHT, platform=pid,
-                   opponent_platform=args.opponent_platform, envelope_table=args.envelope_table)
+            pe = _probe(opponent_type=BvrOpponentType.STRAIGHT, platform=pid,
+                        opponent_platform=args.opponent_platform, envelope_table=args.envelope_table)
+            for e, plat in ((pe._env_own, pe._plat), (pe._env_thr, pe._opp_plat)):
+                if e._table is not None and not e.target_altitude_aware:
+                    old_tables.add(plat.missile.id)
     except LibraryError as e:
         ap.error(str(e))
+    for mid in sorted(old_tables):
+        print(f"[bvr] NOTE: {mid}'s launch envelope was calibrated before target altitude "
+              f"was measured (SIM_REV 11), so it assumes a level target. Recalibrate it: "
+              f"GUI Library -> Calibrate, or `python sweep_envelope.py --missile {mid}`")
     heterogeneous = args.platform != args.opponent_platform
     if heterogeneous and opponent == BvrOpponentType.SELF_PLAY:
         ap.error(f"self-play needs both sides on the same platform (here {args.platform} v "

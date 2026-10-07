@@ -1008,6 +1008,41 @@ def test_adaptive_defence():
           f"{counts['deep_cold']} shallow/beam/cold of 400)")
 
 
+def test_envelope_target_alt():
+    """Launch envelopes depend on the target's altitude (SIM_REV 11): the
+    calibrated AIM-120C-DCS reaches much less far against a low target; no
+    target altitude means level; old tables without that axis still read as
+    level-target tables."""
+    import os, tempfile
+    import bvr_library as L
+    from bvr_envelope import Aim120Envelope
+    env = Aim120Envelope(str(L.envelope_path(L.missile_config("AIM-120C-DCS"))))
+    assert env.target_altitude_aware
+    level = env.compute(0.9, 9000.0, 0.0, 0.9, target_alt=9000.0)[0]
+    low = env.compute(0.9, 9000.0, 0.0, 0.9, target_alt=1000.0)[0]
+    assert env.compute(0.9, 9000.0, 0.0, 0.9)[0] == level
+    assert low < 0.8 * level, (low, level)
+    # A table at a grid point returns the swept value exactly.
+    with np.load(str(L.envelope_path(L.missile_config("AIM-120C-DCS")))) as d:
+        im, ia, it, ip = 1, 3, 0, 0
+        r = env.compute(float(d["mach_grid"][im]), float(d["alt_grid"][ia]),
+                        float(d["aspect_grid"][ip]), 0.9,
+                        target_alt=float(d["target_alt_grid"][it]))[0]
+        assert abs(r - float(d["r_max"][im, ia, it, ip])) < 1e-6
+    # An old 3-D table: the target altitude is ignored.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "old.npz")
+        g = np.ones((2, 2, 3))
+        np.savez(path, mach_grid=np.array([0.7, 1.1]), alt_grid=np.array([3000.0, 9000.0]),
+                 aspect_grid=np.array([0.0, 90.0, 180.0]), r_max=40_000.0 * g, r_nez=20_000.0 * g)
+        old = Aim120Envelope(path)
+        assert not old.target_altitude_aware
+        assert old.compute(0.9, 6000.0, 0.0, 0.9, target_alt=1000.0) == \
+            old.compute(0.9, 6000.0, 0.0, 0.9)
+    print(f"  envelope target altitude .... OK  (AIM-120C-DCS head-on from 9 km: "
+          f"{level/1000:.0f} km level, {low/1000:.0f} km against a target at 1 km)")
+
+
 def test_env_pickles():
     """The envs pickle: older stable-baselines3 (before 2.x has_attr) sends
     env.action_masks, and with it the whole env, from each worker process."""
@@ -1325,6 +1360,7 @@ if __name__ == "__main__":
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),
+        ("envelope target altitude", test_envelope_target_alt),
         ("envs pickle",             test_env_pickles),
         ("ADAPTIVE defence",        test_adaptive_defence),
     ]

@@ -30,18 +30,18 @@
   <li>14. Two against one (2v1)<span class="pg">17</span></li>
   <li>15. The parameter library<span class="pg">18</span></li>
   <li class="ph">Part C · The GUI, page by page</li>
-  <li>16. The TRAINING page<span class="pg">20</span></li>
-  <li>17. The WATCH page<span class="pg">21</span></li>
-  <li>18. The CROSS-PLAY page<span class="pg">22</span></li>
-  <li>19. The LIBRARY page<span class="pg">22</span></li>
+  <li>16. The TRAINING page<span class="pg">21</span></li>
+  <li>17. The WATCH page<span class="pg">22</span></li>
+  <li>18. The CROSS-PLAY page<span class="pg">23</span></li>
+  <li>19. The LIBRARY page<span class="pg">23</span></li>
   <li class="ph">Part D · Working with results</li>
-  <li>20. Reading a training run<span class="pg">24</span></li>
-  <li>21. Symptoms and what to do<span class="pg">24</span></li>
-  <li>22. Files, checkpoints and versions<span class="pg">25</span></li>
-  <li>23. Command-line reference<span class="pg">26</span></li>
-  <li>24. DCS World: first step<span class="pg">27</span></li>
-  <li>25. Troubleshooting<span class="pg">27</span></li>
-  <li>26. Glossary<span class="pg">28</span></li>
+  <li>20. Reading a training run<span class="pg">25</span></li>
+  <li>21. Symptoms and what to do<span class="pg">25</span></li>
+  <li>22. Files, checkpoints and versions<span class="pg">26</span></li>
+  <li>23. Command-line reference<span class="pg">27</span></li>
+  <li>24. DCS World: first step<span class="pg">28</span></li>
+  <li>25. Troubleshooting<span class="pg">28</span></li>
+  <li>26. Glossary<span class="pg">29</span></li>
 </ul>
 
 <div class="box"><h4>How to read this guide</h4>
@@ -264,7 +264,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <li><b>Hand-off:</b> within 8–16 km of the target (less against a small target), its own seeker locks on. From then on it no longer needs the shooter.</li>
 <li><b>Terminal:</b> it steers itself to the target, pulling up to 30 g. It kills inside a 10 m radius, misses if it runs out of energy, and is gone after 120 s at most.</li>
 </ol>
-<p><b>Launch envelope.</b> How far a missile can reach depends on the shooter's speed and altitude and on the target's direction of flight. Head-on, the target flies into the missile, so the reach is longest; tail-on it is several times shorter. The project measures this once per missile type with <code>sweep_envelope.py</code> and stores it as a table. Two numbers come out of it:</p>
+<p><b>Launch envelope.</b> How far a missile can reach depends on the shooter's speed and altitude and on the target's direction of flight and altitude. Head-on, the target flies into the missile, so the reach is longest; tail-on it is several times shorter. A target far below makes the missile end its flight in thick air: from 9 km, the AIM-120C-DCS reaches 84 km head-on against a level target, 58 km against one at 1 km (target altitude is measured since SIM_REV 11). The project measures this once per missile type with <code>sweep_envelope.py</code> and stores it as a table. Two numbers come out of it:</p>
 <ul>
 <li><b>R<sub>max</sub></b>: the farthest range at which a shot can hit a target that keeps flying as it is.</li>
 <li><b>R<sub>NEZ</sub></b> (no-escape zone): the range inside which a shot hits even if the target turns and runs at once.</li>
@@ -546,7 +546,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <li>On the LIBRARY tab, open a built-in item and click <b>⧉ Copy…</b>. Built-ins are never changed.</li>
 <li>Edit the copy's values and click <b>✔ Save</b>. Each value has a unit, a valid range and a source note.</li>
 <li>For an airframe or platform, click <b>▶ Performance card</b>: it flies the flight model and reports top speed, turn, climb, ceiling and autopilot behaviour, with warnings.</li>
-<li>For a missile, click <b>⟳ Calibrate envelope</b> (or <code>python sweep_envelope.py --missile &lt;id&gt;</code>). Training refuses to start until a missile has an envelope for its exact values. The file name carries a fingerprint, so editing the missile invalidates the old table.</li>
+<li>For a missile, click <b>⟳ Calibrate envelope</b> (or <code>python sweep_envelope.py --missile &lt;id&gt;</code>). Training refuses to start until a missile has an envelope for its exact values. The file name carries a fingerprint, so editing the missile invalidates the old table. A table calibrated before SIM_REV 11 has no target altitude and assumes a level target; training says so at the start. Recalibrate it.</li>
 <li>Select your platform under ENGAGEMENT on the TRAINING page.</li>
 </ol>
 <div class="tip"><h4>Old models keep their meaning</h4>
