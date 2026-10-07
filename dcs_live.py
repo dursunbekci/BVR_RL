@@ -329,6 +329,32 @@ def wait_for_fight(link, agent=None, red=None, after_t=None, log=print):
             notice += 30.0
 
 
+# A decision counts as "short" when BLUE-1 flies this much below its commanded speed.
+SPEED_SHORT_MPS = 30.0
+
+
+def _append_result(path, row):
+    """Append a row to results.csv; an older file with fewer columns is rewritten
+    with the new ones (left empty for its rows)."""
+    rows, fields = [], list(row)
+    if os.path.exists(path):
+        with open(path, newline="") as fh:
+            r = csv.DictReader(fh)
+            old = r.fieldnames or []
+            rows = list(r)
+        fields = old + [k for k in row if k not in old]
+        if old != fields:
+            with open(path, "w", newline="") as fh:
+                w = csv.DictWriter(fh, fieldnames=fields)
+                w.writeheader(); w.writerows(rows)
+    new = not os.path.exists(path)
+    with open(path, "a", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        if new:
+            w.writeheader()
+        w.writerow(row)
+
+
 def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     from bvr_selfplay import FrameStacker, N_STACK
     from gymnasium import spaces
@@ -363,12 +389,14 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     wr.writerow(["t", "hdg_off", "alt_delta", "speed", "fire", "cmd_hdg_deg", "cmd_alt_m",
                  "cmd_spd_mps", "track", "range_true_m", *OBS_LABELS])
     info = {}
+    spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
     try:
         while True:
             mask = env.action_masks()
             action, _ = model.predict(sobs, deterministic=True, action_masks=mask)
             obs, _, term, trunc, info = env.step(action)
             sobs = stacker.update(obs)
+            spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
             wr.writerow([round(env._t_sim, 1), HDG_OFFSETS_DEG[a[0]], ALT_DELTAS_M[a[1]],
@@ -395,15 +423,20 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            "fire_timeouts": sum(1 for _, s in world.fire_log if s in ("timeout", "refused")),
            "missiles_removed": sum(1 for *_, st in world.support_log if st == "destroyed"),
            "support_losses": info.get("support_losses", 0)}
-    path = os.path.join(args.out, "results.csv")
-    new = not os.path.exists(path)
-    with open(path, "a", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(row))
-        if new:
-            w.writeheader()
-        w.writerow(row)
+    # How often BLUE-1 flew well below the speed the policy asked for. The DCS
+    # AI following a route may not use afterburner; the simulator always does.
+    short = [c - f > SPEED_SHORT_MPS for c, f in spd]
+    row.update(speed_cmd_mean=round(float(np.mean([c for c, _ in spd])), 1) if spd else "",
+               speed_flown_mean=round(float(np.mean([f for _, f in spd])), 1) if spd else "",
+               speed_short_pct=round(100.0 * sum(short) / len(short), 1) if short else "")
+    _append_result(os.path.join(args.out, "results.csv"), row)
     log(f"episode {ep}: {outcome} after {env._t_sim:.0f} s, {row['shots']} shots "
         f"({row['fire_timeouts']} fire requests not answered by a launch)")
+    if short and not args.shadow:
+        log(f"  speed: asked for {row['speed_cmd_mean']:.0f} m/s on average, flew "
+            f"{row['speed_flown_mean']:.0f}; more than {SPEED_SHORT_MPS:.0f} m/s short "
+            f"{row['speed_short_pct']:.0f}% of the time"
+            + ("  <- DCS is not flying the commanded speed" if row["speed_short_pct"] > 30 else ""))
     log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv")
     return row, rec.t_end
 

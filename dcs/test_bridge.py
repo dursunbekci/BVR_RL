@@ -98,11 +98,13 @@ def test_bridge():
     ctrl = [d["t"] for d in lines if d.get("ev") == "bridge" and d.get("status") == "control"]
     assert ctrl and ctrl[0] >= 5.0, ctrl
     assert state["blue_calls_before"] == 0, "the agent was changed before any command"
-    opts = {x[2]: x[3] for x in calls("Viper-1", "opt")[:5]}
+    opts = {x[2]: x[3] for x in calls("Viper-1", "opt")[:6]}
     assert opts[0] == 4 and opts[1] == 0 and opts[3] == 3 and opts[18] == 0, opts
     route = calls("Viper-1", "setTask")[0][2].params.route.points
     assert abs(route[2].x - (-300000 + 5 * 250)) < 2000 and route[2].y > 650000, "not routed east"
     assert route[2].alt == 10000 and route[2].speed == 300
+    assert opts[16] is False, "afterburner not allowed"
+    assert [x[2] for x in calls("Viper-1", "setSpeed")][:1] == [300], "speed not ordered"
     assert abs(math.degrees(state["hdg20"]) - 90) < 3, math.degrees(state["hdg20"])
     fires = [d["status"] for d in lines if d.get("ev") == "fire"]
     assert fires == ["requested", "launched", "requested", "timeout"], fires

@@ -13,7 +13,7 @@ Weapon = {Category = {SHELL = 0, MISSILE = 1, ROCKET = 2, BOMB = 3}, MissileCate
 Group = {Category = {AIRPLANE = 0, HELICOPTER = 1}}
 AI = {Option = {Air = {
   id = {NO_OPTION = -1, ROE = 0, REACTION_ON_THREAT = 1, RADAR_USING = 3, FLARE_USING = 4,
-        PROHIBIT_JETT = 15, MISSILE_ATTACK = 18},
+        PROHIBIT_JETT = 15, PROHIBIT_AB = 16, MISSILE_ATTACK = 18},
   val = {ROE = {WEAPON_FREE = 0, OPEN_FIRE_WEAPON_FREE = 1, OPEN_FIRE = 2, RETURN_FIRE = 3, WEAPON_HOLD = 4},
          REACTION_ON_THREAT = {NO_REACTION = 0, PASSIVE_DEFENCE = 1, EVADE_FIRE = 2, BYPASS_AND_ESCAPE = 3, ALLOW_ABORT_MISSION = 4},
          RADAR_USING = {NEVER = 0, FOR_ATTACK_ONLY = 1, FOR_SEARCH_IF_REQUIRED = 2, FOR_CONTINUOUS_SEARCH = 3},
@@ -31,6 +31,7 @@ local function mkctrl(who)
   function c:pushTask(t) self.tasks[#self.tasks + 1] = t; LOG[#LOG + 1] = {who, "pushTask", t} end
   function c:popTask() self.tasks[#self.tasks] = nil; LOG[#LOG + 1] = {who, "popTask"} end
   function c:resetTask() self.tasks = {}; LOG[#LOG + 1] = {who, "resetTask"} end
+  function c:setSpeed(v, keep) self.speed = v; LOG[#LOG + 1] = {who, "setSpeed", v} end
   return c
 end
 

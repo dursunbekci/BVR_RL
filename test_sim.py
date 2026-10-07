@@ -830,11 +830,16 @@ def test_dcs_live_link():
         args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=250,
                                doctrine="AGGRESSIVE")
         scen = {"platform": "F-16C", "opponent_platform": "F-16C"}
+        with open(os.path.join(d, "results.csv"), "w") as fh:     # one from before the speed columns
+            fh.write("episode,mode,outcome\nold_ep1,live,SHOT_DOWN\n")
         rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
         row, _ = dcs_live.run_episode(link, Scripted(), args, scen, rec, agent, red, 1,
                                       log=lambda m: None)
         th.join(timeout=120)
         files = sorted(os.listdir(d))
+        import csv
+        with open(os.path.join(d, "results.csv"), newline="") as fh:
+            results = list(csv.DictReader(fh))
     link.close(); fake.close()
     fires = [c for c in fake.commands if c[5]]
     assert len(fake.commands) >= 30, f"only {len(fake.commands)} commands reached the fake"
@@ -842,8 +847,12 @@ def test_dcs_live_link():
     assert row["outcome"] in ("KILL", "TIMEOUT", "MUTUAL_KILL"), row
     assert row["outcome"] != "KILL" or res.get("out") == "KILL", (row, res)
     assert any(f.endswith(".jsonl") for f in files) and "results.csv" in files, files
+    # The speed DCS flies against the speed asked for; the fake flies what it is told.
+    assert [r["episode"] for r in results] == ["old_ep1", row["episode"]], results
+    assert results[0]["speed_short_pct"] == "" and results[1]["outcome"] == row["outcome"]
+    assert row["speed_short_pct"] < 30 and row["speed_cmd_mean"] > 0, row
     print(f"  DCS live link ............... OK  ({len(fake.commands)} commands, "
-          f"{row['shots']} shots, {row['outcome']})")
+          f"{row['shots']} shots, {row['outcome']}; speed short {row['speed_short_pct']:.0f}% of the time)")
 
 
 def test_dcs_support_rule():
@@ -992,6 +1001,10 @@ def test_adaptive_defence():
         assert 1000.0 <= o.DIVE_FLOOR <= 2500.0
     assert 160 <= counts["shallow"] <= 240 and counts["deep_beam"] >= 70 and counts["deep_cold"] >= 70, counts
     two = AdaptiveShooterOpponent(rng=np.random.default_rng(3)); two.legacy_crank = True
+    for seed in range(40):               # as the 2v1 env does: new opponent, legacy flag, reset
+        fresh = AdaptiveShooterOpponent(rng=np.random.default_rng(seed)); fresh.legacy_crank = True
+        fresh.reset(ic)
+        assert (fresh.DEFENCE, fresh.LONG_SHOT, fresh.PRESS) == ("shallow", False, False), seed
     for _ in range(50):
         two.reset(ic)
         assert two.DEFENCE == "shallow"
@@ -1004,8 +1017,27 @@ def test_adaptive_defence():
         assert cmd["altTarget"] == o.DIVE_FLOOR, cmd["altTarget"]
         off = math.degrees(abs((cmd["hdgCmd"] - o._bearing_to_ac1(state) + math.pi) % (2 * math.pi) - math.pi))
         assert abs(off - (90.0 if style == "deep_beam" else 180.0)) < 1.0, (style, off)
+    # The DCS-like episodes (SIM_REV 12): a third shoot at the edge of R-max and
+    # press on after their missile goes active; 2v1 red never does.
+    longs = 0
+    for _ in range(300):
+        o.reset(ic)
+        if o.LONG_SHOT:
+            longs += 1
+            assert 0.95 <= o.SHOT_RMAX_FRAC <= 1.0 and o.PRESS
+        else:
+            assert o.SHOT_RMAX_FRAC <= 0.95 and not o.PRESS
+    assert 70 <= longs <= 130, longs
+    for _ in range(30):
+        two.reset(ic)
+        assert not two.LONG_SHOT and not two.PRESS
+    for press in (False, True):          # once its missile is autonomous: drag, or press on
+        o.reset(ic); o.PRESS = press; o._phase = "CRANK"; o._last_shot = 0.0; o.rmax_t = 10_000.0
+        o.act({"range": 40_000.0, "aa_deg_t": 0.0, "psi_t": math.pi, "wpn_remaining_t": 3,
+               "missiles": [{"owner": 2, "state": "TERMINAL", "needs_support": 0}]}, 10.0)
+        assert o._phase == ("REATTACK" if press else "DRAG"), (press, o._phase)
     print(f"  ADAPTIVE defence ............ OK  ({counts['shallow']}/{counts['deep_beam']}/"
-          f"{counts['deep_cold']} shallow/beam/cold of 400)")
+          f"{counts['deep_cold']} shallow/beam/cold of 400; {longs}/300 long shots)")
 
 
 def test_envelope_target_alt():

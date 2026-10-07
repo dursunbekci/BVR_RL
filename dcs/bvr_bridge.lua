@@ -217,6 +217,10 @@ local function take_control()
   set_opt(c, O.id.RADAR_USING, O.val.RADAR_USING.FOR_CONTINUOUS_SEARCH)
   set_opt(c, O.id.MISSILE_ATTACK, O.val.MISSILE_ATTACK.MAX_RANGE)
   set_opt(c, O.id.PROHIBIT_JETT, true)
+  -- Let it use afterburner: in training the aircraft reaches the commanded
+  -- speed with full thrust, but a DCS AI following a route stayed at ~280 m/s
+  -- (Mach 0.9 at 10 km) when told 340.
+  set_opt(c, O.id.PROHIBIT_AB, false)
   S.controlled = true
   send({ev = "bridge", t = timer.getTime(), status = "control", agent = AGENT})
 end
@@ -250,6 +254,8 @@ local function issue_route(cmd)
   }}}}
   local ok, err = pcall(function() ctrl_of(agent):setTask(task) end)
   if not ok then env.info("bvr_bridge route error: " .. tostring(err)) end
+  -- The route's speed alone did not get the commanded speed flown; order it too.
+  pcall(function() ctrl_of(agent):setSpeed(cmd.spd, true) end)
   S.issued, S.t_issued = cmd, timer.getTime()
 end
 

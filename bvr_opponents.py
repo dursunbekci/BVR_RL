@@ -235,6 +235,10 @@ class ShooterOpponent(BvrOpponent):
     # only through the thicker air draining the coasting missile.
     DEFENCE = "shallow"
     DIVE_FLOOR = 1000.0
+    # Once its missile no longer needs support: turn cold and run (DRAG), or
+    # press: turn hot again and keep attacking, as the DCS AI does (SIM_REV 12).
+    PRESS = False
+    LONG_SHOT = False     # ADAPTIVE's DCS-like episodes: SHOT_RMAX_FRAC 0.95-1.0 and PRESS
 
     def reset(self, ic):
         super().reset(ic)
@@ -314,7 +318,7 @@ class ShooterOpponent(BvrOpponent):
             since_shot = t_sim - self._last_shot
             still_supporting = any(m.get("needs_support", 0) for m in mine)
             if since_shot > 4.0 and not still_supporting:
-                self._phase = "DRAG"
+                self._phase = "REATTACK" if self.PRESS else "DRAG"
             hdg = brg + self._crank_side * self.CRANK_ANGLE
             cmd = self._cmd(hdg, self._base_alt + 500.0, 340.0, fire)
             if at_other:
@@ -351,3 +355,19 @@ class AdaptiveShooterOpponent(ShooterOpponent):
             u = float(self.rng.random())
             self.DEFENCE = "shallow" if u < 0.5 else ("deep_beam" if u < 0.75 else "deep_cold")
             self.DIVE_FLOOR = float(self.rng.uniform(1000.0, 2500.0))
+            # A third of episodes fly like the DCS AI (SIM_REV 12): shoot at the
+            # edge of R-max and keep pressing. With the usual 0.60-0.95 the
+            # agent nearly always fired first, red then only defended, and the
+            # agent never learned to be shot at: red fired in 16 of 40 fights
+            # against dcs_v7; at 1.0, in 33, first in 31, from 62 km (the DCS
+            # AI fired from 63 km).
+            self.LONG_SHOT = bool(self.rng.random() < 1.0 / 3.0)
+            frac = float(self.rng.uniform(0.95, 1.0))
+            self.PRESS = self.LONG_SHOT
+            if self.LONG_SHOT:
+                self.SHOT_RMAX_FRAC = frac
+        else:
+            # Set, not left: the constructor's own reset() ran before the 2v1 env
+            # set legacy_crank, and its draws would otherwise stay (they did for
+            # DEFENCE from SIM_REV 10 until 12).
+            self.DEFENCE, self.LONG_SHOT, self.PRESS = "shallow", False, False
