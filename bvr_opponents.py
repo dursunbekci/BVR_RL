@@ -208,15 +208,39 @@ class ShooterOpponent(BvrOpponent):
     # at these conditions is 36-49 km, so every shot flew out of range and
     # SHOOTER never killed anything.
     SHOT_RMAX_FRAC = 0.80
-    CRANK_ANGLE = 50.0 * DEG2RAD
+    # Crank: the target this far off the nose. It must stay inside the radar's
+    # field of view (60 deg, randomised +-15% per episode, so as little as 51
+    # deg), or red loses the track that guides its missile (SIM_REV 9). Was 50.
+    CRANK_ANGLE = 45.0 * DEG2RAD
     REATTACK_RANGE = 40_000.0
     MIN_SHOT_INTERVAL = 12.0
     # 2v1 second shot: the other blue aircraft must be within this of red's nose.
     OTHER_SHOT_OFF_NOSE_DEG = 60.0
 
+    # Set by the env (SIM_REV 9): a callable saying whether red may fire now,
+    # the same rule as the agent's fire mask applied to red's own radar track.
+    # None: no gate (2v1, and the old behaviour).
+    fire_gate = None
+    # Set by the 2v1 env: red keeps truth guidance there, so it keeps the old,
+    # wider cranks (50 deg; ADAPTIVE 35-70 deg).
+    legacy_crank = False
+    # Defence against an inbound missile (SIM_REV 10):
+    #   "shallow"   beam and descend 1.5 km, 4 km in the last 12 s (SHOOTER)
+    #   "deep_beam" beam and dive to DIVE_FLOOR, as the DCS AI does
+    #   "deep_cold" turn away and dive to DIVE_FLOOR
+    # ADAPTIVE draws one per episode. Against a level, supporting AIM-120C-DCS
+    # shot head-on at 9 km, red escaped from 35 km in 10/12 runs with shallow,
+    # 12/12 with deep_beam; deep_cold escaped from 29 km in 10/12, where both
+    # beams were always hit. No ground clutter is modelled, so the dive helps
+    # only through the thicker air draining the coasting missile.
+    DEFENCE = "shallow"
+    DIVE_FLOOR = 1000.0
+
     def reset(self, ic):
         super().reset(ic)
         self._phase = "COMMIT"
+        if self.legacy_crank:
+            self.CRANK_ANGLE = 50.0 * DEG2RAD
         self._crank_side = 1.0 if self.rng.random() < 0.5 else -1.0
         self._last_shot = -999.0
         self._fire_edge = False
@@ -244,6 +268,11 @@ class ShooterOpponent(BvrOpponent):
         # ── DEFEND overrides everything ─────────────────────────────
         if inbound is not None:
             tgo = float(inbound.get("tgo_est", 60.0))
+            if self.DEFENCE == "deep_cold":
+                return self._cmd(brg + math.pi, self.DIVE_FLOOR, 400.0)
+            if self.DEFENCE == "deep_beam":
+                off = 100.0 if tgo < 12.0 else 90.0
+                return self._cmd(brg + self._crank_side * off * DEG2RAD, self.DIVE_FLOOR, 400.0)
             if tgo < 12.0:
                 # Last-ditch: hard beam and dive, maximum energy
                 hdg = brg + self._crank_side * (100.0 * DEG2RAD)
@@ -255,7 +284,8 @@ class ShooterOpponent(BvrOpponent):
         fire = 0
         if (wpn > 0 and rng <= self.SHOT_RMAX_FRAC * self.rmax_t
                 and (t_sim - self._last_shot) > self.MIN_SHOT_INTERVAL
-                and self._phase in ("COMMIT", "REATTACK")):
+                and self._phase in ("COMMIT", "REATTACK")
+                and (self.fire_gate is None or self.fire_gate())):
             if not self._fire_edge:
                 fire = 1
                 self._fire_edge = True
@@ -312,6 +342,12 @@ class AdaptiveShooterOpponent(ShooterOpponent):
     def reset(self, ic):
         super().reset(ic)
         self.SHOT_RMAX_FRAC = float(self.rng.uniform(0.60, 0.95))
-        self.CRANK_ANGLE = float(self.rng.uniform(35.0, 70.0)) * DEG2RAD
+        # 30-45 deg: wider cranks lose red's own track (was 35-70; SIM_REV 9).
+        lo, hi = (35.0, 70.0) if self.legacy_crank else (30.0, 45.0)
+        self.CRANK_ANGLE = float(self.rng.uniform(lo, hi)) * DEG2RAD
         self.REATTACK_RANGE = float(self.rng.uniform(30_000.0, 55_000.0))
         self.MIN_SHOT_INTERVAL = float(self.rng.uniform(8.0, 20.0))
+        if not self.legacy_crank:          # 2v1 keeps the shallow defence
+            u = float(self.rng.random())
+            self.DEFENCE = "shallow" if u < 0.5 else ("deep_beam" if u < 0.75 else "deep_cold")
+            self.DIVE_FLOOR = float(self.rng.uniform(1000.0, 2500.0))

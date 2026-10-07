@@ -30,6 +30,7 @@ x north, y up, z east):
   {"ev":"shot", "t":..., "id":..., "shooter":..., "target":..., "type":...}
   {"ev":"hit",  "t":..., "id":..., "shooter":..., "target":..., "type":...}
   {"ev":"weapon_gone", "t":..., "id":...}
+  {"ev":"kill", "t":..., "unit":..., "killer":..., "id":...}   (DCS's S_EVENT_KILL)
   {"ev":"dead", "t":..., "unit":..., "cause":"dead|crash|ejection|..."}
   {"ev":"ammo", "t":..., "unit":..., "items":[{type, count, aam, guidance}]}
 
@@ -167,6 +168,11 @@ function handler:onEvent(e)
       pcall(function() wtype = e.weapon:getTypeName() end)
       write({ev = "hit", t = t, id = w and w.id or -1, shooter = name_of(e.initiator),
              target = name_of(e.target), type = wtype})
+    elseif E.S_EVENT_KILL and e.id == E.S_EVENT_KILL and e.target then
+      -- the moment DCS decides a unit is destroyed, with killer and weapon
+      local w = e.weapon and weapons[weapon_key(e.weapon)]
+      write({ev = "kill", t = t, unit = name_of(e.target), killer = name_of(e.initiator),
+            id = w and w.id or -1})
     elseif DEAD_EVENTS[e.id] and e.initiator then
       write({ev = "dead", t = t, unit = name_of(e.initiator), cause = DEAD_EVENTS[e.id]})
     elseif e.id == E.S_EVENT_MISSION_END then

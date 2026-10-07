@@ -119,6 +119,7 @@ class AIM120:
         self.t_since_update  = 0.0
         self.seeker_active   = False
         self.guidance_valid  = True   # seeded at launch
+        self._loft_done      = False  # the loft climb, if any, has ended
 
         # Last known target state (from datalink). These are ESTIMATES, not truth.
         self.last_tgt_pos = pos.copy()
@@ -206,6 +207,21 @@ class AIM120:
             # this uses last_tgt_pos directly (updated by update_guidance).
             aim_pos = self.last_tgt_pos + self.last_tgt_vel * self.t_since_update
             aim_vel = self.last_tgt_vel
+            # Loft: a long shot first climbs at LOFT_ANGLE into thinner air,
+            # then guides on the target once it is LOFT_DIVE below (or within
+            # 5 km horizontally); the climb is not resumed. Off (0) unless the
+            # missile's parameters set it.
+            loft = getattr(self.cfg, "LOFT_ANGLE", 0.0)
+            if loft > 0.0 and not self._loft_done:
+                d = aim_pos - self.pos
+                hor = math.hypot(d[0], d[1])
+                if hor < 5000.0 or math.atan2(-d[2], hor) >= getattr(self.cfg, "LOFT_DIVE", 0.0):
+                    self._loft_done = True
+                else:
+                    u = np.array([d[0] / hor, d[1] / hor, 0.0])
+                    aim_pos = self.pos + 50_000.0 * (math.cos(loft) * u
+                                                     + np.array([0.0, 0.0, math.sin(loft)]))
+                    aim_vel = np.zeros(3)
 
         self._aim_pos, self._aim_vel = aim_pos, aim_vel
         a_nav = self._pro_nav(aim_pos, aim_vel)

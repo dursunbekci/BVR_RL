@@ -38,6 +38,11 @@ lat/lon back into the same metres, so ranges and bearings are exact.
 write_sim_recording() writes a simulator episode in the logger's format, so
 the whole path can be checked without DCS: a replay of it must reproduce
 the simulator's inputs (test_sim.test_dcs_round_trip).
+
+Live (dcs_live.py): DcsLiveRecording grows as dcs/bvr_bridge.lua streams the
+same lines over UDP, and dcs_live.DcsLiveWorld steps through it as DCS flies.
+sim_frame / sim_events / sim_ammo turn a SimWorld into those lines
+(dcs/fake_dcs.py).
 """
 
 import json
@@ -78,13 +83,18 @@ def _dcs_to_enu(x, y, z):
 class DcsRecording:
     """A bvr_logger.lua file: aircraft and missile tracks plus events, in ENU metres."""
 
+    # A unit missing from the samples this long, without a death event, has
+    # left the fight. 0 for a finished file; the live recording waits a little,
+    # so one sample that lacks a unit doesn't end its fight.
+    VANISH_S = 0.0
+
     def __init__(self, source):
         if isinstance(source, (list, tuple)):
             lines = list(source)
         else:
             with open(source, encoding="utf-8") as fh:
                 lines = fh.read().splitlines()
-        self.header, frames, self.events = {}, [], []
+        self._clear()
         for n, ln in enumerate(lines, start=1):
             if not ln.strip():
                 continue
@@ -95,25 +105,43 @@ class DcsRecording:
                 if n == len(lines):
                     break
                 raise ValueError(f"line {n}: {e}") from e
-            if "format" in d:
-                self.header = d
-            elif "ev" in d:
-                self.events.append(d)
-            elif "units" in d:
-                frames.append(d)
-        if self.header.get("format", FORMAT) != FORMAT:
-            raise ValueError(f"unknown recording format {self.header.get('format')!r}")
-        if not frames:
+            self._add(d)
+        if not self._frames:
             raise ValueError("the recording has no samples")
+        self._build()
+
+    def _clear(self):
+        self.header, self._frames, self.events = {}, [], []
+        self._x0 = self._z0 = None
+        self._t_first = None
+
+    def _add(self, d):
+        """Take one parsed line: the header, an event or a sample."""
+        if "format" in d:
+            if d["format"] != FORMAT:
+                raise ValueError(f"unknown recording format {d['format']!r}")
+            # The live bridge repeats its header; the first one stands.
+            self.header = self.header or d
+        elif "ev" in d:
+            self.events.append(d)
+        elif "units" in d:
+            self._frames.append(d)
+
+    def _build(self):
+        """Turn the lines taken so far into the arrays the queries read."""
+        frames = self._frames
         frames.sort(key=lambda fr: fr["t"])
         self.events.sort(key=lambda e: e["t"])
         self.rate = float(self.header.get("rate", 0.1))
-        self.t_start, self.t_end = float(frames[0]["t"]), float(frames[-1]["t"])
+        if self._t_first is None:
+            self._t_first = float(frames[0]["t"])
+        self.t_start, self.t_end = self._t_first, float(frames[-1]["t"])
 
         # Origin: the middle of the first sample's aircraft, horizontally.
-        first = frames[0]["units"]
-        self._x0 = float(np.mean([u["x"] for u in first])) if first else 0.0
-        self._z0 = float(np.mean([u["z"] for u in first])) if first else 0.0
+        if self._x0 is None:
+            first = frames[0]["units"]
+            self._x0 = float(np.mean([u["x"] for u in first])) if first else 0.0
+            self._z0 = float(np.mean([u["z"] for u in first])) if first else 0.0
 
         self.units = {}
         for fr in frames:
@@ -156,12 +184,28 @@ class DcsRecording:
                 d["type"] = e.get("type", d["type"])
             elif kind == "weapon_gone":
                 self._weapon(e["id"])["t_gone"] = t
+            elif kind == "support_lost":
+                # dcs_live.py had the bridge remove it: no support for too long.
+                if e.get("status") == "destroyed":
+                    self._weapon(e["id"])["support_lost"] = t
             elif kind == "hit":
                 self.hits.append(e)
                 if int(e.get("id", -1)) >= 0 and e.get("target"):
                     d = self._weapon(e["id"])
                     if d["t_hit"] is None:
                         d["t_hit"], d["hit_target"] = t, e["target"]
+            elif kind == "kill":
+                # S_EVENT_KILL: the moment DCS decides the unit is destroyed, with
+                # the killer and weapon (its dead/crash event can come much later,
+                # when the wreck reaches the ground).
+                if e.get("unit"):
+                    self.dead.setdefault(e["unit"], (t, "killed"))
+                    self.hits.append({"t": t, "target": e["unit"], "shooter": e.get("killer"),
+                                      "id": e.get("id", -1)})
+                    if int(e.get("id", -1)) >= 0:
+                        d = self._weapon(e["id"])
+                        if d["t_hit"] is None:
+                            d["t_hit"], d["hit_target"] = t, e["unit"]
             elif kind == "dead":
                 self.dead.setdefault(e["unit"], (t, e.get("cause", "dead")))
             elif kind == "ammo":
@@ -181,9 +225,21 @@ class DcsRecording:
                 end = min(end, d["t_hit"])
             d["t_end"] = end
 
-        # A unit that stops appearing without a death event left the fight then.
+        # A missile hit is a kill, as in the simulator, from the moment of the
+        # hit: DCS may report the death only when the wreck reaches the ground,
+        # and meanwhile the falling wreck would read as a crash (or, if it was
+        # the bandit, as an aircraft still in the fight).
+        for d in self.weapons.values():
+            if d["hit_target"] and d["t_hit"] is not None:
+                cur = self.dead.get(d["hit_target"])
+                if cur is None or d["t_hit"] < cur[0]:
+                    self.dead[d["hit_target"]] = (d["t_hit"], "missile hit")
+
+        # A unit that stops appearing without a death event left the fight then
+        # (DCS removes a destroyed aircraft, and may report its death only when
+        # the wreck reaches the ground).
         for name, d in self.units.items():
-            if name not in self.dead and d["t"][-1] < self.t_end - 1e-6:
+            if name not in self.dead and d["t"][-1] < self.t_end - max(self.VANISH_S, 1e-6):
                 self.dead[name] = (float(d["t"][-1]) + self.rate, "vanished")
 
     def _enu(self, x, y, z):
@@ -193,9 +249,22 @@ class DcsRecording:
         return self.weapons.setdefault(int(wid), {
             "id": int(wid), "type": "?", "shooter": None, "target": None,
             "t": [], "pos": [], "vel": [], "t_shot": None, "t_gone": None,
-            "t_hit": None, "hit_target": None, "t_end": None})
+            "t_hit": None, "hit_target": None, "t_end": None, "support_lost": None})
 
     # ── queries ──────────────────────────────────────────────────────
+    def death_cause(self, name) -> dict:
+        """How a dead unit died: {"t", "cause" (DCS's word), "weapon" (the last
+        missile that hit it before its death, or None), "hit" (anything hit
+        it before its death)}. A hit followed by a death, however long after,
+        is a kill: DCS reports the death when the wreck lands or is removed."""
+        t, cause = self.dead[name]
+        hits = [d for d in self.weapons.values()
+                if d["hit_target"] == name and d["t_hit"] is not None and d["t_hit"] <= t + 0.5]
+        weapon = max(hits, key=lambda d: d["t_hit"]) if hits else None
+        hit = weapon is not None or any(h.get("target") == name and float(h["t"]) <= t + 0.5
+                                        for h in self.hits)
+        return {"t": t, "cause": cause, "weapon": weapon, "hit": hit}
+
     def names(self, coal=None):
         return [n for n, d in self.units.items() if coal is None or d["coal"] == coal]
 
@@ -230,6 +299,43 @@ class DcsRecording:
         return rows[-1] if rows else None
 
 
+class DcsLiveRecording(DcsRecording):
+    """A recording that grows while DCS runs (dcs_live.py): extend() it with
+    parsed lines as they arrive. Only the last WINDOW_S seconds of samples
+    are kept, which is all the queries need near the newest time; events
+    are all kept."""
+
+    WINDOW_S = 30.0
+    VANISH_S = 1.0
+
+    def __init__(self):
+        self._clear()
+        self.units, self.weapons, self.dead, self.ammo, self.hits = {}, {}, {}, {}, []
+        self.rate, self.t_start, self.t_end = 0.1, None, None
+
+    @property
+    def ready(self) -> bool:
+        return bool(self._frames)
+
+    def extend(self, objs, reader_t=None) -> None:
+        """Add parsed lines. reader_t: the earliest time still to be read; samples
+        are kept from WINDOW_S before it (or before the newest, without it)."""
+        n = len(self._frames)
+        for d in objs:
+            self._add(d)
+        if not self._frames:
+            return
+        if len(self._frames) > n:
+            newest = max(float(fr["t"]) for fr in self._frames[n:])
+            ref = newest if reader_t is None else min(newest, float(reader_t))
+            keep = ref - self.WINDOW_S
+            if float(self._frames[0]["t"]) < keep:
+                self._frames = [fr for fr in self._frames if float(fr["t"]) >= keep]
+        elif self.t_end is None:
+            return
+        self._build()
+
+
 # ────────────────────────────────────────────────────────────────────
 class DcsReplayWorld:
     """SimWorld's 1v1 interface, answered from a DcsRecording. Commands are ignored."""
@@ -257,6 +363,7 @@ class DcsReplayWorld:
         self.t = self.t0
         self._t_prev = self.t0 - 1e-9
         self._seeker = set()
+        self._deaths_done = set()
         self.events = []
 
     @property
@@ -416,36 +523,37 @@ class DcsReplayWorld:
                             "t_sim": rel(d["t_shot"])})
             if d["t_end"] is not None and ta < d["t_end"] <= tb:
                 if d["t_hit"] is not None and d["hit_target"] in self.labels:
-                    dead = rec.dead.get(d["hit_target"])
-                    killed = int(dead is not None and dead[0] <= d["t_hit"] + 3.0)
-                    out.append({"type": "MISSILE_HIT", "id": d["id"], "owner": owner,
-                                "target": self.labels[d["hit_target"]], "killed": killed,
-                                "t_sim": rel(d["t_end"])})
+                    pass                # a hit: the target's death, below, decides what it did
                 elif tgt in self.labels:
                     out.append({"type": "MISSILE_MISS", "id": d["id"], "owner": owner,
-                                "cause": "DCS", "t_sim": rel(d["t_end"])})
-        # One event per death, as the simulator's reach the env: a kill by a
-        # replayed missile is its MISSILE_HIT above; BvrEnv would count a
-        # second event for the same death as a new kill (MUTUAL_KILL -> KILL).
+                                "cause": "SUPPORT_LOST" if d["support_lost"] is not None else "DCS",
+                                "t_sim": rel(d["t_end"])})
+        # One event per death, as the simulator's reach the env (BvrEnv would
+        # count a second event for the same death as a new kill), sent once,
+        # when the death is known: DCS can report it well after the hit, and
+        # live, a unit's death can become known after its time has passed.
         for name, lab in self.labels.items():
             dead = rec.dead.get(name)
-            if dead is None or not (ta < dead[0] <= tb):
+            if dead is None or dead[0] > tb or name in self._deaths_done:
                 continue
-            by_missile = any(d["hit_target"] == name and d["shooter"] in self.labels
-                             and d["t_hit"] is not None and d["t_hit"] <= dead[0] <= d["t_hit"] + 3.0
-                             for d in rec.weapons.values())
-            if by_missile:
-                continue
-            shot = any(h.get("target") == name and dead[0] - 10.0 <= h["t"] <= dead[0]
-                       for h in rec.hits)
-            out.append({"type": "AC_DESTROYED" if shot else "AC_CRASHED", "ac": lab,
-                        "cause": dead[1], "t_sim": rel(dead[0])})
+            self._deaths_done.add(name)
+            how = rec.death_cause(name)
+            if how["weapon"] is not None and how["weapon"]["shooter"] in self.labels:
+                d = how["weapon"]
+                out.append({"type": "MISSILE_HIT", "id": d["id"], "owner": self.labels[d["shooter"]],
+                            "target": lab, "killed": 1, "t_sim": rel(dead[0])})
+            else:
+                out.append({"type": "AC_DESTROYED" if how["hit"] else "AC_CRASHED", "ac": lab,
+                            "cause": dead[1], "t_sim": rel(dead[0])})
         return out
 
     # ── telemetry packet ─────────────────────────────────────────────
-    def telemetry(self) -> dict:
+    def telemetry(self, me: int = 1) -> dict:
+        """The packet aircraft `me` gets (1 = blue, the default; 2 = red, for red's
+        radar in dcs_live.py): its own state, the other's as *_t, and missiles
+        labelled from its side (1 = its own, 2 = aimed at it)."""
         t = self.t
-        blue, red = self.names[1], self.names[2]
+        blue, red = self.names[me], self.names[3 - me]          # "blue" is `me` below
         a1, a2 = self._kin(blue, t), self._kin(red, t)
         lat1, lon1, alt1 = _enu_to_latlon(*a1["pos"])
         lat2, lon2, alt2 = _enu_to_latlon(*a2["pos"])
@@ -467,8 +575,11 @@ class DcsReplayWorld:
             m = self._missile_dict(dw, tgt, owner)
             if m is None:
                 continue
+            if me != 1:                                   # relabel from red's side
+                m["owner"] = 1 if owner == me else 2
+                m["target"] = 1 if tgt == blue else 2
             msl.append(m)
-            if owner == 2 and tgt == blue:
+            if owner != me and tgt == blue:
                 inbound.append((dw, m))
         if inbound:
             dw, m = min(inbound, key=lambda x: float(np.linalg.norm(
@@ -514,6 +625,11 @@ class DcsReplayEnv(BvrEnv):
     previous heading choice, the turn still to fly) look as they would have
     if the policy had flown the same path.
     """
+
+    # No altitude floor: in training, below 300 m counts as hitting the ground.
+    # In DCS an aircraft can fly lower (the AI dives to the sea to defend) and
+    # DCS itself reports a real crash, which counts as one.
+    MIN_ALT = -1e9
 
     INFER_HDG_S = 2.0      # heading choice: course this many seconds ahead
     INFER_ALT_S = 8.0      # altitude choice: height change over this many seconds
@@ -599,6 +715,58 @@ def capture_raw_obs(env) -> dict:
     return box
 
 
+def sim_frame(w, names, t, x0=-250_000.0, z0=620_000.0, coal=(COAL_BLUE, COAL_RED)) -> dict:
+    """A SimWorld's aircraft and missiles as one bvr_logger.lua sample at time t.
+    names[i-1] is aircraft i's DCS name; (x0, z0) puts the fight on the DCS map."""
+    units = []
+    for i, a in enumerate(w.acs, start=1):
+        if not w.alive[i - 1]:
+            continue
+        R = body_to_enu_matrix(a.chi, a.theta, a.phi)
+        f, up, v = R[:, 0], -R[:, 2], a.vel_enu
+        units.append({"name": names[i - 1], "coal": coal[i - 1], "type": "F-16C_50",
+                      "x": a.y + x0, "y": a.z, "z": a.x + z0,
+                      "vx": v[1], "vy": v[2], "vz": v[0],
+                      "fx": f[1], "fy": f[2], "fz": f[0],
+                      "ux": up[1], "uy": up[2], "uz": up[0],
+                      "fuel": a.fuel_frac})
+    wl = []
+    for m in w.missiles:
+        if m.phase.value in ("HIT", "MISS"):
+            continue
+        wl.append({"id": m.id, "type": "AIM_120C", "shooter": names[m.owner - 1],
+                   "target": names[m.target - 1],
+                   "x": m.pos[1] + x0, "y": m.pos[2], "z": m.pos[0] + z0,
+                   "vx": m.vel[1], "vy": m.vel[2], "vz": m.vel[0]})
+    return {"t": t, "units": units, "weapons": wl}
+
+
+def sim_ammo(w, names, i, t) -> dict:
+    return {"ev": "ammo", "t": t, "unit": names[i - 1], "items": [
+        {"type": "AIM_120C", "count": int(w.wpn[i - 1]), "aam": True, "guidance": 3}]}
+
+
+def sim_events(w, names, t) -> list:
+    """The bvr_logger.lua event lines for a SimWorld step's events."""
+    out = []
+    for ev in w.events:
+        k = ev.get("type")
+        if k == "MISSILE_LAUNCH":
+            m = next(m for m in w.missiles if m.id == ev["id"])
+            out.append({"ev": "shot", "t": t, "id": m.id, "shooter": names[m.owner - 1],
+                        "target": names[m.target - 1], "type": "AIM_120C"})
+            out.append(sim_ammo(w, names, m.owner, t))
+        elif k == "MISSILE_HIT":
+            out.append({"ev": "hit", "t": t, "id": ev["id"], "shooter": names[ev["owner"] - 1],
+                        "target": names[ev["target"] - 1], "type": "AIM_120C"})
+            out.append({"ev": "weapon_gone", "t": t, "id": ev["id"]})
+        elif k == "MISSILE_MISS":
+            out.append({"ev": "weapon_gone", "t": t, "id": ev["id"]})
+        elif k == "AC_DESTROYED":
+            out.append({"ev": "dead", "t": t, "unit": names[ev["ac"] - 1], "cause": "dead"})
+    return out
+
+
 def write_sim_recording(env, policy, path, x0=-250_000.0, z0=620_000.0, t_offset=3600.0,
                         names=("BLUE-1", "RED-1")):
     """
@@ -612,38 +780,13 @@ def write_sim_recording(env, policy, path, x0=-250_000.0, z0=620_000.0, t_offset
     w = env._world
     rate_frames = 5                                   # 0.1 s at 50 Hz
     lines = [json.dumps({"format": FORMAT, "rate": 0.1, "t0": t_offset, "theatre": "sim"})]
-    coal = {1: COAL_BLUE, 2: COAL_RED}
     frame = {"n": 0}
 
     def T():
         return round(w.t_sim + t_offset, 4)
 
-    def ammo(i):
-        lines.append(json.dumps({"ev": "ammo", "t": T(), "unit": names[i - 1], "items": [
-            {"type": "AIM_120C", "count": int(w.wpn[i - 1]), "aam": True, "guidance": 3}]}))
-
     def sample():
-        units = []
-        for i, a in enumerate(w.acs, start=1):
-            if not w.alive[i - 1]:
-                continue
-            R = body_to_enu_matrix(a.chi, a.theta, a.phi)
-            f, up, v = R[:, 0], -R[:, 2], a.vel_enu
-            units.append({"name": names[i - 1], "coal": coal[i], "type": "F-16C_50",
-                          "x": a.y + x0, "y": a.z, "z": a.x + z0,
-                          "vx": v[1], "vy": v[2], "vz": v[0],
-                          "fx": f[1], "fy": f[2], "fz": f[0],
-                          "ux": up[1], "uy": up[2], "uz": up[0],
-                          "fuel": a.fuel_frac})
-        wl = []
-        for m in w.missiles:
-            if m.phase.value in ("HIT", "MISS"):
-                continue
-            wl.append({"id": m.id, "type": "AIM_120C", "shooter": names[m.owner - 1],
-                       "target": names[m.target - 1],
-                       "x": m.pos[1] + x0, "y": m.pos[2], "z": m.pos[0] + z0,
-                       "vx": m.vel[1], "vy": m.vel[2], "vz": m.vel[0]})
-        lines.append(json.dumps({"t": T(), "units": units, "weapons": wl}))
+        lines.append(json.dumps(sim_frame(w, names, T(), x0, z0)))
 
     orig_reset, orig_step = w.reset, w.step
 
@@ -651,29 +794,12 @@ def write_sim_recording(env, policy, path, x0=-250_000.0, z0=620_000.0, t_offset
         orig_reset(ic, episode_id=episode_id)
         frame["n"] = 0
         for i in (1, 2):
-            ammo(i)
+            lines.append(json.dumps(sim_ammo(w, names, i, T())))
         sample()
 
     def step(c1, c2):
         tlm = orig_step(c1, c2)
-        for ev in w.events:
-            k = ev.get("type")
-            if k == "MISSILE_LAUNCH":
-                m = next(m for m in w.missiles if m.id == ev["id"])
-                lines.append(json.dumps({"ev": "shot", "t": T(), "id": m.id,
-                                         "shooter": names[m.owner - 1],
-                                         "target": names[m.target - 1], "type": "AIM_120C"}))
-                ammo(m.owner)
-            elif k == "MISSILE_HIT":
-                lines.append(json.dumps({"ev": "hit", "t": T(), "id": ev["id"],
-                                         "shooter": names[ev["owner"] - 1],
-                                         "target": names[ev["target"] - 1], "type": "AIM_120C"}))
-                lines.append(json.dumps({"ev": "weapon_gone", "t": T(), "id": ev["id"]}))
-            elif k == "MISSILE_MISS":
-                lines.append(json.dumps({"ev": "weapon_gone", "t": T(), "id": ev["id"]}))
-            elif k == "AC_DESTROYED":
-                lines.append(json.dumps({"ev": "dead", "t": T(), "unit": names[ev["ac"] - 1],
-                                         "cause": "dead"}))
+        lines.extend(json.dumps(e) for e in sim_events(w, names, T()))
         frame["n"] += 1
         if frame["n"] % rate_frames == 0:
             sample()

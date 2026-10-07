@@ -1,6 +1,8 @@
-"""Build docs/BVR_RL_Project_Guide.pdf from body.html.
+"""Build the PDF guides in docs/ from their HTML bodies.
 
-    python docs/guide/build.py
+    python docs/guide/build.py              # both
+    python docs/guide/build.py project      # docs/BVR_RL_Project_Guide.pdf from body.html
+    python docs/guide/build.py dcs          # docs/BVR_RL_DCS_Guide.pdf from dcs_body.html
 
 Needs Playwright with Chromium (pip install playwright; playwright install chromium).
 Set CHROMIUM to use an existing Chromium instead. The cover shows the commit the
@@ -13,7 +15,10 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-OUT = os.path.join(REPO, "docs", "BVR_RL_Project_Guide.pdf")
+GUIDES = {   # name: (body, output, title, footer)
+    "project": ("body.html", "BVR_RL_Project_Guide.pdf", "BVR RL project guide", "project guide"),
+    "dcs": ("dcs_body.html", "BVR_RL_DCS_Guide.pdf", "BVR RL in DCS World", "DCS World guide"),
+}
 COMMIT = subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"],
                         capture_output=True, text=True).stdout.strip() or "unknown"
 _d = datetime.date.today()
@@ -77,6 +82,14 @@ figcaption{font-size:8.6pt;color:var(--ink2);margin-top:3px}
 .two{display:flex;gap:16px;align-items:flex-start} .two>*{flex:1;min-width:0}
 .kbd{font-family:'IBM Plex Mono',monospace;font-size:8.6pt;border:1px solid var(--rule);background:var(--soft);padding:0 4px}
 .small{font-size:8.8pt;color:var(--ink2)}
+pre.out{border-left-color:#b9b7b0;background:#fafaf8;color:var(--ink2)}
+.lbl{font-size:7.8pt;font-weight:600;letter-spacing:.6px;color:var(--muted);margin:8px 0 -3px;text-transform:uppercase}
+.where{display:inline-block;font-size:7.8pt;font-weight:600;letter-spacing:.5px;padding:1px 7px;border-radius:9px;
+  margin-right:6px;vertical-align:1px}
+.where.dcs{background:#e8f0fb;color:#1f5fae}.where.py{background:#eaf6ef;color:#1b7f55}
+.where.admin{background:#fbf1ea;color:#b4541a}
+.done{border:1.5px solid var(--ok);padding:7px 12px;margin:10px 0 12px;break-inside:avoid}
+.done b{color:var(--ok)}
 """
 
 
@@ -113,26 +126,38 @@ def geometry_svg():
     return "".join(out)
 
 
-BODY = open(os.path.join(HERE, "body.html"), encoding="utf-8").read()
-BODY = BODY.replace("{COMMIT}", COMMIT).replace("{DATE}", DATE).replace("{GEOMETRY_SVG}", geometry_svg())
+def build(name):
+    body_file, out_name, title, footer = GUIDES[name]
+    out = os.path.join(REPO, "docs", out_name)
+    body = open(os.path.join(HERE, body_file), encoding="utf-8").read()
+    body = body.replace("{COMMIT}", COMMIT).replace("{DATE}", DATE)
+    if "{GEOMETRY_SVG}" in body:
+        body = body.replace("{GEOMETRY_SVG}", geometry_svg())
+    page = os.path.join(HERE, f"_{name}.html")
+    html = (f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>'
+            f'<style>{CSS}</style></head><body>{body}</body></html>')
+    open(page, "w", encoding="utf-8").write(html)
 
-html = (f'<!doctype html><html><head><meta charset="utf-8"><title>BVR RL project guide</title>'
-        f'<style>{CSS}</style></head><body>{BODY}</body></html>')
-open(os.path.join(HERE, "guide.html"), "w", encoding="utf-8").write(html)
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(executable_path=os.environ.get("CHROMIUM") or None)
+        pg = b.new_page()
+        pg.goto("file://" + page)
+        pg.wait_for_timeout(800)
+        pg.evaluate("document.fonts.ready")
+        pg.pdf(path=out, format="A4", print_background=True,
+               margin={"top": "16mm", "bottom": "18mm", "left": "17mm", "right": "17mm"},
+               display_header_footer=True, header_template="<span></span>",
+               footer_template='<div style="width:100%;font-size:7.5pt;color:#7a7873;font-family:sans-serif;'
+                               'padding:0 17mm;display:flex;justify-content:space-between">'
+                               f'<span>BVR RL · {footer}</span>'
+                               '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>')
+        b.close()
+    os.remove(page)
+    print("built", out, "at", COMMIT)
 
-from playwright.sync_api import sync_playwright
-with sync_playwright() as p:
-    b = p.chromium.launch(executable_path=os.environ.get("CHROMIUM") or None)
-    pg = b.new_page()
-    pg.goto("file://" + os.path.join(HERE, "guide.html"))
-    pg.wait_for_timeout(800)
-    pg.evaluate("document.fonts.ready")
-    pg.pdf(path=OUT, format="A4", print_background=True,
-           margin={"top": "16mm", "bottom": "18mm", "left": "17mm", "right": "17mm"},
-           display_header_footer=True, header_template="<span></span>",
-           footer_template='<div style="width:100%;font-size:7.5pt;color:#7a7873;font-family:sans-serif;'
-                           'padding:0 17mm;display:flex;justify-content:space-between">'
-                           '<span>BVR RL · project guide</span>'
-                           '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>')
-    b.close()
-print("built", OUT, "at", COMMIT)
+
+if __name__ == "__main__":
+    import sys
+    for name in (sys.argv[1:] or list(GUIDES)):
+        build(name)

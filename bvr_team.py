@@ -158,6 +158,8 @@ class TeamBvrEnv:
             self._opponent = self._opponent_factory(self)
         else:
             self._opponent = BvrOpponent.create(self._opponent_type, rng=self._rng)
+        # 2v1 red keeps truth guidance, so it keeps the pre-SIM_REV 9 cranks.
+        self._opponent.legacy_crank = True
         # Scripted opponents read their start from the 1v1 key names.
         self._opponent.reset({**ic, "ac2_psi": ic["ac3_psi"], "ac2_alt": ic["ac3_alt"],
                               "ac2_spd": ic["ac3_spd"]})

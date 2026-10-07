@@ -777,6 +777,256 @@ def test_team_roles_far_target():
     print(f"  2v1 red opens on rear ........ OK  (first missile at it in {fired_at_far}/4)")
 
 
+def test_missile_loft():
+    """A missile with LOFT_ANGLE climbs before diving on the target and still hits;
+    without it (the default) it does not climb."""
+    import copy, math
+    from bvr_library import missile_config
+    from missile_sim import AIM120, MslPhase
+    base = missile_config("AIM-120")
+    assert base.LOFT_ANGLE == 0.0
+    loft = copy.copy(base); loft.LOFT_ANGLE, loft.LOFT_DIVE = math.radians(25), math.radians(5)
+    out = {}
+    for name, cfg in (("flat", base), ("loft", loft)):
+        m = AIM120(1, 2, np.array([0.0, 0.0, 9000.0]), np.array([0.0, 400.0, 0.0]), 12000.0, cfg=cfg)
+        tp, tv = np.array([0.0, 35000.0, 9000.0]), np.array([0.0, -250.0, 0.0])
+        top = 0.0
+        for _ in range(int(80 / 0.02)):
+            tp = tp + tv * 0.02
+            m.update_guidance({"valid": 1, "tgt_pos": tp, "tgt_vel": tv})
+            m.step(0.02, tp, tv)
+            top = max(top, m.pos[2])
+            if m.phase in (MslPhase.HIT, MslPhase.MISS):
+                break
+        out[name] = (m.phase, top - 9000.0, m.t_flight)
+    assert out["flat"][1] < 200.0, out
+    assert out["loft"][1] > 1500.0 and out["loft"][0] == MslPhase.HIT, out
+    print(f"  missile loft ................ OK  (climbs {out['loft'][1]:.0f} m, hits after "
+          f"{out['loft'][2]:.1f} s; without loft {out['flat'][1]:.0f} m)")
+
+
+def test_dcs_live_link():
+    """dcs_live.py flies a policy through the UDP link against dcs/fake_dcs.py."""
+    import os, sys, tempfile, threading
+    from types import SimpleNamespace
+    from gymnasium import spaces
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import dcs_live
+    from fake_dcs import FakeDcs
+    from bvr_env import BvrEnv, OBS_DIM, PRIV_DIM, HDG_OFFSETS_DEG
+
+    class Scripted:          # straight at the bandit, top speed, fire whenever allowed
+        observation_space = spaces.Dict({"obs": spaces.Box(-1, 1, (OBS_DIM,)),
+                                         "priv": spaces.Box(-1, 1, (PRIV_DIM,))})
+        def predict(self, obs, deterministic=True, action_masks=None):
+            return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 3, int(action_masks[-1])]), None
+
+    fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=250.0, lockstep=True)
+    res = {}
+    th = threading.Thread(target=lambda: res.setdefault("out", fake.run()), daemon=True)
+    link = dcs_live.UdpLink()
+    th.start()
+    with tempfile.TemporaryDirectory() as d:
+        args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=250,
+                               doctrine="AGGRESSIVE")
+        scen = {"platform": "F-16C", "opponent_platform": "F-16C"}
+        rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
+        row, _ = dcs_live.run_episode(link, Scripted(), args, scen, rec, agent, red, 1,
+                                      log=lambda m: None)
+        th.join(timeout=120)
+        files = sorted(os.listdir(d))
+    link.close(); fake.close()
+    fires = [c for c in fake.commands if c[5]]
+    assert len(fake.commands) >= 30, f"only {len(fake.commands)} commands reached the fake"
+    assert fires and row["shots"] >= 1, (row, fires)
+    assert row["outcome"] in ("KILL", "TIMEOUT", "MUTUAL_KILL"), row
+    assert row["outcome"] != "KILL" or res.get("out") == "KILL", (row, res)
+    assert any(f.endswith(".jsonl") for f in files) and "results.csv" in files, files
+    print(f"  DCS live link ............... OK  ({len(fake.commands)} commands, "
+          f"{row['shots']} shots, {row['outcome']})")
+
+
+def test_dcs_support_rule():
+    """dcs_live.py removes the policy's missile 3 s after its guidance stops
+    (before the seeker takes over), and leaves a live opponent's missiles alone."""
+    import os, sys, tempfile, threading
+    from types import SimpleNamespace
+    from gymnasium import spaces
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import dcs_live
+    from fake_dcs import FakeDcs
+    from bvr_env import BvrEnv, OBS_DIM, PRIV_DIM, HDG_OFFSETS_DEG
+
+    class Scripted:          # straight at the bandit, fire whenever allowed
+        observation_space = spaces.Dict({"obs": spaces.Box(-1, 1, (OBS_DIM,)),
+                                         "priv": spaces.Box(-1, 1, (PRIV_DIM,))})
+        def predict(self, obs, deterministic=True, action_masks=None):
+            return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 3, int(action_masks[-1])]), None
+
+    orig = BvrEnv._guidance_packet
+    cut = {}
+    def no_guidance_after_first_shot(self):
+        if self._shots_fired >= 1:
+            cut.setdefault("t", self._t_sim)
+            return {"valid": 0}
+        return orig(self)
+    dcs_live.DcsLiveEnv._guidance_packet = no_guidance_after_first_shot
+    fake = FakeDcs(opponent="SHOOTER", seed=2, speed=8.0, max_time=250.0, lockstep=True)
+    th = threading.Thread(target=fake.run, daemon=True)
+    link = dcs_live.UdpLink()
+    th.start()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=250,
+                                   doctrine="AGGRESSIVE", support_rule="training")
+            rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
+            row, _ = dcs_live.run_episode(link, Scripted(), args,
+                                          {"platform": "F-16C", "opponent_platform": "F-16C"},
+                                          rec, agent, red, 1, log=lambda m: None)
+    finally:
+        del dcs_live.DcsLiveEnv._guidance_packet
+        th.join(timeout=120)
+        link.close(); fake.close()
+    assert fake.destroyed, ("no missile removed", row)
+    assert all(owner == 1 for _, owner in fake.destroyed), fake.destroyed
+    assert row["missiles_removed"] >= 1 and row["support_losses"] >= 1, row
+    print(f"  DCS support rule ............ OK  ({len(fake.destroyed)} of the policy's missiles "
+          f"removed, guidance cut at {cut.get('t', 0):.0f} s; {row['outcome']})")
+
+
+def test_dcs_red_support():
+    """dcs_live.py (training rule): a red that fires and turns away loses its own
+    radar track, and its missile is removed before its seeker takes over; with
+    --support-rule dcs, or a red that keeps its radar on, nothing is removed."""
+    import json, os, sys, tempfile
+    import bvr_env as E
+    import bvr_opponents as O
+    import dcs_live
+    from bvr_opponents import BvrOpponentType as T
+    from dcs_world import write_sim_recording
+
+    class FireAndRun(O.ShooterOpponent):   # fires once, then turns cold for good
+        def act(self, state, t_sim):
+            cmd = super().act(state, t_sim)
+            if self._phase == "COMMIT":
+                return cmd
+            if not hasattr(self, "_cold"):     # the firing frame: remember the way out
+                self._cold = (cmd["hdgCmd"] + math.pi) % (2 * math.pi)
+                return cmd
+            return dict(cmd, hdgCmd=self._cold, fire=0)
+
+    from bvr_env import HDG_OFFSETS_DEG
+    from sim_world import _enu_to_latlon
+    hot = [list(HDG_OFFSETS_DEG).index(0), 2, 1, 0]   # straight at red, never firing
+
+    def head_on(env):                       # 70 km head-on at 9 km: red fires within ~10 s
+        ic = env.__class__._random_ic(env)
+        lat1, lon1, _ = _enu_to_latlon(0.0, 0.0, 9000.0)
+        lat2, lon2, _ = _enu_to_latlon(0.0, 70_000.0, 9000.0)
+        ic.update(ac1_lat=lat1, ac1_lon=lon1, ac1_alt=9000.0, ac1_psi=0.0, ac1_spd=280.0,
+                  ac2_lat=lat2, ac2_lon=lon2, ac2_alt=9000.0, ac2_psi=math.pi, ac2_spd=280.0,
+                  start_range=70_000.0, scenario="head_on", mirrored=False)
+        return ic
+
+    def recording(path, run_away):
+        E.BvrEnv.OPPONENT_RADAR = False        # the source fight: truth-guided red
+        try:
+            sim = E.BvrEnv(opponent_type=T.SHOOTER, seed=5, doctrine="AGGRESSIVE",
+                           platform="F-16C-DCS", opponent_platform="F-16C-DCS")
+            sim.MAX_STEPS = 60
+            sim._random_ic = lambda blue_top_speed=None: head_on(sim)
+            if run_away:
+                sim._opponent_factory = lambda env: FireAndRun(rng=env._rng)
+            write_sim_recording(sim, lambda e: hot, path)
+        finally:
+            E.BvrEnv.OPPONENT_RADAR = True
+        return [json.loads(l) for l in open(path)]
+
+    class FakeLink:
+        def __init__(self, objs):
+            self.objs = sorted(objs, key=lambda d: d.get("t", -1) if "format" not in d else -1)
+            self.i, self.sink, self.sent = 0, None, []
+        def poll(self, timeout=0.2):
+            out = self.objs[self.i:self.i + 4]; self.i += 4; return out
+        def send(self, text): self.sent.append(text)
+
+    def destroyed(lines, rule):
+        link = FakeLink(lines)
+        rec, a, r = dcs_live.wait_for_fight(link, log=lambda m: None)
+        env = dcs_live.DcsLiveEnv(lambda bp, rp: dcs_live.DcsLiveWorld(
+            link, rec, a, r, bp, rp, log=lambda m: None, support_rule=rule),
+            "F-16C-DCS", "F-16C-DCS")
+        env.reset()
+        while link.i < len(link.objs) - 4:
+            _, _, te, tr, _ = env.step(hot)
+            if te or tr:
+                break
+        red_ids = {d["id"] for d in lines if d.get("ev") == "shot" and d["shooter"] == "RED-1"}
+        gone = {int(t.split()[1]) for t in link.sent if t.startswith("DESTROY")}
+        return red_ids, gone
+
+    with tempfile.TemporaryDirectory() as d:
+        run = recording(os.path.join(d, "run.jsonl"), run_away=True)
+        crank = recording(os.path.join(d, "crank.jsonl"), run_away=False)
+    red_ids, gone = destroyed(run, "training")
+    assert red_ids and red_ids <= gone, (red_ids, gone)
+    assert not destroyed(run, "dcs")[1]
+    red_ids2, gone2 = destroyed(crank, "training")
+    assert red_ids2 and not (red_ids2 & gone2), (red_ids2, gone2)
+    print(f"  DCS red support ............. OK  (fire and turn away: {len(red_ids)} red missile(s) "
+          f"removed; cranking: none)")
+
+
+def test_adaptive_defence():
+    """ADAPTIVE draws its defence per episode (half shallow, a quarter each deep
+    beam and deep cold); 2v1 keeps the shallow one; a deep defence dives to its
+    floor, beaming or turning away."""
+    import collections
+    from bvr_opponents import AdaptiveShooterOpponent, ShooterOpponent
+    ic = {"ac2_psi": math.pi, "ac2_alt": 9000.0, "ac2_spd": 280.0, "ac1_psi": 0.0}
+    o = AdaptiveShooterOpponent(rng=np.random.default_rng(3))
+    counts = collections.Counter()
+    for _ in range(400):
+        o.reset(ic)
+        counts[o.DEFENCE] += 1
+        assert 1000.0 <= o.DIVE_FLOOR <= 2500.0
+    assert 160 <= counts["shallow"] <= 240 and counts["deep_beam"] >= 70 and counts["deep_cold"] >= 70, counts
+    two = AdaptiveShooterOpponent(rng=np.random.default_rng(3)); two.legacy_crank = True
+    for _ in range(50):
+        two.reset(ic)
+        assert two.DEFENCE == "shallow"
+    assert ShooterOpponent.DEFENCE == "shallow"
+    state = {"range": 40_000.0, "aa_deg_t": 0.0, "psi_t": math.pi, "wpn_remaining_t": 4,
+             "missiles": [{"owner": 1, "state": "MIDCOURSE", "tgo_est": 30.0}]}
+    for style in ("deep_beam", "deep_cold"):
+        o.reset(ic); o.DEFENCE = style
+        cmd = o.act(state, 10.0)
+        assert cmd["altTarget"] == o.DIVE_FLOOR, cmd["altTarget"]
+        off = math.degrees(abs((cmd["hdgCmd"] - o._bearing_to_ac1(state) + math.pi) % (2 * math.pi) - math.pi))
+        assert abs(off - (90.0 if style == "deep_beam" else 180.0)) < 1.0, (style, off)
+    print(f"  ADAPTIVE defence ............ OK  ({counts['shallow']}/{counts['deep_beam']}/"
+          f"{counts['deep_cold']} shallow/beam/cold of 400)")
+
+
+def test_env_pickles():
+    """The envs pickle: older stable-baselines3 (before 2.x has_attr) sends
+    env.action_masks, and with it the whole env, from each worker process."""
+    import pickle
+    import bvr_env as E
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    for plat in ("F-16C", "F-16C-DCS"):
+        env = E.BvrEnv(opponent_type=T.SHOOTER, seed=1, platform=plat, opponent_platform=plat)
+        env.reset()
+        for _ in range(5):
+            env.step(env.action_space.sample())
+        pickle.loads(pickle.dumps(env.action_masks))
+    team = TeamBvrEnv(opponent_type=T.SHOOTER, seed=1)
+    team.reset()
+    pickle.loads(pickle.dumps(team))
+    print("  envs pickle ................. OK")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -1064,6 +1314,10 @@ if __name__ == "__main__":
         ("2v1 red targeting",       test_team_red_targeting),
         ("2v1 red opens on rear",   test_team_roles_far_target),
         ("DCS round trip",          test_dcs_round_trip),
+        ("DCS live link",           test_dcs_live_link),
+        ("DCS support rule",        test_dcs_support_rule),
+        ("DCS red support",         test_dcs_red_support),
+        ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
@@ -1071,6 +1325,8 @@ if __name__ == "__main__":
         ("2v1 vec env",             test_team_vec_env),
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),
+        ("envs pickle",             test_env_pickles),
+        ("ADAPTIVE defence",        test_adaptive_defence),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

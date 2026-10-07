@@ -143,6 +143,13 @@ SCHEMA = {
         P("SUPPORT_TIMEOUT", "Datalink support timeout", "s", "Datalink", 0.5, 60,
           help="Before hand-off, a missile left without datalink updates this long misses."),
         P("MAX_FLIGHT", "Maximum flight time", "s", "Datalink", 5, 600),
+        P("LOFT_ANGLE", "Loft: climb angle", "deg", "Guidance", 0, 60, advanced=True, default=0.0,
+          help="A long shot first climbs at this angle into thinner air, before guiding on "
+               "the target. 0 (items saved before this parameter existed): no loft."),
+        P("LOFT_DIVE", "Loft: dive when the target is this far below", "deg", "Guidance", 0, 60,
+          advanced=True, default=0.0,
+          help="The climb ends, for good, when the target is this many degrees below the "
+               "missile, or within 5 km horizontally."),
     ],
     "radar": [
         P("MAX_RANGE", "Detection range", "m", "Detection", 1000, 400_000,
@@ -185,6 +192,7 @@ SCHEMA = {
 # Stored in degrees (or mrad), used in radians by the models.
 _TO_SI = {("airframe", "PHI_MAX"): DEG2RAD, ("airframe", "ROLL_MAX"): DEG2RAD,
           ("airframe", "GAMMA_MAX"): DEG2RAD, ("missile", "SEEKER_FOV"): DEG2RAD,
+          ("missile", "LOFT_ANGLE"): DEG2RAD, ("missile", "LOFT_DIVE"): DEG2RAD,
           ("radar", "FOV_AZ"): DEG2RAD, ("radar", "FOV_EL"): DEG2RAD,
           ("platform", "CLIMB_FPA_LO"): 1.0, ("platform", "CLIMB_FPA_HI"): 1.0}
 _TO_SI_DIV = {("radar", "SIG_AZ_REF"): 1000.0, ("radar", "SIG_EL_REF"): 1000.0,
@@ -383,7 +391,7 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 8
+SIM_REV = 10
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -404,6 +412,16 @@ _SIM_REV_NOTES = {
     8: "half the episodes now start mirrored: the opponent gets the start the "
        "agent always had (nose on while the other is offset, beaming or running), "
        "so the agent also practises the worse start; expect a lower win rate",
+    9: "scripted shooters fight under the agent's rules: their missiles are guided "
+       "on their own radar track (not the agent's true position), so the 3-second "
+       "support rule binds them too, and they fire only when the agent's fire mask "
+       "would allow it from their side; they crank at most 45 deg (SHOOTER 45, was "
+       "50; ADAPTIVE 30-45, was 35-70) so they keep their own track. 1v1 only: "
+       "2v1 red is unchanged",
+    10: "ADAPTIVE defends deep in half its episodes: against an inbound missile it "
+        "dives to 1-2.5 km, beaming (as the DCS AI does) or turning away, instead "
+        "of beaming and descending 1.5 km (4 km in the last 12 s). SHOOTER and "
+        "2v1 red are unchanged",
 }
 
 
@@ -435,25 +453,39 @@ class _Cfg:
             setattr(self, p.key, v)
 
 
+# Curves are small classes, not closures, so an env (which holds them) can be
+# pickled: older stable-baselines3 sends env attributes between processes.
+class _InterpCurve:
+    def __init__(self, table):
+        t = np.asarray(table, dtype=float)
+        self.xs, self.ys = t[:, 0].copy(), t[:, 1].copy()
+
+    def __call__(self, m):
+        return float(np.interp(float(m), self.xs, self.ys))
+
+
+class _CdRise:
+    def __init__(self, m0, m1, m2, peak, decay):
+        self.m0, self.m1, self.m2, self.peak, self.decay = m0, m1, m2, peak, decay
+
+    def __call__(self, mach):
+        m0, m1, m2, peak, decay = self.m0, self.m1, self.m2, self.peak, self.decay
+        if mach < m0: return 0.0
+        if mach < m1: return peak * math.sin(0.5 * math.pi * (mach - m0) / (m1 - m0))
+        if mach < m2: return peak * math.exp(-decay * (mach - m1))
+        return peak * math.exp(-decay * (m2 - m1))          # supersonic wave drag
+
+
 def _interp_curve(table):
-    t = np.asarray(table, dtype=float)
-    xs, ys = t[:, 0].copy(), t[:, 1].copy()
-    return lambda m: float(np.interp(float(m), xs, ys))
+    return _InterpCurve(table)
 
 
 def airframe_config(item_id: str) -> _Cfg:
     it = get_item("airframe", item_id)
     c = _Cfg("airframe", it)
     c.thrust_mach_factor = _interp_curve(c.THRUST_MACH_TABLE)
-    m0, m1, m2 = c.DRAG_RISE_M0, c.DRAG_RISE_M1, c.DRAG_RISE_M2
-    peak, decay = c.DRAG_RISE_PEAK, c.DRAG_RISE_DECAY
-
-    def cd_rise(mach):
-        if mach < m0: return 0.0
-        if mach < m1: return peak * math.sin(0.5 * math.pi * (mach - m0) / (m1 - m0))
-        if mach < m2: return peak * math.exp(-decay * (mach - m1))
-        return peak * math.exp(-decay * (m2 - m1))          # supersonic wave drag
-    c.cd_rise = cd_rise
+    c.cd_rise = _CdRise(c.DRAG_RISE_M0, c.DRAG_RISE_M1, c.DRAG_RISE_M2,
+                        c.DRAG_RISE_PEAK, c.DRAG_RISE_DECAY)
     return c
 
 

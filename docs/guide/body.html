@@ -454,10 +454,12 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="k">STRAIGHT</td><td>no</td><td>Flies straight at constant speed and altitude.</td><td>Find, track and shoot.</td></tr>
 <tr><td class="k">EVASIVE</td><td>no</td><td>Slow S-turns (±35–70°, every 25–45 s) and altitude changes.</td><td>Keep the radar on a changing target.</td></tr>
 <tr><td class="k">NOTCHER</td><td>no</td><td>When spiked or within 90 km, turns 90° to the agent (beaming) and descends 2 km, switching sides every 12–25 s.</td><td>That a track isn't permanent; how to close on a beaming target.</td></tr>
-<tr><td class="k">SHOOTER</td><td>yes</td><td>Commits; fires at 80% of its R<sub>max</sub>; cranks 50° while its missile needs guidance; turns cold and runs once it doesn't; re-attacks beyond 60 km; defends (beam and dive) against inbound missiles.</td><td>Fight an armed enemy: shoot, support, defend.</td></tr>
-<tr><td class="k">ADAPTIVE</td><td>yes</td><td>SHOOTER with random settings each episode: shot at 60–95% of R<sub>max</sub>, crank 35–70°, re-attack 30–55 km, 8–20 s between shots.</td><td>Not to overfit one opponent's habits.</td></tr>
+<tr><td class="k">SHOOTER</td><td>yes</td><td>Commits; fires at 80% of its R<sub>max</sub>; cranks 45° while its missile needs guidance; turns cold and runs once it doesn't; re-attacks beyond 60 km; defends (beam and dive) against inbound missiles.</td><td>Fight an armed enemy: shoot, support, defend.</td></tr>
+<tr><td class="k">ADAPTIVE</td><td>yes</td><td>SHOOTER with random settings each episode: shot at 60–95% of R<sub>max</sub>, crank 30–45°, re-attack 30–55 km, 8–20 s between shots. Against an inbound missile, half its episodes it dives to 1–2.5 km instead of descending 1.5 km: beaming (as the DCS AI does) or turning away.</td><td>Not to overfit one opponent's habits.</td></tr>
 <tr><td class="k">SELF-PLAY</td><td>yes</td><td>Frozen copies of the agent itself (chapter 13).</td><td>Beat an opponent as good as itself.</td></tr>
 </table>
+<p>In 1v1, SHOOTER and ADAPTIVE fly under the agent's rules (since SIM_REV 9): each runs its own copy of the radar model, aims its missiles at its own track and fires only when the agent would be allowed to. A red that turns too far off loses its track, and its missile misses after 3 s without support, as the agent's would. Before, red's missiles were guided by the true position, so red could crank wider and still hit. The 2v1 opponents are unchanged.</p>
+<p>The deep dives (SIM_REV 10) matter because of the missile's energy: after its motor burns out it coasts, and the thick low air drains it. Against a level AIM-120C-DCS shot from 9 km, a red that turns away and dives escaped shots from 29 km that hit every beaming target. No ground clutter is modelled, so diving doesn't hide a target from the radar.</p>
 
 <h2>When does it advance?</h2>
 <p>The curriculum moves on when <b>all three</b> hold:</p>

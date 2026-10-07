@@ -1,0 +1,559 @@
+<!-- ═══════════════════════ COVER ═══════════════════════ -->
+<div class="cover">
+  <div>
+    <div class="t">BVR RL<br>in DCS World</div>
+    <div class="s">A step-by-step guide: from a computer without DCS to a trained 1v1 policy flying an F-16C against the DCS AI.</div>
+  </div>
+  <div class="m">BVR_RL · branch feature/dcs-1v1 @ {COMMIT} · {DATE}<br>
+  The live link described here has been tested against a stand-in for DCS (our own simulator speaking the same protocol, and a mock of DCS's scripting interface). It has not yet been run inside DCS itself.</div>
+</div>
+
+<!-- ═══════════════════════ CONTENTS ═══════════════════════ -->
+<div class="chap first">
+<h1>Contents</h1>
+<ul class="toc">
+  <li class="ph">Part 1 · Before you start</li>
+  <li>1. What you will build<span class="pg">4</span></li>
+  <li>2. What you need, and the seven steps<span class="pg">5</span></li>
+  <li class="ph">Part 2 · Step by step</li>
+  <li>3. Step 1 · Install DCS World<span class="pg">7</span></li>
+  <li>4. Step 2 · Get the code and test without DCS<span class="pg">7</span></li>
+  <li>5. Step 3 · Let DCS missions talk to Python<span class="pg">8</span></li>
+  <li>6. Step 4 · Make the mission<span class="pg">9</span></li>
+  <li>7. Step 5 · Shadow run: the policy only watches<span class="pg">10</span></li>
+  <li>8. Step 6 · Let the policy fly<span class="pg">11</span></li>
+  <li>9. Step 7 · Read the results<span class="pg">12</span></li>
+  <li>10. Fly against the policy yourself (free)<span class="pg">13</span></li>
+  <li class="ph">Part 3 · When things go wrong, and reference</li>
+  <li>11. Troubleshooting<span class="pg">16</span></li>
+  <li>12. How DCS differs from training<span class="pg">16</span></li>
+  <li>13. What the bridge does to the DCS AI<span class="pg">17</span></li>
+  <li>14. Commands and options<span class="pg">18</span></li>
+  <li>15. Protocol and files<span class="pg">19</span></li>
+  <li>16. Undoing everything<span class="pg">20</span></li>
+</ul>
+
+<div class="box"><h4>How to use this guide</h4>
+<ul>
+<li>Do Part 2 in order. Each step ends with a green <b>Done when</b> box: don't go on until you see what it describes.</li>
+<li>Each instruction is marked with where you do it: <span class="where dcs">DCS</span> in DCS World, <span class="where py">TERMINAL</span> in a normal terminal in the BVR_RL folder, <span class="where admin">ADMIN TERMINAL</span> in a terminal opened with <i>Run as administrator</i>.</li>
+<li>Commands are shown in grey boxes; what the computer answers is shown in lighter boxes below them. Numbers in the answers are examples: yours will differ.</li>
+<li>If something fails, Part 3 lists the symptoms seen so far and what to do.</li>
+</ul></div>
+</div>
+
+<!-- ═══════════════════════ PART 1 ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART 1</div>
+  <div class="pt">Before you start</div>
+  <div class="pd">What the pieces are, how they talk to each other, and what you need on your computer.</div>
+</div>
+
+<div class="chap first">
+<h1>1 · What you will build</h1>
+<p>Your policy was trained in BVR_RL's own simulator. Here it flies in DCS World instead: DCS flies the aircraft and the missiles, and the policy decides, once a second, where to point the aircraft and when to shoot.</p>
+
+<figure>
+<svg width="640" height="262" viewBox="0 0 640 262" style="display:block;font-family:IBM Plex Sans,sans-serif">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0b0b0b"/></marker></defs>
+  <rect x="4" y="18" width="250" height="214" fill="#e8f0fb" stroke="#1f5fae" stroke-width="1.5"/>
+  <text x="16" y="40" font-size="12.5" font-weight="600" fill="#1f5fae">DCS World</text>
+  <text x="16" y="62" font-size="10.5" font-weight="600">Mission bvr_rl_1v1.miz</text>
+  <text x="16" y="82" font-size="10">BLUE-1  F-16C, DCS AI airframe</text>
+  <text x="16" y="98" font-size="10">            flown on the policy's commands</text>
+  <text x="16" y="118" font-size="10">RED-1   F-16C, the DCS AI opponent</text>
+  <rect x="14" y="134" width="230" height="86" fill="#fff" stroke="#1f5fae"/>
+  <text x="24" y="153" font-size="10.5" font-weight="600">bvr_bridge.lua  (mission script)</text>
+  <text x="24" y="171" font-size="9.6">sends the state of the fight, 10 / s</text>
+  <text x="24" y="187" font-size="9.6">turns commands into a route for BLUE-1</text>
+  <text x="24" y="203" font-size="9.6">lets the AI shoot when the policy fires</text>
+
+  <rect x="386" y="18" width="250" height="214" fill="#eaf6ef" stroke="#1b7f55" stroke-width="1.5"/>
+  <text x="398" y="40" font-size="12.5" font-weight="600" fill="#1b7f55">Python (dcs_live.py)</text>
+  <text x="398" y="64" font-size="10">BVR_RL radar + track model</text>
+  <text x="398" y="80" font-size="10">   on DCS's true positions</text>
+  <text x="398" y="100" font-size="10">observation, built as in training</text>
+  <text x="398" y="120" font-size="10">your policy (.zip) chooses an action</text>
+  <text x="398" y="140" font-size="10">action -> heading, altitude, speed, fire</text>
+  <text x="398" y="164" font-size="10">records everything to dcs_runs\</text>
+
+  <line x1="258" y1="92" x2="380" y2="92" stroke="#0b0b0b" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="319" y="80" font-size="9.6" text-anchor="middle" font-weight="600">state, 10 times a second</text>
+  <text x="319" y="108" font-size="9" text-anchor="middle" fill="#52514e">UDP port 15301</text>
+  <line x1="382" y1="168" x2="262" y2="168" stroke="#0b0b0b" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="321" y="156" font-size="9.6" text-anchor="middle" font-weight="600">command, once a second</text>
+  <text x="321" y="184" font-size="9" text-anchor="middle" fill="#52514e">UDP port 15302</text>
+  <text x="320" y="254" font-size="9.4" text-anchor="middle" fill="#52514e">both on this computer (address 127.0.0.1)</text>
+</svg>
+<figcaption>The two halves and what goes between them. Nothing leaves your computer.</figcaption>
+</figure>
+
+<h2>One second of a fight</h2>
+<ol class="steps">
+<li><b>DCS reports.</b> Ten times a second the bridge sends where every aircraft and air-to-air missile is, which way it points and how fast it moves, plus events: shots, hits, deaths, missiles left.</li>
+<li><b>Python builds what the policy sees.</b> BVR_RL's own radar and track model runs on those true positions, exactly as in training, and the 68 observation inputs are built from the track. DCS's radar is not used.</li>
+<li><b>The policy chooses.</b> A heading offset from the line to the bandit, an altitude change, one of four speeds, and fire or not: the same action as in training.</li>
+<li><b>Python sends a command.</b> The action becomes an absolute heading, altitude and speed, and a fire flag.</li>
+<li><b>DCS flies it.</b> The bridge gives BLUE-1's AI a route along the commanded heading, at the commanded altitude and speed. On "fire" it lets the AI launch one AIM-120 at RED-1, then takes control back.</li>
+</ol>
+
+<h2>The files</h2>
+<table>
+<tr><th>File</th><th>What it does</th></tr>
+<tr><td class="k"><code>dcs/bvr_bridge.lua</code></td><td>The mission script. Packed into the mission; you never run it yourself.</td></tr>
+<tr><td class="k"><code>dcs/setup_dcs.py</code></td><td>One-time patch that lets mission scripts use a network socket (Step 3).</td></tr>
+<tr><td class="k"><code>dcs/make_mission.py</code></td><td>Builds the mission file <code>bvr_rl_1v1.miz</code> (Step 4).</td></tr>
+<tr><td class="k"><code>dcs_live.py</code></td><td>Runs your policy against DCS, or only watches with <code>--shadow</code> (Steps 5 and 6).</td></tr>
+<tr><td class="k"><code>dcs/fake_dcs.py</code></td><td>Pretends to be DCS, using BVR_RL's simulator, to test without DCS (Step 2).</td></tr>
+<tr><td class="k"><code>dcs_obs_check.py</code></td><td>Compares the inputs the policy got in DCS with the ones it got in training (Step 7).</td></tr>
+<tr><td class="k"><code>dcs/README.md</code></td><td>The same instructions in short form.</td></tr>
+</table>
+</div>
+
+<div class="chap first">
+<h1>2 · What you need, and the seven steps</h1>
+<h2>Checklist</h2>
+<table>
+<tr><th>You need</th><th>Notes</th></tr>
+<tr><td class="k">A Windows 10 or 11 PC</td><td>DCS World runs on Windows only. Python and DCS run on the same computer.</td></tr>
+<tr><td class="k">Disk space on an SSD</td><td>DCS is a large download, well over 100 GB with the free maps. Check the current requirements on the DCS website before you start.</td></tr>
+<tr><td class="k">Memory and graphics</td><td>In practice 16 GB of RAM is the minimum and 32 GB is better; a dedicated graphics card.</td></tr>
+<tr><td class="k">The Python environment you train in</td><td>The one that runs <code>train_bvr.py</code> and the GUI. One more package, <code>pydcs</code>, is added in Step 2.</td></tr>
+<tr><td class="k">A trained <b>1v1</b> checkpoint</td><td>Any <code>.zip</code> from <code>models_bvr\</code> trained in 1v1, ideally as the F-16C against the F-16C (the platforms the mission uses). 2v1 checkpoints are refused.</td></tr>
+<tr><td class="k">Administrator rights</td><td>Once, for Step 3: DCS is installed under <code>C:\Program Files</code>.</td></tr>
+<tr><td class="k">Nothing to buy</td><td>Both aircraft are DCS AI units, which are free for every type. A paid module is only needed to fly the red aircraft yourself.</td></tr>
+</table>
+
+<h2>The seven steps</h2>
+<div class="chev"><span>1 Install</span><i>›</i><span>2 Test</span><i>›</i><span>3 Patch</span><i>›</i><span>4 Mission</span><i>›</i><span>5 Shadow</span><i>›</i><span>6 Fly</span><i>›</i><span>7 Results</span></div>
+<table>
+<tr><th>Step</th><th>What you do</th><th>Why</th></tr>
+<tr><td class="k">1</td><td>Install DCS World and fly a free mission once.</td><td>DCS itself works.</td></tr>
+<tr><td class="k">2</td><td>Get the <code>feature/dcs-1v1</code> branch; fly your policy against the fake DCS.</td><td>The Python half and the network link work, before DCS is involved.</td></tr>
+<tr><td class="k">3</td><td>Run <code>setup_dcs.py</code> as administrator.</td><td>DCS lets mission scripts talk to Python.</td></tr>
+<tr><td class="k">4</td><td>Run <code>make_mission.py</code>, copy the mission.</td><td>A 1v1 mission with the bridge inside.</td></tr>
+<tr><td class="k">5</td><td>Start <code>dcs_live.py --shadow</code>, then the mission.</td><td>The link works with DCS; you see how the policy reads a DCS fight, without it flying.</td></tr>
+<tr><td class="k">6</td><td>Start <code>dcs_live.py</code>, then the mission.</td><td>The policy flies BLUE-1.</td></tr>
+<tr><td class="k">7</td><td>Read <code>dcs_runs\</code>; run <code>dcs_obs_check.py</code>.</td><td>Outcomes, and where DCS differs from training.</td></tr>
+</table>
+
+<div class="tip"><h4>Why the order matters</h4>
+Each step adds one new thing. If Step 2 works and Step 5 doesn't, the problem is on the DCS side (the patch, the mission, the bridge), not in Python. If Step 5 works and Step 6 doesn't, it is in how the bridge steers or fires, not in the link.</div>
+</div>
+
+<!-- ═══════════════════════ PART 2 ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART 2</div>
+  <div class="pt">Step by step</div>
+  <div class="pd">From installing DCS to reading the results of a policy flying in it.</div>
+</div>
+
+<div class="chap first">
+<h1>3 · Step 1 · Install DCS World</h1>
+<ol class="steps">
+<li><span class="where dcs">WEB</span> Go to <b>digitalcombatsimulator.com</b> and make an account (<i>Sign up</i>, top right). Confirm it from the e-mail they send.</li>
+<li><span class="where dcs">WEB</span> On the same site open <i>Downloads → DCS World</i> and download the installer (the "standalone" version).<br>
+<span class="small">DCS is also on Steam as <i>DCS World Steam Edition</i>. Either works; this guide uses the standalone folders. With Steam, DCS is under <code>…\steamapps\common\DCSWorld</code>, and <code>setup_dcs.py</code> looks there too.</span></li>
+<li>Run the installer. Keep the default folder, <code>C:\Program Files\Eagle Dynamics\DCS World</code>, unless that disk lacks space; an SSD makes a large difference. The installer downloads the game, which can take hours.</li>
+<li><span class="where dcs">DCS</span> Start DCS from the desktop icon and log in with your account. The first start is slow while it prepares its graphics.</li>
+<li><span class="where dcs">DCS</span> Fly once to be sure it works: <i>Instant Action</i> → a free aircraft (Su-25T or TF-51D) → any mission → <i>Fly</i>. Press <span class="kbd">Esc</span> → <i>Quit</i> to leave.</li>
+</ol>
+
+<div class="box"><h4>What is free, and why it is enough</h4>
+The free game includes the Caucasus map and two aircraft you can fly yourself (Su-25T, TF-51D). What matters here: <b>every aircraft type can be placed in a mission as an AI unit without buying it</b>, including the F-16C. The policy's aircraft and its opponent are both AI units: the policy steers its aircraft through the AI. Buy a module (such as the F-16C) only if you want to fly a fair fight against the policy yourself; Chapter 10 shows how to fly against it for free, as a defender in the Su-25T.</div>
+
+<div class="done"><b>Done when</b> DCS starts, you are logged in, and an Instant Action mission flies.</div>
+</div>
+
+<div class="chap">
+<h1>4 · Step 2 · Get the code and test without DCS</h1>
+<p>Before DCS is involved, check the Python half: <code>fake_dcs.py</code> pretends to be DCS (using BVR_RL's own simulator, speaking exactly the bridge's protocol) and <code>dcs_live.py</code> flies your policy against it.</p>
+<ol class="steps">
+<li><span class="where py">TERMINAL</span> Open a terminal in the BVR_RL folder, with your training environment active, and get the branch:
+<pre>git fetch
+git checkout feature/dcs-1v1
+pip install pydcs</pre></li>
+<li><span class="where py">TERMINAL</span> Start the policy. Use any 1v1 checkpoint you have:
+<pre>python dcs_live.py models_bvr\latest.zip</pre>
+<pre class="out">policy: models_bvr\latest.zip (F-16C v F-16C), BALANCED doctrine
+listening for DCS on UDP 15301, commands to 15302
+waiting for DCS (start the mission that runs bvr_bridge.lua) ...</pre></li>
+<li><span class="where py">TERMINAL 2</span> Open a second terminal in the same folder and start the fake DCS:
+<pre>python dcs\fake_dcs.py --speed 4</pre>
+<span class="small"><code>--speed 4</code> flies four seconds of fight per real second.</span></li>
+<li>Watch the first terminal. Every 10 seconds it prints the range, the track state and the policy's choices, <code>FIRE</code> where it shoots, and the outcome at the end:
+<pre class="out">episode 1: BLUE-1 v RED-1, start range 91.6 km
+  t=   10s  range  87.3 km  track TRACK  heading  +30  alt    +0  speed 340
+  t=   41s  range  38.0 km  track TRACK  heading  +30  alt    +0  speed 340  FIRE
+episode 1: KILL after 88 s, 1 shots (0 fire requests not answered by a launch)
+  written: dcs_runs\live_20261002_181500_ep1.jsonl, _steps.csv
+results: KILL 1</pre></li>
+</ol>
+<p>If Windows asks whether Python may use the network, allow it on <i>private networks</i>. Everything stays on this computer (address 127.0.0.1).</p>
+<div class="done"><b>Done when</b> the first terminal shows an episode from start to outcome, and <code>dcs_runs\</code> holds a <code>.jsonl</code>, a <code>_steps.csv</code> and <code>results.csv</code>. From here on, anything that fails is on the DCS side.</div>
+</div>
+
+<div class="chap">
+<h1>5 · Step 3 · Let DCS missions talk to Python</h1>
+<p>DCS takes networking and file access away from mission scripts, for safety. The bridge needs one thing back: <b>LuaSocket</b>, a small network library that ships with DCS. <code>setup_dcs.py</code> adds a few lines to DCS's file <code>Scripts\MissionScripting.lua</code> that load LuaSocket before DCS locks the scripts down, and keep it under one name, <code>bvr_rl_socket</code>. Everything else (files, the operating system, loading other code) stays locked.</p>
+<ol class="steps">
+<li><span class="where dcs">DCS</span> Close DCS completely.</li>
+<li><span class="where admin">ADMIN TERMINAL</span> Open a terminal as administrator: Start menu, type <code>cmd</code>, right-click <i>Command Prompt</i> → <i>Run as administrator</i>. Activate your Python environment in it if you use one, and go to the BVR_RL folder (<code>cd C:\…\BVR_RL</code>).</li>
+<li><span class="where admin">ADMIN TERMINAL</span> Run:
+<pre>python dcs\setup_dcs.py</pre>
+<pre class="out">DCS World: C:\Program Files\Eagle Dynamics\DCS World
+LuaSocket: found
+MissionScripting.lua: not patched
+backup: C:\Program Files\Eagle Dynamics\DCS World\Scripts\MissionScripting.lua.bvr_rl_backup
+patched. Restart DCS if it is running. Run this again after every DCS update.</pre></li>
+</ol>
+<table>
+<tr><th>If you see</th><th>Do</th></tr>
+<tr><td class="k">DCS World not found</td><td>Give the folder: <code>python dcs\setup_dcs.py --dcs "D:\Games\DCS World"</code> (the folder that holds <code>bin</code> and <code>Scripts</code>).</td></tr>
+<tr><td class="k">permission denied</td><td>The terminal is not running as administrator. Open it again as in item 2.</td></tr>
+<tr><td class="k">LuaSocket: NOT FOUND</td><td>Patch anyway; if Step 5 then reports that LuaSocket is missing, tell me the DCS version and what is in the DCS folder.</td></tr>
+<tr><td class="k">already patched</td><td>Nothing to do.</td></tr>
+</table>
+<div class="warn"><h4>Know what the patch allows</h4>
+<ul>
+<li>With the patch, <b>any</b> mission you open can make network connections, not only this one. Undo it when you stop using BVR_RL (<code>python dcs\setup_dcs.py --undo</code>, as administrator), and don't join multiplayer servers with it in place: some check this file and turn you away.</li>
+<li>Every DCS update puts the original file back. Run <code>setup_dcs.py</code> again after each update. <code>--check</code> tells you whether the patch is there, without changing anything.</li>
+</ul></div>
+<div class="done"><b>Done when</b> <code>python dcs\setup_dcs.py --check</code> reports <code>MissionScripting.lua: patched</code>.</div>
+</div>
+
+<div class="chap">
+<h1>6 · Step 4 · Make the mission</h1>
+<ol class="steps">
+<li><span class="where py">TERMINAL</span> Build the mission:
+<pre>python dcs\make_mission.py</pre>
+<pre class="out">written dcs\bvr_rl_1v1.miz: BLUE-1 (F-16C, policy) v RED-1 (F-16C, DCS AI), 90 km apart
+copy it to Saved Games\DCS\Missions\ (or open it from anywhere in DCS)</pre>
+<span class="small">pydcs may first print <i>Couldn't detect any installed DCS World version</i> many times. Ignore it: the mission is still written.</span></li>
+<li>Copy <code>dcs\bvr_rl_1v1.miz</code> into <code>C:\Users\&lt;you&gt;\Saved Games\DCS\Missions\</code>.</li>
+</ol>
+<h2>What is in the mission</h2>
+<ul>
+<li>The Caucasus map, over open sea west of Sukhumi, so there is no terrain in the fight.</li>
+<li><b>BLUE-1</b>: an F-16C (AI, skill Excellent) with four AIM-120C, as the training platform carries. The policy flies it. Without <code>dcs_live.py</code> it flies a combat air patrol and fights on its own.</li>
+<li><b>RED-1</b>: an F-16C (AI) with four AIM-120C, 90 km away, flying towards BLUE-1, 500 m higher. The bridge orders it to attack BLUE-1.</li>
+<li>A trigger that starts <code>bvr_bridge.lua</code> when the mission starts. The script is packed inside the <code>.miz</code>.</li>
+<li>No player aircraft: DCS opens the mission in the map and external views.</li>
+</ul>
+<h2>Variations</h2>
+<table>
+<tr><th>Option</th><th>Effect</th></tr>
+<tr><td class="k"><code>--range-km 70</code></td><td>Start separation (default 90; training starts are 70–110 km).</td></tr>
+<tr><td class="k"><code>--bearing 45</code></td><td>Direction from blue to red, degrees from map north (default 90).</td></tr>
+<tr><td class="k"><code>--alt-blue 8000 --alt-red 10000</code></td><td>Start altitudes in metres (defaults 9000 and 9500).</td></tr>
+<tr><td class="k"><code>--speed 250</code></td><td>Start speed, m/s (default 280).</td></tr>
+<tr><td class="k"><code>--red-type Su-27</code></td><td>Red's aircraft: F-16C, F-15C, Su-27, MiG-29S, FA-18C, Su-25T. Tell <code>dcs_live.py</code> with <code>--opp-platform</code> which library platform's missile envelopes to assume for it.</td></tr>
+<tr><td class="k"><code>--red-player</code></td><td>You fly RED-1 (needs that module).</td></tr>
+<tr><td class="k"><code>--defender</code></td><td>You fly RED-1 in the free Su-25T and defend (Chapter 10).</td></tr>
+<tr><td class="k"><code>--out my.miz</code></td><td>Another file name, to keep several missions.</td></tr>
+</table>
+<div class="box"><h4>Building it by hand instead</h4>
+In the Mission Editor (main menu → <i>Mission Editor</i> → <i>New</i>, map Caucasus): place an <b>F-16C bl.50</b> for blue (unit name <b>BLUE-1</b>, task CAP, 9000 m, four AIM-120C, a second waypoint towards red) and one for red (<b>RED-1</b>, 70–110 km away, flying towards blue). Then <i>Triggers</i>: new trigger of type <b>4 MISSION START</b>, action <b>DO SCRIPT FILE</b> → <code>dcs\bvr_bridge.lua</code>. Save into <code>Saved Games\DCS\Missions\</code>. The bridge flies the first blue airplane and fights the first red one.</div>
+<div class="done"><b>Done when</b> <code>bvr_rl_1v1.miz</code> is in <code>Saved Games\DCS\Missions\</code>.</div>
+</div>
+
+<div class="chap">
+<h1>7 · Step 5 · Shadow run: the policy only watches</h1>
+<p>In a shadow run nothing is sent to DCS. DCS's own AI flies BLUE-1 and fights; the policy sees everything and works out what it would do. This checks the link with real DCS data, and shows how the policy reads a DCS fight, with no effect on the fight.</p>
+<ol class="steps">
+<li><span class="where py">TERMINAL</span> Start the policy in shadow mode (a normal terminal, not administrator):
+<pre>python dcs_live.py models_bvr\latest.zip --shadow</pre>
+<pre class="out">waiting for DCS (start the mission that runs bvr_bridge.lua) ...</pre></li>
+<li><span class="where dcs">DCS</span> Start DCS. Main menu → <i>Mission</i> → choose <code>bvr_rl_1v1</code> → <i>Fly</i>. If the mission starts paused, press <span class="kbd">Pause</span>.</li>
+<li><span class="where dcs">DCS</span> At the top right of the screen the bridge says:
+<pre class="out">bvr_bridge: BLUE-1 v RED-1, sending to 127.0.0.1:15301, listening on 15302</pre>
+There is no player aircraft, so you see the map (<span class="kbd">F10</span>). <span class="kbd">F2</span> shows an external view of an aircraft; press it again for the next one.</li>
+<li><span class="where py">TERMINAL</span> The terminal starts the episode and prints it every 10 seconds: the range, the track, and the heading, altitude and speed the policy <i>would</i> choose, with <code>FIRE</code> where it would shoot.
+<pre class="out">episode 1: BLUE-1 v RED-1, start range 89.7 km  [shadow: the DCS AI flies, the policy only watches]
+  t=   10s  range  83.1 km  track TRACK  heading  +30  alt    +0  speed 340</pre></li>
+<li>When the episode ends the terminal prints the outcome and the files it wrote.</li>
+</ol>
+<div class="tip"><h4>What to look at</h4>
+<ul>
+<li>The <b>range</b> in the terminal should match the F10 map (the ruler tool measures it).</li>
+<li>The <b>track</b> should reach <code>TRACK</code> as the aircraft close, as in training.</li>
+<li>The policy's choices are what it would do in a fight DCS's AI is flying, so they may look odd: the aircraft is not where the policy would have put it.</li>
+</ul></div>
+<div class="done"><b>Done when</b> the terminal shows an episode with a track and an outcome, and <code>dcs_runs\</code> holds <code>live_…_shadow.jsonl</code>.</div>
+</div>
+
+<div class="chap">
+<h1>8 · Step 6 · Let the policy fly</h1>
+<ol class="steps">
+<li><span class="where py">TERMINAL</span> Start the policy without <code>--shadow</code>:
+<pre>python dcs_live.py models_bvr\latest.zip</pre></li>
+<li><span class="where dcs">DCS</span> Start the mission as in Step 5.</li>
+<li>From the first command the bridge flies BLUE-1:
+<ul>
+<li>the DCS AI's own reactions to threats are switched off and its weapons held, so the policy decides when to turn, defend and shoot;</li>
+<li>every second the policy's heading, altitude and speed become a route for the AI to fly;</li>
+<li>on <code>FIRE</code> the bridge lets the AI shoot one AIM-120 at RED-1, then takes control back;</li>
+<li>RED-1 is the DCS AI, ordered to attack BLUE-1.</li>
+</ul></li>
+<li><span class="where py">TERMINAL</span> The terminal shows the fight and its end:
+<pre class="out">  t=   52s  range  41.2 km  track TRACK  heading  +30  alt    +0  speed 340  FIRE
+  t=   60s  range  36.0 km  track TRACK  heading  +50  alt    +0  speed 340
+episode 1: KILL after 97 s, 1 shots (0 fire requests not answered by a launch)
+  written: dcs_runs\live_20261002_181500_ep1.jsonl, _steps.csv</pre></li>
+<li>When the episode ends (a kill, a loss, or the step limit) BLUE-1 is given back to the DCS AI, which carries on with its own mission.</li>
+</ol>
+
+<h2>Several episodes</h2>
+<p>Start with <code>--episodes 5</code>. After each episode restart the mission in DCS (<span class="kbd">Esc</span> → <i>Quit</i> → <i>FLY AGAIN</i> in the debriefing). <code>dcs_live.py</code> notices the restart and starts the next episode by itself. <span class="kbd">Ctrl</span>+<span class="kbd">C</span> in the terminal stops it at any time and hands BLUE-1 back to the AI.</p>
+
+<h2>Faster fights</h2>
+<p>DCS time acceleration works: <span class="kbd">Ctrl</span>+<span class="kbd">Z</span> faster, <span class="kbd">Alt</span>+<span class="kbd">Z</span> back to normal. Python handles about 8 seconds of fight per real second on an ordinary computer. If it falls behind it says so:</p>
+<pre class="out">  this computer is 2.4 s of mission time behind DCS: the policy's commands arrive late (lower DCS time acceleration)</pre>
+
+<h2>Useful options</h2>
+<table>
+<tr><th>Option</th><th>Use</th></tr>
+<tr><td class="k"><code>--max-steps 400</code></td><td>If you trained with 400-second episodes. The policy sees elapsed time as a share of this, so match training.</td></tr>
+<tr><td class="k"><code>--doctrine CONSERVATIVE</code></td><td>The shot doctrine the policy is told (AGGRESSIVE, BALANCED, CONSERVATIVE), as on the WATCH page.</td></tr>
+<tr><td class="k"><code>--opp-platform …</code></td><td>The library platform whose missile envelopes the policy assumes for red, when red is not an F-16C.</td></tr>
+</table>
+<div class="done"><b>Done when</b> an episode ends with an outcome and BLUE-1 visibly followed the policy (its turns in DCS match the heading choices in the terminal).</div>
+</div>
+
+<div class="chap">
+<h1>9 · Step 7 · Read the results</h1>
+<p>Everything is in <code>dcs_runs\</code>:</p>
+<table>
+<tr><th>File</th><th>Contents</th></tr>
+<tr><td class="k"><code>results.csv</code></td><td>One row per episode: live or shadow, the aircraft, outcome, flight time, start range, shots, fire requests, and requests that never became a launch.</td></tr>
+<tr><td class="k"><code>live_…_ep1.jsonl</code></td><td>Everything DCS sent during the episode, in <code>bvr_logger.lua</code>'s format. <code>dcs_obs_check.py</code> reads it.</td></tr>
+<tr><td class="k"><code>live_…_ep1_steps.csv</code></td><td>One row per second: the action (heading offset, altitude change, speed, fire), the command sent to DCS, the track state, the true range, and all policy inputs. Opens in Excel.</td></tr>
+</table>
+
+<h2>Checking the inputs</h2>
+<p>The most useful check: did the policy get inputs in DCS like the ones it trained on?</p>
+<pre>python dcs_obs_check.py dcs_runs\live_20261002_181500_ep1.jsonl --platform F-16C --opp-platform F-16C --max-steps 300</pre>
+<p>It replays the recording through the observation code, flies 20 simulator episodes for reference, and prints a table, one row per input, with the DCS and simulator ranges. It writes <code>report.txt</code>, <code>summary.csv</code> and <code>dcs_inputs.csv</code> to <code>dcs_check\</code>. Several recordings can be given at once.</p>
+<table>
+<tr><th>Flag</th><th>Means</th></tr>
+<tr><td class="k">OUTSIDE</td><td>More than 20% of the DCS steps fall outside the range the simulator produced: the policy has rarely or never seen those values.</td></tr>
+<tr><td class="k">CLIP</td><td>DCS pushes the input past its normalisation limit at least 5 percentage points more often than the simulator: the policy sees it pinned at the limit.</td></tr>
+</table>
+<p>Each flag is one of two things: a <b>bridge mistake</b> (a unit, sign or axis error), which should be fixed, or a <b>real difference</b> between DCS and the simulator (speeds, turn rates, missile ranges), to decide on: accept it, or retrain with the simulator moved closer to DCS.</p>
+<div class="box"><h4>What to send me after the first runs</h4>
+The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a shadow run and one from a live run, and <code>Saved Games\DCS\Logs\dcs.log</code> if anything went wrong. That is enough to find what needs adjusting.</div>
+</div>
+
+
+<div class="chap first">
+<h1>10 · Fly against the policy yourself (free)</h1>
+<p>You fly RED-1 in the <b>Su-25T</b>, which comes free with DCS. It is a ground-attack jet: no air-to-air radar, and only two short-range heat-seeking R-73s. You can't shoot back beyond visual range, so you <b>defend</b>. The question this answers: can the policy shoot down a human who knows a missile is coming and evades it?</p>
+<ol class="steps">
+<li><span class="where py">TERMINAL</span> Build the defender mission and copy it to <code>Saved Games\DCS\Missions\</code>:
+<pre>python dcs\make_mission.py --defender</pre>
+<pre class="out">written dcs\bvr_rl_defender.miz: BLUE-1 (F-16C, policy) v RED-1 (Su-25T, you), 90 km apart</pre>
+It puts you in RED-1 at 6000 m and 200 m/s (the Su-25T is slow: about 950 km/h at most), 90 km from BLUE-1, flying towards it. BLUE-1 is unchanged: an F-16C with four AIM-120Cs. The mission's briefing screen repeats the essentials.</li>
+<li><span class="where py">TERMINAL</span> Start the policy, for several fights:
+<pre>python dcs_live.py models_bvr\latest_selfplay_v6.zip --episodes 5</pre></li>
+<li><span class="where dcs">DCS</span> <i>Mission</i> → <code>bvr_rl_defender</code> → <i>Fly</i>. You start in the cockpit, in the air. Keep time acceleration at 1×.</li>
+<li>Survive. BLUE-1 will turn towards you and shoot from long range.</li>
+<li>After each fight: <span class="kbd">Esc</span> → <i>Quit</i> → <i>FLY AGAIN</i>. The terminal starts the next episode by itself.</li>
+</ol>
+
+<h2>Defending</h2>
+<ul>
+<li><b>Watch the radar warning receiver.</b> It shows BLUE-1's radar. It may warn of a missile only late, when the missile's own radar switches on, so treat a radar lock as a possible launch.</li>
+<li><b>Beam the missile:</b> turn so the threat is at your 3 or 9 o'clock. A radar missile loses its target when the target moves across its line of sight.</li>
+<li><b>Release chaff</b> while beaming, and <b>descend</b>. Find the countermeasures key in <i>Options → Controls</i>, Su-25T, "Countermeasures".</li>
+<li><b>Or turn away early,</b> so the missile has to chase you and runs out of energy. You can't outrun the F-16 itself.</li>
+<li>If the policy lets you get within a few kilometres, your R-73s can hit it.</li>
+</ul>
+<div class="tip"><h4>New to the Su-25T?</h4>DCS has simplified "game" flight and avionics modes in <i>Options → Gameplay</i> that make it easier to fly. Practise once in an Instant Action mission first.</div>
+
+<h2>Reading the result</h2>
+<table>
+<tr><th>Outcome in the terminal</th><th>Means</th></tr>
+<tr><td class="k">KILL</td><td>The policy shot you down.</td></tr>
+<tr><td class="k">TIMEOUT</td><td>You survived until the time limit (300 s by default): your win.</td></tr>
+<tr><td class="k">ESCAPE</td><td>You got more than 150 km from BLUE-1.</td></tr>
+<tr><td class="k">SHOT_DOWN</td><td>You shot BLUE-1 down with an R-73.</td></tr>
+<tr><td class="k">BANDIT_CRASH</td><td>You crashed or ejected.</td></tr>
+</table>
+<p><code>python dcs\inspect_run.py dcs_runs\live_…_ep1.jsonl</code> shows when each missile was fired, at what range, and how it ended.</p>
+<div class="warn"><h4>What the policy doesn't know</h4>
+<ul>
+<li>It only knows the F-16C, so it <b>assumes you carry AIM-120s</b>. It will defend against shots you can't make, and keep more distance than it needs.</li>
+<li>A slow Su-25T at low altitude is outside anything it trained on.</li>
+</ul>
+So read these fights as a check of how it tracks, shoots and follows up against a human who evades, not as a fair score.</div>
+</div>
+
+<!-- ═══════════════════════ PART 3 ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART 3</div>
+  <div class="pt">When things go wrong, and reference</div>
+  <div class="pd">Symptoms and fixes, what to expect from DCS, what the bridge changes in the DCS AI, and every command option.</div>
+</div>
+
+<div class="chap first">
+<h1>11 · Troubleshooting</h1>
+<p>Errors inside the bridge go to <code>Saved Games\DCS\Logs\dcs.log</code>, as lines containing <code>bvr_bridge</code>. Search the file for that word first.</p>
+<table>
+<tr><th style="width:34%">Symptom</th><th>Cause and fix</th></tr>
+<tr><td class="k">No <code>bvr_bridge: …</code> message when the mission starts</td><td>The trigger is missing, or the script stopped with an error. Check <code>dcs.log</code>. If you built the mission by hand, check the MISSION START trigger and its DO SCRIPT FILE action.</td></tr>
+<tr><td class="k"><code>bvr_bridge: LuaSocket is not available</code></td><td>The patch is missing: run <code>setup_dcs.py</code> as administrator (Step 3) and restart DCS. After every DCS update, run it again.</td></tr>
+<tr><td class="k"><code>bvr_bridge: need a blue and a red airplane</code></td><td>The mission lacks one of them, or names given in <code>CFG.agent</code> / <code>CFG.red</code> don't exist.</td></tr>
+<tr><td class="k"><code>bvr_bridge: cannot listen on port 15302</code></td><td>Another program uses the port. Change <code>port_in</code> at the top of <code>bvr_bridge.lua</code>, rebuild the mission, and start <code>dcs_live.py</code> with <code>--port-out</code> set to the same number.</td></tr>
+<tr><td class="k">Python keeps printing <code>waiting for DCS</code></td><td>DCS isn't sending: look for the bridge message; make sure the mission isn't paused. A firewall that blocks Python on <i>private</i> networks can also stop it.</td></tr>
+<tr><td class="k"><code>cannot listen on UDP port 15301</code> in Python</td><td>Another <code>dcs_live.py</code> (or <code>fake_dcs.py</code> test) is still running. Close it.</td></tr>
+<tr><td class="k"><code>fire timeout</code> in the terminal</td><td>The DCS AI did not launch within 8 s. Its radar may not have RED-1 yet, or RED-1 is outside the AI's own launch range. If it never fires, open <code>bvr_bridge.lua</code>, set <code>fire_weapon = nil</code> (the AI picks the missile itself), and rebuild the mission.</td></tr>
+<tr><td class="k">BLUE-1 turns and climbs more slowly than in training</td><td>The DCS AI flies the route its own way. This is a real difference (Chapter 12), not a fault.</td></tr>
+<tr><td class="k"><code>… behind DCS</code></td><td>Lower the time acceleration (<span class="kbd">Alt</span>+<span class="kbd">Z</span>).</td></tr>
+<tr><td class="k">The next episode doesn't start</td><td>Restart the mission in DCS; <code>dcs_live.py</code> waits for mission time to go back to the start.</td></tr>
+<tr><td class="k"><code>this checkpoint was trained for 2v1</code></td><td>The DCS link is 1v1 only for now. Use a 1v1 checkpoint.</td></tr>
+<tr><td class="k">Multiplayer server refuses you</td><td>The patched <code>MissionScripting.lua</code>. Run <code>setup_dcs.py --undo</code> before joining.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>12 · How DCS differs from training</h1>
+<p>Expect the policy to do worse in DCS than in training at first. These are the reasons, and where to see each one.</p>
+<table>
+<tr><th>Difference</th><th>What it means</th><th>Where to see it</th></tr>
+<tr><td class="k">Flying</td><td>BLUE-1 is flown by the DCS AI along the commanded route, with DCS's F-16 flight model. Turns, climbs and speed changes differ from the training autopilot.</td><td><code>_steps.csv</code>: commanded vs flown heading; obs check on rates and speeds.</td></tr>
+<tr><td class="k">Shooting</td><td>"Fire" is a request. The AI launches when its own logic agrees (set to shoot at maximum range), usually within a second or two. No second shot is allowed until the launch is seen.</td><td><code>results.csv</code>: fire timeouts.</td></tr>
+<tr><td class="k">Missile support</td><td>In training a missile misses after 3 s without guidance from its shooter's radar track, until its own seeker takes over; since SIM_REV 9 this holds for scripted opponents too. DCS is more forgiving. By default <code>dcs_live.py</code> applies the training rule to both aircraft (red's track comes from the same radar model run from red's side on DCS's positions) and has the bridge remove a missile that loses support; <code>--support-rule dcs</code> leaves it to DCS.</td><td>Terminal; <code>missiles_removed</code> in <code>results.csv</code>.</td></tr>
+<tr><td class="k">Radar</td><td>The track comes from BVR_RL's radar model on DCS's true positions, as in training. DCS's radar is not used, so this part matches training by design.</td><td>—</td></tr>
+<tr><td class="k">Opponent</td><td>RED-1 is the DCS AI, which none of the training opponents imitate exactly. Its defence (beam and dive to near the sea) is closest to ADAPTIVE's deep defence (SIM_REV 10). DCS also models ground clutter, so a low, beaming target can break a missile's lock there; training has no clutter.</td><td>Outcomes; the <code>.jsonl</code> replay.</td></tr>
+<tr><td class="k">Missiles</td><td>DCS's AIM-120 reaches differently from the envelope tables the policy trained with.</td><td>Shot ranges vs outcomes.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>13 · What the bridge does to the DCS AI</h1>
+<p>Nothing changes until the first command arrives, which is why a shadow run leaves the fight to the DCS AI.</p>
+<table>
+<tr><th>When</th><th>What the bridge sets</th></tr>
+<tr><td class="k">Mission start</td><td>RED-1, if it is AI: weapons free, and an attack task on BLUE-1.</td></tr>
+<tr><td class="k">First command</td><td>BLUE-1: weapons <b>hold</b>; reaction to threats <b>none</b>; radar <b>continuous search</b>; missile attack range <b>maximum</b>; no jettison.</td></tr>
+<tr><td class="k">Each command</td><td>A two-point route from BLUE-1's position along the commanded heading (3 km and 60 km out) at the commanded altitude and speed. Re-issued only when the command moves by 2° of heading, 50 m or 1 m/s, or every 10 s.</td></tr>
+<tr><td class="k">Fire</td><td>Weapons <b>open fire</b>, and an attack task on RED-1 for one active-radar missile. While it waits, the route is not changed.</td></tr>
+<tr><td class="k">Launch seen (or 8 s without one)</td><td>Weapons hold again, the attack task removed, the route re-issued. Python is told <code>launched</code> or <code>timeout</code>.</td></tr>
+<tr><td class="k">Support lost (<code>DESTROY</code>)</td><td>The missile is removed in DCS: a miss, as in training. Python is told <code>destroyed</code> (or <code>gone</code> if it had already ended).</td></tr>
+<tr><td class="k">End of episode (<code>STOP</code>)</td><td>BLUE-1's tasks cleared; reaction to threats back to evading fire; weapons free. It carries on as an ordinary AI aircraft.</td></tr>
+</table>
+<h2>Settings at the top of bvr_bridge.lua</h2>
+<p>Change them in the file, then rebuild the mission (the mission keeps its own copy of the script).</p>
+<table>
+<tr><th>Setting</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td class="k"><code>port_out</code> / <code>port_in</code></td><td class="n">15301 / 15302</td><td>UDP ports to and from Python</td></tr>
+<tr><td class="k"><code>rate</code></td><td class="n">0.1 s</td><td>Time between state messages</td></tr>
+<tr><td class="k"><code>agent</code> / <code>red</code></td><td class="n">nil</td><td>Unit names; nil means the first blue / red airplane</td></tr>
+<tr><td class="k"><code>red_attack</code></td><td class="n">true</td><td>Order an AI red aircraft to attack the agent</td></tr>
+<tr><td class="k"><code>near_m</code> / <code>far_m</code></td><td class="n">3000 / 60000</td><td>Distances of the two route points</td></tr>
+<tr><td class="k"><code>reissue_deg</code> / <code>reissue_s</code></td><td class="n">2 / 10</td><td>When to re-issue the route</td></tr>
+<tr><td class="k"><code>fire_timeout</code></td><td class="n">8 s</td><td>Wait for a launch before giving up</td></tr>
+<tr><td class="k"><code>fire_weapon</code></td><td class="n">134217728</td><td>DCS weapon flag for the shot: active-radar air-to-air. <code>nil</code> lets the AI choose</td></tr>
+<tr><td class="k"><code>resend_s</code></td><td class="n">2 s</td><td>How often the header and ammunition are repeated, for a late-starting Python</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>14 · Commands and options</h1>
+<h2>dcs_live.py</h2>
+<pre>python dcs_live.py CHECKPOINT [options]</pre>
+<table>
+<tr><th>Option</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td class="k"><code>--shadow</code></td><td class="n">off</td><td>Never send commands: the DCS AI flies, the policy only watches</td></tr>
+<tr><td class="k"><code>--episodes N</code></td><td class="n">1</td><td>Episodes before quitting; restart the mission between them</td></tr>
+<tr><td class="k"><code>--max-steps N</code></td><td class="n">300</td><td>Episode length in seconds; match training</td></tr>
+<tr><td class="k"><code>--doctrine D</code></td><td class="n">BALANCED</td><td>Shot doctrine the policy is told</td></tr>
+<tr><td class="k"><code>--opp-platform P</code></td><td class="n">checkpoint's</td><td>Library platform assumed for red's envelopes</td></tr>
+<tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (e.g. <code>F-16C-DCS</code>)</td></tr>
+<tr><td class="k"><code>--support-rule R</code></td><td class="n">training</td><td><code>training</code>: 3 s without support before the seeker takes over removes the missile (blue's and red's); <code>dcs</code>: DCS decides</td></tr>
+<tr><td class="k"><code>--agent</code> / <code>--red</code></td><td class="n">from bridge</td><td>DCS unit names, if not the bridge's choice</td></tr>
+<tr><td class="k"><code>--port-in</code> / <code>--port-out</code></td><td class="n">15301 / 15302</td><td>UDP ports</td></tr>
+<tr><td class="k"><code>--out DIR</code></td><td class="n">dcs_runs</td><td>Output folder</td></tr>
+</table>
+<h2>dcs/make_mission.py</h2>
+<table>
+<tr><th>Option</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td class="k"><code>--range-km</code></td><td class="n">90</td><td>Start separation</td></tr>
+<tr><td class="k"><code>--bearing</code></td><td class="n">90</td><td>Direction blue → red, degrees from map north</td></tr>
+<tr><td class="k"><code>--alt-blue</code> / <code>--alt-red</code></td><td class="n">9000 / 9500</td><td>Start altitudes, m</td></tr>
+<tr><td class="k"><code>--speed</code></td><td class="n">280</td><td>Start speed, m/s</td></tr>
+<tr><td class="k"><code>--blue-type</code></td><td class="n">F-16C</td><td>F-16C, F-15C, FA-18C. Keep F-16C for an F-16C policy</td></tr>
+<tr><td class="k"><code>--red-type</code></td><td class="n">F-16C</td><td>F-16C, F-15C, Su-27, MiG-29S, FA-18C, Su-25T</td></tr>
+<tr><td class="k"><code>--red-player</code></td><td class="n">off</td><td>You fly RED-1</td></tr>
+<tr><td class="k"><code>--defender</code></td><td class="n">off</td><td>You in the free Su-25T, defending; writes <code>bvr_rl_defender.miz</code></td></tr>
+<tr><td class="k"><code>--speed-red</code></td><td class="n">--speed</td><td>Red's start speed, m/s (200 for the Su-25T)</td></tr>
+<tr><td class="k"><code>--out</code></td><td class="n">dcs\bvr_rl_1v1.miz</td><td>Mission file</td></tr>
+</table>
+<h2>dcs/setup_dcs.py (as administrator)</h2>
+<table>
+<tr><th>Option</th><th>Meaning</th></tr>
+<tr><td class="k">(none)</td><td>Find DCS, back up and patch <code>MissionScripting.lua</code></td></tr>
+<tr><td class="k"><code>--check</code></td><td>Report only</td></tr>
+<tr><td class="k"><code>--undo</code></td><td>Remove the patch; the file is restored exactly</td></tr>
+<tr><td class="k"><code>--dcs PATH</code></td><td>DCS install folder, if not found</td></tr>
+</table>
+<h2>dcs/fake_dcs.py</h2>
+<table>
+<tr><th>Option</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td class="k"><code>--speed</code></td><td class="n">4</td><td>Fight seconds per real second</td></tr>
+<tr><td class="k"><code>--opponent</code></td><td class="n">SHOOTER</td><td>Scripted red: STRAIGHT, EVASIVE, NOTCHER, SHOOTER, ADAPTIVE_SHOOTER</td></tr>
+<tr><td class="k"><code>--platform</code> / <code>--opp-platform</code></td><td class="n">F-16C</td><td>Library platforms</td></tr>
+<tr><td class="k"><code>--missions</code></td><td class="n">1</td><td>Missions one after another (use with <code>dcs_live.py --episodes</code>)</td></tr>
+<tr><td class="k"><code>--seed</code></td><td class="n">0</td><td>Start geometry</td></tr>
+</table>
+<h2>dcs_obs_check.py</h2>
+<table>
+<tr><th>Option</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td class="k"><code>RECORDING …</code></td><td class="n">—</td><td>One or more <code>.jsonl</code> files</td></tr>
+<tr><td class="k"><code>--platform</code> / <code>--opp-platform</code></td><td class="n">F-16C</td><td>The platforms the policy was trained with</td></tr>
+<tr><td class="k"><code>--max-steps</code></td><td class="n">300</td><td>Training episode length</td></tr>
+<tr><td class="k"><code>--ref-episodes</code> / <code>--ref-opponent</code></td><td class="n">20 / SHOOTER</td><td>The simulator reference</td></tr>
+<tr><td class="k"><code>--out</code></td><td class="n">dcs_check</td><td>Output folder</td></tr>
+</table>
+<h2>Tests (no DCS needed)</h2>
+<pre>python test_sim.py              (includes "DCS live link": dcs_live.py against fake_dcs.py over UDP)
+pip install lupa
+python dcs\test_bridge.py       (bvr_bridge.lua and the setup patch, in Lua 5.1)</pre>
+</div>
+
+<div class="chap">
+<h1>15 · Protocol and files</h1>
+<h2>DCS → Python (UDP 15301)</h2>
+<p>One JSON object per message: the same lines <code>bvr_logger.lua</code> writes (state samples, shots, hits, deaths, ammunition), plus:</p>
+<pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":1, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
+{"ev":"fire", "t":..., "status":"requested|launched|timeout|refused", "seq":...}
+{"ev":"bridge", "t":..., "status":"control|released", "agent":...}
+{"ev":"support_lost", "t":..., "id":..., "status":"destroyed|gone|failed"}
+{"ev":"kill", "t":..., "unit":..., "killer":..., "id":...}
+{"ev":"mission_end", "t":...}</pre>
+<h2>Python → DCS (UDP 15302)</h2>
+<pre>CMD &lt;seq&gt; &lt;heading deg, map north, clockwise&gt; &lt;altitude m&gt; &lt;speed m/s&gt; &lt;fire 0|1&gt; &lt;mission time, ignored by the bridge&gt;
+STOP
+DESTROY &lt;missile id&gt;</pre>
+<p>Commands are re-sent every second, so a lost message costs at most a second.</p>
+<h2>Where things are</h2>
+<table>
+<tr><th>What</th><th>Where</th></tr>
+<tr><td class="k">DCS</td><td><code>C:\Program Files\Eagle Dynamics\DCS World</code></td></tr>
+<tr><td class="k">The patched file and its backup</td><td><code>…\DCS World\Scripts\MissionScripting.lua</code>, <code>…\MissionScripting.lua.bvr_rl_backup</code></td></tr>
+<tr><td class="k">Missions</td><td><code>C:\Users\&lt;you&gt;\Saved Games\DCS\Missions\</code></td></tr>
+<tr><td class="k">DCS's log</td><td><code>C:\Users\&lt;you&gt;\Saved Games\DCS\Logs\dcs.log</code></td></tr>
+<tr><td class="k">Run results</td><td><code>BVR_RL\dcs_runs\</code></td></tr>
+<tr><td class="k">Input check results</td><td><code>BVR_RL\dcs_check\</code></td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>16 · Undoing everything</h1>
+<ol class="steps">
+<li><span class="where admin">ADMIN TERMINAL</span> Remove the patch: <code>python dcs\setup_dcs.py --undo</code>. The file is put back exactly as it was. (The backup <code>MissionScripting.lua.bvr_rl_backup</code> stays next to it; delete it if you like.)</li>
+<li>Delete <code>bvr_rl_1v1.miz</code> from <code>Saved Games\DCS\Missions\</code>.</li>
+<li>Delete <code>dcs_runs\</code> and <code>dcs_check\</code> in the BVR_RL folder, if you don't need the recordings.</li>
+<li><code>git checkout feature/platforms-2v1</code> takes the code back to the branch without the DCS link.</li>
+</ol>
+</div>
