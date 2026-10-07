@@ -1,0 +1,36 @@
+{
+  "id": "F-16C",
+  "kind": "platform",
+  "name": "F-16C with 4 × AIM-120",
+  "description": "The aircraft every model so far was trained on.",
+  "params": {
+    "airframe": "F-16C",
+    "radar": "APG-68",
+    "missile": "AIM-120",
+    "WPN_COUNT": 4,
+    "RCS_M2": 1.2,
+    "SPEED_CMDS": [
+      220.0,
+      280.0,
+      340.0,
+      400.0
+    ],
+    "ALT_MIN_OP": 1000.0,
+    "ALT_MAX_OP": 14000.0,
+    "CLIMB_FPA_LO": 20.0,
+    "CLIMB_FPA_HI": 10.0,
+    "CLIMB_FPA_ALT_LO": 5000.0,
+    "CLIMB_FPA_ALT_HI": 11000.0
+  },
+  "sources": {
+    "WPN_COUNT": "standard BVR loadout in this project",
+    "RCS_M2": "commonly cited open-source frontal estimate (≈ 1.2 m²)",
+    "SPEED_CMDS": "the action set existing checkpoints were trained with",
+    "ALT_MIN_OP": "as trained",
+    "ALT_MAX_OP": "as trained",
+    "CLIMB_FPA_LO": "holds speed on a 3 km climb (measured)",
+    "CLIMB_FPA_HI": "as CLIMB_FPA_LO",
+    "CLIMB_FPA_ALT_LO": "as CLIMB_FPA_LO",
+    "CLIMB_FPA_ALT_HI": "as CLIMB_FPA_LO"
+  }
+}

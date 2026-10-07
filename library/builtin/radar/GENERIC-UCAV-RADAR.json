@@ -1,0 +1,36 @@
+{
+  "id": "GENERIC-UCAV-RADAR",
+  "kind": "radar",
+  "name": "Generic small AESA (illustrative)",
+  "description": "A smaller-aperture radar than a fighter's: shorter range, somewhat larger errors.",
+  "params": {
+    "MAX_RANGE": 70000.0,
+    "REF_RCS_M2": 1.2,
+    "FOV_AZ": 60.0,
+    "FOV_EL": 60.0,
+    "REF_RANGE": 50000.0,
+    "SIG_AZ_REF": 2.0,
+    "SIG_EL_REF": 2.0,
+    "SIG_RNG_REF": 45.0,
+    "SIG_RDOT_REF": 5.0,
+    "SIG_ADOT_REF": 0.16,
+    "TAU": 2.0,
+    "LOWDOP_CLOSURE": 40.0,
+    "LOWDOP_MAX_INFLATE": 4.0
+  },
+  "sources": {
+    "MAX_RANGE": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "REF_RCS_M2": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "FOV_AZ": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "FOV_EL": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "REF_RANGE": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SIG_AZ_REF": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SIG_EL_REF": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SIG_RNG_REF": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SIG_RDOT_REF": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SIG_ADOT_REF": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "TAU": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "LOWDOP_CLOSURE": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "LOWDOP_MAX_INFLATE": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft"
+  }
+}

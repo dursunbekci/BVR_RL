@@ -1,0 +1,865 @@
+<!-- ═══════════════════════ COVER ═══════════════════════ -->
+<div class="cover">
+  <div>
+    <div class="t">BVR RL<br>Project Guide</div>
+    <div class="s">Training an AI pilot for beyond-visual-range air combat with reinforcement learning: how to install it, run it, read it, and how every part works.</div>
+  </div>
+  <div class="m">BVR_RL · branch feature/platforms-2v1 @ {COMMIT} · {DATE}<br>
+  Everything in this guide describes the code at this commit. Simulation revision 8.</div>
+</div>
+
+<!-- ═══════════════════════ CONTENTS ═══════════════════════ -->
+<div class="chap first">
+<h1>Contents</h1>
+<ul class="toc">
+  <li class="ph">Part A · Getting started</li>
+  <li>1. What this project is<span class="pg">4</span></li>
+  <li>2. Installing and starting<span class="pg">5</span></li>
+  <li>3. Your first training run<span class="pg">6</span></li>
+  <li>4. Watching a trained model<span class="pg">7</span></li>
+  <li>5. Comparing models with cross-play<span class="pg">7</span></li>
+  <li class="ph">Part B · How it works</li>
+  <li>6. The simulated world<span class="pg">10</span></li>
+  <li>7. One episode, step by step<span class="pg">11</span></li>
+  <li>8. What the agent sees<span class="pg">12</span></li>
+  <li>9. What the agent can do<span class="pg">13</span></li>
+  <li>10. How the agent is rewarded<span class="pg">13</span></li>
+  <li>11. How the agent learns<span class="pg">15</span></li>
+  <li>12. The curriculum and the opponents<span class="pg">15</span></li>
+  <li>13. Self-play<span class="pg">16</span></li>
+  <li>14. Two against one (2v1)<span class="pg">17</span></li>
+  <li>15. The parameter library<span class="pg">18</span></li>
+  <li class="ph">Part C · The GUI, page by page</li>
+  <li>16. The TRAINING page<span class="pg">20</span></li>
+  <li>17. The WATCH page<span class="pg">21</span></li>
+  <li>18. The CROSS-PLAY page<span class="pg">22</span></li>
+  <li>19. The LIBRARY page<span class="pg">22</span></li>
+  <li class="ph">Part D · Working with results</li>
+  <li>20. Reading a training run<span class="pg">24</span></li>
+  <li>21. Symptoms and what to do<span class="pg">24</span></li>
+  <li>22. Files, checkpoints and versions<span class="pg">25</span></li>
+  <li>23. Command-line reference<span class="pg">26</span></li>
+  <li>24. DCS World: first step<span class="pg">27</span></li>
+  <li>25. Troubleshooting<span class="pg">27</span></li>
+  <li>26. Glossary<span class="pg">28</span></li>
+</ul>
+
+<div class="box"><h4>How to read this guide</h4>
+<ul>
+<li><b>New to the project?</b> Read Part A from start to finish and do the steps. You'll have trained, watched and compared a model.</li>
+<li><b>Want to understand what the agent is doing?</b> Part B explains the simulation, the agent's inputs and actions, the reward, and the training method.</li>
+<li><b>Looking for a field or a number on screen?</b> Part C explains every page of the GUI.</li>
+<li><b>Something looks wrong?</b> Part D lists the symptoms seen in this project, their causes and what to do.</li>
+</ul></div>
+</div>
+
+<!-- ═══════════════════════ PART A ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART A</div>
+  <div class="pt">Getting started</div>
+  <div class="pd">Install the project, train a first model, watch it fly, and compare it with other models.</div>
+  <ol start="1"><li>What this project is</li><li>Installing and starting</li><li>Your first training run</li><li>Watching a trained model</li><li>Comparing models with cross-play</li></ol>
+</div>
+
+<div class="chap first">
+<h1>1 · What this project is</h1>
+<p>BVR RL trains an artificial pilot for <b>beyond-visual-range (BVR) air combat</b>: engagements where the two aircraft are tens of kilometres apart, see each other only on radar, and fight with radar-guided missiles of the AIM-120 class.</p>
+<p>The pilot is a neural network. It is not programmed with tactics. It learns them by flying hundreds of thousands of simulated engagements and being rewarded for good outcomes. This is called <b>reinforcement learning</b>.</p>
+
+<h2>The pieces</h2>
+<div class="flow">
+  <div class="nd"><b>Simulator</b>aircraft flight model, missiles, radar, datalink · 50 steps per second</div>
+  <div class="ar">→</div>
+  <div class="nd"><b>Environment</b>turns the fight into 68 inputs, 4 choices and a reward, once per second</div>
+  <div class="ar">→</div>
+  <div class="nd"><b>Trainer (PPO)</b>flies episodes, improves the network from the rewards</div>
+  <div class="ar">→</div>
+  <div class="nd"><b>Checkpoints</b>saved networks: <code>models_bvr/*.zip</code></div>
+  <div class="ar">→</div>
+  <div class="nd"><b>GUI</b>train, watch, compare, edit aircraft</div>
+</div>
+
+<table>
+<tr><th>Piece</th><th>Main files</th><th>What it does</th></tr>
+<tr><td class="k">Simulator</td><td><code>f16_sim.py</code>, <code>missile_sim.py</code>, <code>sim_world.py</code>, <code>bvr_radar_sim.py</code>, <code>bvr_track_adapter.py</code></td><td>Flies the aircraft and missiles and models what each aircraft's radar sees.</td></tr>
+<tr><td class="k">Environment</td><td><code>bvr_env.py</code> (1v1), <code>bvr_team.py</code> (2v1)</td><td>Starts each engagement, builds the agent's inputs, applies its choices, computes rewards, decides when the fight is over.</td></tr>
+<tr><td class="k">Opponents</td><td><code>bvr_opponents.py</code>, <code>bvr_selfplay.py</code></td><td>Scripted enemy pilots of increasing difficulty, and frozen copies of the agent for self-play.</td></tr>
+<tr><td class="k">Trainer</td><td><code>train_bvr.py</code>, <code>bvr_policy.py</code></td><td>Runs PPO training, the curriculum, self-play snapshots, and writes metrics for the GUI.</td></tr>
+<tr><td class="k">Evaluation</td><td><code>crossplay.py</code></td><td>Plays saved models against each other and scores them.</td></tr>
+<tr><td class="k">Library</td><td><code>bvr_library.py</code>, <code>library/</code></td><td>Every number for each aircraft, radar and missile, editable and versioned.</td></tr>
+<tr><td class="k">GUI</td><td><code>bvr_gui.py</code>, <code>bvr_gui.html</code></td><td>A browser interface to all of the above.</td></tr>
+<tr><td class="k">Tests</td><td><code>test_sim.py</code></td><td>36 checks of the simulator, environment, rewards and tools.</td></tr>
+</table>
+
+<h2>What the agent learns</h2>
+<ul>
+<li><b>Find and hold the enemy on radar.</b> Its radar sees only ±60° off the nose, out to a range that depends on the enemy's size.</li>
+<li><b>Shoot at the right moment.</b> Too far and the missile runs out of energy; too close and the enemy shoots first.</li>
+<li><b>Support its missile.</b> Its missile needs radar updates until its own seeker locks on.</li>
+<li><b>Defend.</b> Turn away or across an incoming missile to make it miss.</li>
+<li><b>Manage energy and altitude.</b> Speed and height extend a missile's reach.</li>
+</ul>
+
+<h2>Formats</h2>
+<ul>
+<li><b>1 v 1</b>: one agent aircraft against one enemy. This is the main format.</li>
+<li><b>2 v 1</b>: two agent aircraft, flown by the same network, against one enemy. They share radar tracks over a datalink (chapter 14).</li>
+</ul>
+</div>
+
+<div class="chap">
+<h1>2 · Installing and starting</h1>
+<h2>What you need</h2>
+<ul>
+<li>A computer with Python 3.10 or newer. The project is used on Windows; it also runs on Linux.</li>
+<li>About 2 GB of disk space for Python packages, plus room for models (each about 5 MB).</li>
+<li>More CPU cores make training faster: each parallel environment uses one core.</li>
+<li>A modern web browser for the GUI.</li>
+</ul>
+
+<h2>Install, step by step</h2>
+<ol class="steps">
+<li><b>Get the code.</b> Clone the repository and switch to the working branch:
+<pre>git clone https://github.com/dursunbekci/BVR_RL.git
+cd BVR_RL
+git checkout feature/platforms-2v1</pre></li>
+<li><b>Install the Python packages.</b>
+<pre>pip install numpy torch gymnasium stable-baselines3 sb3-contrib tensorboard websockets matplotlib</pre>
+<span class="small">The project was last tested with numpy 2.4, torch 2.14, gymnasium 1.3, stable-baselines3 and sb3-contrib 2.9, websockets 17.1, tensorboard 2.21.</span></li>
+<li><b>Check everything works.</b> Run the test suite. It takes a few minutes and should end with <code>36/36 passed</code>.
+<pre>python test_sim.py</pre></li>
+<li><b>Start the GUI.</b>
+<pre>python bvr_gui.py</pre>
+Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 5006 for the page and 5010 for live updates.</li>
+</ol>
+
+<div class="tip"><h4>Getting updates</h4>
+<p>When new code is pushed, stop the GUI (Ctrl+C), run <code>git pull</code>, and start it again. A training run that is already going keeps the code it started with; the changes apply to the next run.</p></div>
+
+<h2>What the GUI looks like</h2>
+<p>Four tabs across the top:</p>
+<table>
+<tr><th>Tab</th><th>Use it to</th></tr>
+<tr><td class="k">TRAINING</td><td>Set up and start a training run, then follow its progress on the dashboard.</td></tr>
+<tr><td class="k">WATCH</td><td>Load a saved model and watch it fly engagements in a 3-D view, with statistics.</td></tr>
+<tr><td class="k">CROSS-PLAY</td><td>Play several saved models against each other and rank them.</td></tr>
+<tr><td class="k">LIBRARY</td><td>Browse and edit the aircraft, radar and missile parameters.</td></tr>
+</table>
+<p>The button to the right of the tabs switches units between metric (m, km, m/s) and aviation units (ft, nm, kt). Every field has a <b>?</b> button that explains it.</p>
+</div>
+
+<div class="chap">
+<h1>3 · Your first training run</h1>
+<p>This run trains an F-16 against an F-16, starting with the easiest opponent. Everything happens on the <b>TRAINING</b> tab.</p>
+
+<ol class="steps">
+<li><b>Engagement.</b> Set the format to <b>1 v 1</b>, AGENT FLIES to <b>F-16C</b>, OPPONENT FLIES to <b>F-16C</b>.</li>
+<li><b>Opponent stage.</b> Choose <b>STRAIGHT</b>. This is the first stage of the curriculum: an enemy that flies straight and never shoots.</li>
+<li><b>Missile doctrine.</b> Leave it at <b>MIXED</b>. Each episode then uses one of three costs per missile fired, and the agent learns all three (chapter 10).</li>
+<li><b>Training steps.</b> Start with <b>2,000,000</b>. One step is one decision, which is one simulated second. The estimate under the field shows how long that takes on your machine.</li>
+<li><b>Parallel envs.</b> Choose as many as you have spare CPU cores (4 or 8 on most desktops). Each runs its own simulation in a separate process.</li>
+<li><b>Gamma, learn rate, batch.</b> Leave the defaults: 0.997, 0.00025, 256 (chapter 11 explains them).</li>
+<li><b>Auto-curriculum.</b> Leave it <b>ON</b>. The opponent then gets harder by itself as the agent improves (chapter 12).</li>
+<li><b>Model name.</b> Give the run its own name, e.g. <code>f16_first</code>. The final model is saved as <code>models_bvr/f16_first.zip</code>.</li>
+<li><b>Resume from.</b> Leave it at <b>fresh start</b>.</li>
+<li><b>Start.</b> Click <b>▶ START TRAINING</b>. The first episode may take 30–60 seconds while the network is built.</li>
+</ol>
+
+<h2>What you'll see</h2>
+<ul>
+<li><b>The log</b> prints a line every 10 episodes: win, loss, mutual and timeout shares, hit rate (Pk), shots per episode and more.</li>
+<li><b>The dashboard</b> fills in after the first 10 episodes: key numbers along the top and charts below. Chapter 16 explains each one.</li>
+<li><b>The curriculum bar</b> at the top shows the current stage and how close the agent is to advancing.</li>
+</ul>
+
+<h2>Stopping and saving</h2>
+<ol class="steps">
+<li>Click <b>■ STOP</b> at any time. The trainer saves the model before it exits; wait for "saved final model" in the log.</li>
+<li>The model appears as <code>models_bvr/&lt;model name&gt;.zip</code>. Along the way, the trainer also saves backups in <code>models_bvr/archive/</code>: the best model at each stage, and the model just before each stage change (chapter 22).</li>
+<li>To continue later, start a new run with RESUME FROM set to that file, and give the new run a new model name.</li>
+</ol>
+
+<div class="tip"><h4>What a good first run looks like</h4>
+<p>Against STRAIGHT, the win rate should climb from near 0 to over 65% within a few hundred thousand steps, and the curriculum then moves on to EVASIVE. The track fraction should rise and timeouts should fall. If the win rate stays flat for a million steps, see chapter 21.</p></div>
+
+<h2>Long runs</h2>
+<p>For an overnight run, work out the steps from your machine's rate. Example from this project: 92 episodes a minute at about 210 steps each is about 1.16 million steps an hour, so 12 hours is about 14 million steps. Resume from your last model, keep the same number of parallel envs, and give the run a new name so it doesn't overwrite the previous model.</p>
+</div>
+
+<div class="chap">
+<h1>4 · Watching a trained model</h1>
+<p>The <b>WATCH</b> tab flies a saved model live, in a 3-D view, and sums up the episodes it plays.</p>
+<ol class="steps">
+<li><b>Checkpoint to load.</b> Pick the model, e.g. <code>f16_first.zip</code> or an archive file. The list is read live from <code>models_bvr/</code>.</li>
+<li><b>Opponent.</b> Pick who it fights. It doesn't have to be the opponent it trained against: e.g. train against STRAIGHT, then watch against SHOOTER to see what transfers.</li>
+<li><b>Playback speed.</b> 3× is good for following tactics, 10× or 50× for scanning many episodes.</li>
+<li><b>Episodes.</b> How many to play before stopping by itself: 10, 25 (default), 50, 100, 200, or until stopped.</li>
+<li><b>Missile doctrine.</b> The missile cost the model is told about (BALANCED by default).</li>
+<li><b>Opponent flies</b> and <b>Format.</b> By default, the platform and format the model was trained with.</li>
+<li>Click <b>▶ START EVAL</b>.</li>
+</ol>
+
+<h2>What you'll see</h2>
+<ul>
+<li><b>The 3-D tactical view</b> shows both aircraft, their trails and missiles. Blue is the agent, red the opponent.</li>
+<li><b>Live engagement</b> shows range, closure, track state, missile status and more for the current moment.</li>
+<li><b>Watch statistics</b> sums up the session: outcomes, win rate with its 95% range, exchange ratio, hit rate, shots, shot range, and win/loss by start geometry and start range (chapter 17).</li>
+<li><b>Shot Trace</b> (📋 in the log bar) lists every missile launch of the last episode: range, aspect, track quality, and where in the envelope it was fired.</li>
+</ul>
+
+<div class="box"><h4>WATCH is not the training dashboard</h4>
+<p>WATCH always takes the model's single most likely action. During training the model samples its actions, so it sometimes tries less likely ones. WATCH numbers can therefore differ from the training dashboard, usually upwards. For a proper comparison of models, use CROSS-PLAY.</p></div>
+</div>
+
+<div class="chap">
+<h1>5 · Comparing models with cross-play</h1>
+<p><b>CROSS-PLAY</b> plays every chosen model against every other, in both seats, and optionally against scripted opponents. It runs without drawing, in parallel, so it's much faster than WATCH and gives fair, comparable numbers.</p>
+<ol class="steps">
+<li><b>Checkpoints.</b> Tick the models to compare. Quick links select all, only the archive, or none.</li>
+<li><b>Scripted columns.</b> Optionally add scripted opponents (e.g. SHOOTER, ADAPTIVE) as extra columns, to see how each model fares against them.</li>
+<li><b>Games per cell.</b> 100 is a good default. More games give narrower uncertainty ranges.</li>
+<li><b>Workers.</b> Parallel processes; use your spare CPU cores.</li>
+<li><b>Doctrine.</b> Both sides fly the same missile doctrine.</li>
+<li>Click <b>▶ RUN CROSS-PLAY</b>. The estimate under the fields shows the number of games and the expected time.</li>
+</ol>
+
+<h2>Reading the results</h2>
+<ul>
+<li><b>The matrix:</b> each cell is the <b>row</b> model's score against the <b>column</b> model, with the row model in seat AC1. A win scores 1, a draw (mutual kill, timeout, escape) 0.5, a loss 0. Green is above 0.5, red below. The ± value is the 95% uncertainty range.</li>
+<li><b>Head-to-head between two models:</b> average both cells. For example, if v5 scores 0.67 against v4 and v4 scores 0.56 against v5, v5's score is (0.67 + (1 − 0.56)) / 2 ≈ 0.56.</li>
+<li><b>Elo ratings</b> rank all models on one scale with a mean of 1000. A 100-point gap means the higher model scores about 0.64 against the lower one.</li>
+<li><b>Seat bias</b> is how far the AC1 seat scores above 0.5 when the same starts are played both ways. It cancels in head-to-head scores and Elo, since every pairing is played from both seats (chapter 18).</li>
+</ul>
+
+<div class="tip"><h4>Every pairing starts from the same geometries</h4>
+<p>Game <i>i</i> of every pairing starts from the same geometry, so differences between cells come from the models, not from the luck of the draw.</p></div>
+</div>
+
+<!-- ═══════════════════════ PART B ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART B</div>
+  <div class="pt">How it works</div>
+  <div class="pd">The simulation, what the agent sees and can do, how it is rewarded, how it learns, and the opponents it learns against.</div>
+  <ol start="6"><li>The simulated world</li><li>One episode, step by step</li><li>What the agent sees</li><li>What the agent can do</li><li>How the agent is rewarded</li><li>How the agent learns</li><li>The curriculum and the opponents</li><li>Self-play</li><li>Two against one (2v1)</li><li>The parameter library</li></ol>
+</div>
+
+<div class="chap first">
+<h1>6 · The simulated world</h1>
+<p>Everything runs in Python, 50 times per simulated second. The agent decides once per second; between decisions, the simulator flies its last command.</p>
+
+<h2>6.1 Aircraft</h2>
+<p>Each aircraft is a point-mass flight model with an autopilot. The agent does not move the stick: it chooses a <b>heading</b>, a <b>target altitude</b> and a <b>speed</b>, and the autopilot flies there within the aircraft's limits (turn rate, climb angle, thrust, drag, fuel). Two platforms ship with the project:</p>
+<table>
+<tr><th>Platform</th><th>Speed choices (m/s)</th><th class="n">Missiles</th><th class="n">Radar size (RCS)</th><th>Operating altitude</th></tr>
+<tr><td class="k">F-16C</td><td>220 · 280 · 340 · 400</td><td class="n">4</td><td class="n">1.2 m²</td><td>1,000–14,000 m</td></tr>
+<tr><td class="k">GENERIC-UCAV</td><td>170 · 200 · 225 · 250</td><td class="n">2</td><td class="n">0.1 m²</td><td>1,000–12,500 m</td></tr>
+</table>
+<p class="small">The generic UCAV is illustrative, not data for a real aircraft. Both are defined in the parameter library (chapter 15).</p>
+
+<h2>6.2 Missiles</h2>
+<p>The missile model is of the AIM-120 class. A missile's life:</p>
+<ol class="steps">
+<li><b>Boost</b> (6 s): the motor burns and the missile accelerates.</li>
+<li><b>Midcourse:</b> it flies towards where the shooter's radar says the target is, updated over a datalink. <b>If the shooter stops sending updates for 3 seconds, the missile is lost</b> (the "3-second support rule").</li>
+<li><b>Hand-off:</b> within 8–16 km of the target (less against a small target), its own seeker locks on. From then on it no longer needs the shooter.</li>
+<li><b>Terminal:</b> it steers itself to the target, pulling up to 30 g. It kills inside a 10 m radius, misses if it runs out of energy, and is gone after 120 s at most.</li>
+</ol>
+<p><b>Launch envelope.</b> How far a missile can reach depends on the shooter's speed and altitude and on the target's direction of flight. Head-on, the target flies into the missile, so the reach is longest; tail-on it is several times shorter. The project measures this once per missile type with <code>sweep_envelope.py</code> and stores it as a table. Two numbers come out of it:</p>
+<ul>
+<li><b>R<sub>max</sub></b>: the farthest range at which a shot can hit a target that keeps flying as it is.</li>
+<li><b>R<sub>NEZ</sub></b> (no-escape zone): the range inside which a shot hits even if the target turns and runs at once.</li>
+</ul>
+
+<h2>6.3 Radar</h2>
+<p>Each aircraft has a radar model that behaves like a radar that has already locked onto the target. It does not search or scan.</p>
+<ul>
+<li><b>Coverage:</b> ±60° off the nose, left/right and up/down.</li>
+<li><b>Range:</b> the platform's maximum range (90 km for the F-16C's radar, 70 km for the UCAV's) scaled by the target's size: range × (target RCS / 1.2 m²)<sup>¼</sup>. A small UCAV (0.1 m²) is seen at only about 54% of the range of an F-16.</li>
+<li><b>Errors</b> grow with the square of range, are about 4 times larger when the target flies across the line of sight (low closure, the "Doppler notch"), and drift smoothly rather than jumping (about 2 s correlation).</li>
+<li><b>Rate:</b> 10 reports per second.</li>
+</ul>
+
+<h2>6.4 Track</h2>
+<p>The radar reports are turned into a <b>track</b>: an estimate of the target's position and velocity, with an uncertainty. The track has four states:</p>
+<div class="flow">
+  <div class="nd"><b>NONE</b>no target known</div><div class="ar">→</div>
+  <div class="nd"><b>ACQUIRING</b>reports coming in; not yet firm</div><div class="ar">→</div>
+  <div class="nd"><b>TRACK</b>firm: 5 reports in a row. Missiles can be fired.</div><div class="ar">→</div>
+  <div class="nd"><b>COAST</b>no report for 0.5 s; position estimated forward, uncertainty grows</div>
+</div>
+<ul>
+<li>A new report brings a COAST track back to TRACK.</li>
+<li>After 15 s without reports, the track is dropped (NONE).</li>
+<li>If the position uncertainty grows beyond 2 km, the track falls back to ACQUIRING.</li>
+</ul>
+
+<h2>6.5 What the opponent knows</h2>
+<p><b>Scripted opponents see the true positions</b>: they never lose track. That is deliberately in the agent's disfavour, so that beating them is a real result. In self-play, the opponent copy has its own radar and track, exactly like the agent.</p>
+</div>
+
+<div class="chap">
+<h1>7 · One episode, step by step</h1>
+<h2>7.1 The start</h2>
+<p>Each episode starts with the two aircraft 70–110 km apart, at 6–11 km altitude (within 2.5 km of each other), at 250–320 m/s (scaled to slower platforms). One of five start geometries is drawn:</p>
+<figure>{GEOMETRY_SVG}
+<figcaption>The five start geometries, drawn for AC1 (blue, bottom) and AC2 (red, top). AC1 always starts pointing at AC2. In a stern start AC2 flies away and the range is shorter, 45–75 km. Stern starts are skipped when the opponent is faster than the agent, since they could never be won.</figcaption></figure>
+<p><b>Mirrored starts.</b> In four of the five geometries, AC1 has the better start. So in half the episodes the two aircraft swap starts: the opponent gets the better one. The agent learns to fight from both sides. WATCH statistics mark mirrored starts with ⇄.</p>
+
+<h2>7.2 Each second</h2>
+<ol class="steps">
+<li>The agent receives its 68 inputs (chapter 8), together with the previous 7 seconds' inputs.</li>
+<li>It chooses a heading, an altitude change, a speed and whether to fire (chapter 9).</li>
+<li>The simulator flies 50 small steps (1 s) with that command. The radar reports 10 times, the opponent acts, missiles fly.</li>
+<li>The agent receives the reward for that second (chapter 10).</li>
+</ol>
+
+<h2>7.3 The end</h2>
+<table>
+<tr><th>Outcome</th><th>When</th></tr>
+<tr><td class="k">KILL</td><td>The opponent is destroyed by the agent's missile.</td></tr>
+<tr><td class="k">SHOT_DOWN</td><td>The agent is destroyed by the opponent's missile.</td></tr>
+<tr><td class="k">MUTUAL_KILL</td><td>Both are destroyed. A kill ends the fight only once no missile is still in flight at a live aircraft, so a shooter that is hit can still take its killer with it.</td></tr>
+<tr><td class="k">TIMEOUT</td><td>300 decisions (300 s) pass with no result. The limit is <code>MAX_STEPS</code> in <code>bvr_env.py</code>; slow platforms may need more (chapter 21).</td></tr>
+<tr><td class="k">ESCAPE</td><td>The range grows beyond 150 km.</td></tr>
+<tr><td class="k">CRASH</td><td>The agent flies below 300 m.</td></tr>
+<tr><td class="k">BANDIT_CRASH</td><td>The opponent flies below 300 m.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>8 · What the agent sees</h1>
+<p>Every second the agent receives <b>68 numbers</b>. Each is scaled to the range −1 to +1. The agent also gets the previous 7 seconds' numbers (8 frames in all), so it can see how things are changing.</p>
+<p>Important: everything about the enemy comes from <b>its own radar track</b>, never from the true position. If the track is poor, the agent's picture is poor.</p>
+<table>
+<tr><th>Group</th><th class="n">Inputs</th><th>What they are</th></tr>
+<tr><td class="k">Own aircraft</td><td class="n">10</td><td>Mach, altitude, climb angle, bank angle, load factor, energy, angle of attack, missiles left, fuel.</td></tr>
+<tr><td class="k">Track</td><td class="n">14</td><td>Track state (NONE / ACQUIRING / TRACK / COAST), range, closing speed, angle off the nose (left/right and up/down), the enemy's aspect (which way it points relative to us), track age, position and velocity uncertainty.</td></tr>
+<tr><td class="k">Enemy estimate</td><td class="n">4</td><td>Enemy speed, altitude difference, energy difference, line-of-sight rate.</td></tr>
+<tr><td class="k">Envelopes</td><td class="n">4</td><td>Range ÷ own R<sub>max</sub>, range ÷ own R<sub>NEZ</sub>, and the same for the enemy's missile against us. Below 1 means "inside".</td></tr>
+<tr><td class="k">Own missiles</td><td class="n">6</td><td>Missiles in flight, nearest one's time-to-go, time in flight, whether it still needs support, whether its seeker is active, time since its last update.</td></tr>
+<tr><td class="k">Threat warning</td><td class="n">6</td><td>Missile launch warning, how long ago, its bearing, whether its seeker is active, time-to-go of the nearest inbound missile.</td></tr>
+<tr><td class="k">Time and doctrine</td><td class="n">3</td><td>Fraction of the episode elapsed, time since the last shot, the doctrine's cost per missile.</td></tr>
+<tr><td class="k">Wingman (2v1)</td><td class="n">17</td><td>The wingman's position, heading, speed, track, missiles and threats. All zero in 1v1.</td></tr>
+<tr><td class="k">Heading</td><td class="n">4</td><td>The previous heading choice and the turn still to fly.</td></tr>
+<tr><td></td><td class="n"><b>68</b></td><td></td></tr>
+</table>
+
+<h2>The critic sees more</h2>
+<p>The network has two halves (chapter 11). The <b>actor</b> chooses actions and sees only the 68 inputs above. The <b>critic</b> judges how good a situation is, and during training also gets <b>24 true values</b>: true range, closure, aspects, energy, the enemy's missiles and so on. This helps it learn faster. The critic is not used when the model flies, so the agent never relies on information it couldn't have.</p>
+</div>
+
+<div class="chap">
+<h1>9 · What the agent can do</h1>
+<p>Once per second the agent makes four choices at once:</p>
+<table>
+<tr><th>Choice</th><th>Options</th><th>Meaning</th></tr>
+<tr><td class="k">Heading</td><td>0, ±30, ±50, ±90, ±135, 180°</td><td>An offset from the bearing to the enemy. 0 = straight at it, ±50 = crank, ±90 = beam, 180 = straight away. Positive = to the right. With no track, the offset is from the last known bearing.</td></tr>
+<tr><td class="k">Altitude</td><td>−3000, −1200, 0, +1200, +3000 m</td><td>Change of target altitude from the current one, kept inside the platform's operating band.</td></tr>
+<tr><td class="k">Speed</td><td>the platform's 4 speeds</td><td>F-16C: 220, 280, 340, 400 m/s.</td></tr>
+<tr><td class="k">Fire</td><td>no / yes</td><td>Launch a missile this second.</td></tr>
+</table>
+
+<h2>The fire rule</h2>
+<p>"Fire" can only be chosen when all of these hold. Otherwise it is <b>masked</b>, meaning the network cannot pick it:</p>
+<ol class="steps">
+<li>Missiles are left.</li>
+<li>The track is firm (TRACK state).</li>
+<li>At least 3 s have passed since the last launch.</li>
+<li>The target is within <b>60° of the nose</b>. The missile leaves along the aircraft's axis and must turn; beyond 60° it loses most of its reach.</li>
+<li>The range is between <b>1.5 km and R<sub>max</sub></b>.</li>
+</ol>
+<p>Inside that window, choosing <i>when</i> to fire is up to the agent. The reward encourages shots at 0.6–0.85 of R<sub>max</sub>, where hits are likely.</p>
+
+<h2>Changing heading costs a little</h2>
+<p>Each change of the heading choice costs 0.04 per 180° of change (chapter 10). Without it, policies flipped between two similar choices every few seconds, rocking their wings. A deliberate defensive turn still costs very little.</p>
+</div>
+
+<div class="chap">
+<h1>10 · How the agent is rewarded</h1>
+<p>The reward is what the agent tries to maximise. It has three parts.</p>
+
+<h2>10.1 Outcome (last second only)</h2>
+<table>
+<tr><th>Outcome</th><th class="n">Reward</th><th>Why</th></tr>
+<tr><td class="k">KILL</td><td class="n">+1.0</td><td>The goal.</td></tr>
+<tr><td class="k">SHOT_DOWN</td><td class="n">−1.0</td><td>The worst result.</td></tr>
+<tr><td class="k">MUTUAL_KILL</td><td class="n">−0.4</td><td>Trading aircraft is bad, but better than only losing.</td></tr>
+<tr><td class="k">TIMEOUT</td><td class="n">−0.5</td><td>Avoiding the fight is not a solution.</td></tr>
+<tr><td class="k">ESCAPE</td><td class="n">−0.6</td><td>Running away is worse than a timeout.</td></tr>
+<tr><td class="k">CRASH</td><td class="n">−1.0</td><td>Flying into the ground is as bad as being shot down.</td></tr>
+<tr><td class="k">BANDIT_CRASH</td><td class="n">+0.4</td><td>The opponent crashed, often while defending.</td></tr>
+<tr><td class="k">Each wasted missile</td><td class="n">−0.03</td><td>Every missile that did not make the kill.</td></tr>
+</table>
+
+<h2>10.2 Shaping (every second)</h2>
+<p>An episode can last 300 seconds, and the outcome comes only at the end. To help the agent learn which seconds mattered, every second also gets a small <b>shaping</b> reward: the change in a score Φ ("potential") of how good the situation is. Because it is only the <i>change</i>, it speeds up learning without changing what the best tactics are.</p>
+<pre>reward each second = γ·Φ(after) − Φ(before) − heading cost − shot cost</pre>
+<table>
+<tr><th>Term</th><th class="n">Weight</th><th>Rewards</th></tr>
+<tr><td class="k">Envelope</td><td class="n">0.60</td><td>Being inside your own missile's envelope (best inside R<sub>NEZ</sub>) and outside the enemy's.</td></tr>
+<tr><td class="k">Track</td><td class="n">0.25</td><td>Holding a firm track (1), acquiring (0.5), coasting (0.4, fading with age), none (0).</td></tr>
+<tr><td class="k">Energy</td><td class="n">0.15</td><td>Having more energy (speed and height) than the enemy.</td></tr>
+<tr><td class="k">Support</td><td class="n">0.30</td><td>Keeping a good track while your own missile still needs guidance.</td></tr>
+<tr><td class="k">Defence</td><td class="n">0.80</td><td>Negative while an enemy missile is inbound, more so as its time-to-go runs out: −0.8 × (1 − tanh(time-to-go / 25 s)). Defending lengthens time-to-go.</td></tr>
+</table>
+
+<h2>10.3 Costs</h2>
+<table>
+<tr><th>Cost</th><th>Size</th><th>Purpose</th></tr>
+<tr><td class="k">Heading change</td><td>0.04 per 180° of change</td><td>Stops wing-rocking. Flipping +30° ↔ −30° costs 0.013; a 135° defensive turn 0.03.</td></tr>
+<tr><td class="k">Shot (doctrine)</td><td>per missile fired: AGGRESSIVE 0 · BALANCED 0.10 · CONSERVATIVE 0.30</td><td>A price per missile. The agent sees the price as an input, so one model learns all three styles. MIXED training draws one per episode.</td></tr>
+</table>
+
+<h2>10.4 2v1 team rewards</h2>
+<p>In 2v1 both aircraft share a team reward: <b>+1.0</b> when the enemy is destroyed, <b>−1.0</b> for each blue aircraft shot down, −1.0 for a crash, −0.5 for a timeout, −0.6 for an escape, +0.4 if the enemy crashes. Each aircraft also gets its own shaping and costs.</p>
+<div class="box"><h4>Where to see it</h4>
+<p>On the TRAINING page, <b>REWARD DRIVERS</b> shows how much each shaping term and cost has moved the reward recently. A term near zero isn't influencing learning; a dominant one may be steering it too much.</p></div>
+</div>
+
+<div class="chap">
+<h1>11 · How the agent learns</h1>
+<h2>11.1 The method: PPO, in plain words</h2>
+<ol class="steps">
+<li><b>Fly.</b> Each parallel environment flies 1,024 decisions with the current network, recording inputs, choices and rewards.</li>
+<li><b>Judge.</b> The critic estimates how good each situation was. Comparing that with what actually followed shows which choices turned out better or worse than expected.</li>
+<li><b>Improve.</b> The actor is nudged to make the better choices more likely, in 6 passes over the data in batches of 256. PPO limits each nudge (the "clip") so that one batch can't change the network too much.</li>
+<li><b>Repeat</b> until the training steps are used up.</li>
+</ol>
+
+<h2>11.2 Settings</h2>
+<table>
+<tr><th>Setting</th><th class="n">Value</th><th>Meaning</th></tr>
+<tr><td class="k">Gamma (γ)</td><td class="n">0.997</td><td>How much future rewards count. A missile flies about 40 s, so a launch decision is 40 steps from its result. At 0.997, 89% of the result reaches the launch; at 0.99 only 67%; at 0.95 13%.</td></tr>
+<tr><td class="k">Learning rate</td><td class="n">0.00025</td><td>Step size of each update. Lower if updates are unstable.</td></tr>
+<tr><td class="k">Steps per update</td><td class="n">1,024</td><td>Per environment. Long enough to cover a whole engagement.</td></tr>
+<tr><td class="k">Batch size</td><td class="n">256</td><td>Decisions per gradient step.</td></tr>
+<tr><td class="k">Passes</td><td class="n">6</td><td>Passes over each batch of data.</td></tr>
+<tr><td class="k">Clip</td><td class="n">0.2</td><td>Limit on how far one update may change the choice probabilities.</td></tr>
+<tr><td class="k">Target KL</td><td class="n">0.02</td><td>Stops an update early if it changes the network too much.</td></tr>
+<tr><td class="k">Entropy</td><td class="n">0.01</td><td>Keeps the agent exploring.</td></tr>
+<tr><td class="k">Network</td><td class="n">256 × 256</td><td>Two hidden layers each for the actor and the critic.</td></tr>
+<tr><td class="k">Frames</td><td class="n">8</td><td>The last 8 seconds of inputs are given together.</td></tr>
+</table>
+
+<h2>11.3 Masks</h2>
+<p>Impossible choices are removed before the network chooses (for example, firing without a firm track). This is "MaskablePPO". The agent never wastes time learning that impossible choices don't work.</p>
+</div>
+
+<div class="chap">
+<h1>12 · The curriculum and the opponents</h1>
+<p>Starting against a skilled opponent, the agent would rarely win and learn little. So it starts easy, and the opponent gets harder as it improves:</p>
+<div class="chev"><span>STRAIGHT</span><i>›</i><span>EVASIVE</span><i>›</i><span>NOTCHER</span><i>›</i><span>SHOOTER</span><i>›</i><span>ADAPTIVE</span><i>›</i><span>SELF-PLAY</span></div>
+<table>
+<tr><th>Stage</th><th>Armed?</th><th>Behaviour</th><th>What the agent learns</th></tr>
+<tr><td class="k">STRAIGHT</td><td>no</td><td>Flies straight at constant speed and altitude.</td><td>Find, track and shoot.</td></tr>
+<tr><td class="k">EVASIVE</td><td>no</td><td>Slow S-turns (±35–70°, every 25–45 s) and altitude changes.</td><td>Keep the radar on a changing target.</td></tr>
+<tr><td class="k">NOTCHER</td><td>no</td><td>When spiked or within 90 km, turns 90° to the agent (beaming) and descends 2 km, switching sides every 12–25 s.</td><td>That a track isn't permanent; how to close on a beaming target.</td></tr>
+<tr><td class="k">SHOOTER</td><td>yes</td><td>Commits; fires at 80% of its R<sub>max</sub>; cranks 50° while its missile needs guidance; turns cold and runs once it doesn't; re-attacks beyond 60 km; defends (beam and dive) against inbound missiles.</td><td>Fight an armed enemy: shoot, support, defend.</td></tr>
+<tr><td class="k">ADAPTIVE</td><td>yes</td><td>SHOOTER with random settings each episode: shot at 60–95% of R<sub>max</sub>, crank 35–70°, re-attack 30–55 km, 8–20 s between shots.</td><td>Not to overfit one opponent's habits.</td></tr>
+<tr><td class="k">SELF-PLAY</td><td>yes</td><td>Frozen copies of the agent itself (chapter 13).</td><td>Beat an opponent as good as itself.</td></tr>
+</table>
+
+<h2>When does it advance?</h2>
+<p>The curriculum moves on when <b>all three</b> hold:</p>
+<ol class="steps">
+<li>At least <b>60 episodes</b> have been played at the current stage (MIN EPISODES / STAGE). This makes sure the 50 episodes it judges are all against the current opponent.</li>
+<li>The win rate over the <b>last 50 episodes</b> is at least <b>65%</b> (ADVANCE AT).</li>
+<li>It has stayed there for <b>5 checks in a row</b>, one check every 10 episodes (HOLD FOR). A single lucky streak isn't enough: with 1 check, an agent that really wins 55% passed a 65% mark within 1,000 episodes 97% of the time; with 5 checks, 29%.</li>
+</ol>
+<p>All three are set per run on the TRAINING page. For a mismatched matchup (e.g. two UCAVs against an F-16), 65% may be out of reach: lower ADVANCE AT.</p>
+<p>At each advance, the model just before the change is saved as <code>archive/pre_&lt;STAGE&gt;.zip</code>. The best model at each stage is saved as <code>archive/best_&lt;STAGE&gt;_&lt;win rate&gt;.zip</code>.</p>
+</div>
+
+<div class="chap">
+<h1>13 · Self-play</h1>
+<p>In self-play the opponent is a frozen copy ("snapshot") of the agent itself. It only exists in 1v1 with both sides on the same platform, since a copy of the agent can only fly the aircraft it was trained on.</p>
+
+<h2>Step by step</h2>
+<ol class="steps">
+<li><b>The pool starts empty.</b> At the start of every training run, the snapshot pool (<code>models_bvr/selfplay_pool/</code>) is emptied, so a run only ever meets copies of its own policy.</li>
+<li><b>First snapshot.</b> When the SELF-PLAY stage begins, the current policy is saved into the pool.</li>
+<li><b>More snapshots.</b> Every 250,000 steps another is added. The pool keeps the newest 12, about the last 3 million steps of the policy.</li>
+<li><b>Each episode, an opponent is drawn:</b>
+<ul>
+<li>1 in 3 episodes: the scripted ADAPTIVE shooter, so a committed attacker stays in the mix. Without it, self-play tends to settle into both sides turning away at long range.</li>
+<li>Otherwise, half the time the newest snapshot, and otherwise a random snapshot from the pool. Facing older versions stops the agent forgetting how to beat them.</li>
+</ul></li>
+<li><b>The snapshot flies fairly.</b> It has its own radar and track, the same inputs, the same firing rule, its own missile guidance, and its own doctrine.</li>
+<li><b>Only the agent learns.</b> Snapshots are frozen.</li>
+</ol>
+
+<h2>Watching it</h2>
+<ul>
+<li>The log and TensorBoard split the win rate into <b>against snapshots</b> and <b>against scripted</b>. Around 50% against snapshots means parity with its recent selves.</li>
+<li>If the win rate against scripted falls while the rate against snapshots rises, the agent is overfitting to its own style: raise the scripted share.</li>
+<li>SELF-PLAY is the last stage; the curriculum doesn't advance beyond it.</li>
+</ul>
+
+<h2>Settings (SELF-PLAY section of the TRAINING page)</h2>
+<table>
+<tr><th>Setting</th><th class="n">Default</th><th>Change it when</th></tr>
+<tr><td class="k">Scripted share</td><td class="n">33%</td><td>Raise if the agent overfits to its own style; lower if the scripted shooter is already beaten easily.</td></tr>
+<tr><td class="k">Newest share</td><td class="n">50%</td><td>Lower if it forgets how to beat older versions; raise for harder, more current opposition.</td></tr>
+<tr><td class="k">Snapshot every</td><td class="n">250k steps</td><td>Shorter keeps opponents close to the current policy; longer spreads them over more of its history.</td></tr>
+<tr><td class="k">Pool size</td><td class="n">12</td><td>Bigger keeps older opponents longer, at the cost of disk and loading time.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>14 · Two against one (2v1)</h1>
+<p>In 2v1 two blue aircraft fight one red. Both blue aircraft are flown by <b>the same network</b>; each gets its own inputs and makes its own choices.</p>
+<ul>
+<li><b>Datalink.</b> If an aircraft has no firm track of its own, it uses its wingman's, with 150 m extra uncertainty and 0.2 s delay. It can even fire on it.</li>
+<li><b>Wingman inputs.</b> 17 of the 68 inputs describe the wingman: position, heading, speed, track, missiles, threats.</li>
+<li><b>Formation.</b> The wingman starts beside the lead (abreast), behind it (trail) or behind and to the side (echelon).</li>
+<li><b>Red's targeting.</b> Red opens on the nearer blue aircraft and switches only if the other gets much closer. While cranking, SHOOTER and ADAPTIVE also fire at the other blue aircraft if it is in range and within 60° of red's nose.</li>
+<li><b>Rewards.</b> Team rewards (chapter 10.4). A mutual kill (red destroyed, one blue lost) is worth 0, between a clean kill (+1) and a timeout (−0.5).</li>
+<li><b>No self-play yet.</b> Red is always scripted, so the 2v1 curriculum ends at ADAPTIVE.</li>
+</ul>
+<div class="warn"><h4>Lessons from 2v1 training</h4>
+<ul>
+<li>With a lost aircraft costing only −0.7, the team learned to sacrifice the lead as bait and kill with the wingman: 90% mutual kills. The cost is now −1.0, and red also shoots the second aircraft.</li>
+<li>UCAVs are slower than F-16s. With a 300 s limit, even ideal play timed out on most starts beyond 85 km. Raise <code>MAX_STEPS</code> (400–480) for slow platforms.</li>
+</ul></div>
+</div>
+
+<div class="chap">
+<h1>15 · The parameter library</h1>
+<p>Every number the simulation uses for an aircraft, its radar and its missile is stored in the <b>library</b>, as JSON files.</p>
+<table>
+<tr><th>Kind</th><th>Holds</th><th>Built-in items</th></tr>
+<tr><td class="k">airframe</td><td>Mass, wing, thrust, drag, limits</td><td>F-16C, GENERIC-UCAV</td></tr>
+<tr><td class="k">radar</td><td>Range, field of view, error sizes</td><td>APG-68, GENERIC-UCAV-RADAR</td></tr>
+<tr><td class="k">missile</td><td>Motor, drag, guidance, seeker, hand-off, support rule</td><td>AIM-120</td></tr>
+<tr><td class="k">platform</td><td>An airframe + radar + missile, missile count, RCS, speed choices, altitude band</td><td>F-16C, GENERIC-UCAV</td></tr>
+</table>
+<h2>Folders</h2>
+<ul>
+<li><code>library/builtin/&lt;kind&gt;/</code>: shipped with the code, read-only.</li>
+<li><code>library/user/&lt;kind&gt;/</code>: your copies.</li>
+<li><code>library/envelopes/</code>: calibrated missile envelopes, one per missile version.</li>
+</ul>
+<h2>Making your own aircraft, step by step</h2>
+<ol class="steps">
+<li>On the LIBRARY tab, open a built-in item and click <b>⧉ Copy…</b>. Built-ins are never changed.</li>
+<li>Edit the copy's values and click <b>✔ Save</b>. Each value has a unit, a valid range and a source note.</li>
+<li>For an airframe or platform, click <b>▶ Performance card</b>: it flies the flight model and reports top speed, turn, climb, ceiling and autopilot behaviour, with warnings.</li>
+<li>For a missile, click <b>⟳ Calibrate envelope</b> (or <code>python sweep_envelope.py --missile &lt;id&gt;</code>). Training refuses to start until a missile has an envelope for its exact values. The file name carries a fingerprint, so editing the missile invalidates the old table.</li>
+<li>Select your platform under ENGAGEMENT on the TRAINING page.</li>
+</ol>
+<div class="tip"><h4>Old models keep their meaning</h4>
+<p>Every checkpoint stores the platforms and the full items it was trained with. Later edits in the library never change what an old checkpoint means.</p></div>
+</div>
+
+<!-- ═══════════════════════ PART C ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART C</div>
+  <div class="pt">The GUI, page by page</div>
+  <div class="pd">Every field and every number on the four pages, and what good values look like.</div>
+  <ol start="16"><li>The TRAINING page</li><li>The WATCH page</li><li>The CROSS-PLAY page</li><li>The LIBRARY page</li></ol>
+</div>
+
+<div class="chap first">
+<h1>16 · The TRAINING page</h1>
+<h2>16.1 Setup fields</h2>
+<table>
+<tr><th>Field</th><th>Default</th><th>What it does</th></tr>
+<tr><td class="k">Engagement</td><td>1 v 1, F-16C v F-16C</td><td>Format, the agent's platform, the opponent's platform (and the wingman's in 2v1).</td></tr>
+<tr><td class="k">Opponent stage</td><td>STRAIGHT</td><td>The curriculum stage to start at.</td></tr>
+<tr><td class="k">Missile doctrine</td><td>MIXED</td><td>The cost per missile: one fixed doctrine, or a random one per episode.</td></tr>
+<tr><td class="k">Training steps</td><td>2,000,000</td><td>Decisions to train for. The estimate shows the expected time.</td></tr>
+<tr><td class="k">Parallel envs</td><td>1</td><td>Simulations run at once, one CPU core each.</td></tr>
+<tr><td class="k">Gamma · Learn rate · Batch</td><td>0.997 · 0.00025 · 256</td><td>PPO settings (chapter 11).</td></tr>
+<tr><td class="k">Auto-curriculum</td><td>ON</td><td>Advance through the stages automatically. OFF keeps the starting stage.</td></tr>
+<tr><td class="k">Model name</td><td>latest</td><td>File the final model is saved as.</td></tr>
+<tr><td class="k">Resume from</td><td>fresh start</td><td>Continue from a saved model.</td></tr>
+<tr><td class="k">Advance at · Min episodes · Hold for</td><td>65% · 60 · 5</td><td>The curriculum rule (chapter 12).</td></tr>
+<tr><td class="k">Self-play (advanced)</td><td>33% · 50% · 250k · 12</td><td>Chapter 13. Greyed out when the run can't reach self-play.</td></tr>
+</table>
+<p>The warning line under ENGAGEMENT explains consequences of the matchup, for example that different platforms end the curriculum at ADAPTIVE.</p>
+
+<h2>16.2 Key numbers (over the last 50 episodes)</h2>
+<table>
+<tr><th>Number</th><th>Meaning</th><th>Good looks like</th></tr>
+<tr><td class="k">Win rate</td><td>Share of episodes won outright.</td><td>Rising. 65% advances the curriculum.</td></tr>
+<tr><td class="k">Exchange ratio</td><td>(kills + mutual kills) ÷ (losses + mutual kills): enemies destroyed per own aircraft lost. With no losses, the number of enemies destroyed.</td><td>Above 2 is good; about 1 is trading evenly.</td></tr>
+<tr><td class="k">Realised Pk</td><td>Kills per missile fired.</td><td>0.25–0.45 against armed opponents is typical here.</td></tr>
+<tr><td class="k">Timeout rate</td><td>Share of episodes with no result.</td><td>Low. High means hesitating, or episodes too short.</td></tr>
+<tr><td class="k">Launch range</td><td>Average range at launch.</td><td>Depends on the platforms; compare with r/R<sub>max</sub>.</td></tr>
+<tr><td class="k">r / R<sub>max</sub> at shot</td><td>Where in the envelope it shoots.</td><td>0.6–0.85. Above 0.9 is shooting too far out.</td></tr>
+<tr><td class="k">Shots / episode</td><td>Missiles fired per episode.</td><td>1–3. Very high means spraying.</td></tr>
+<tr><td class="k">Track fraction</td><td>Share of seconds with a firm track.</td><td>Rising; 70–80% in a good run.</td></tr>
+<tr><td class="k">Bank reversals / min</td><td>Wing-rocking check.</td><td>A few a minute. 15+ means switching heading choice too often.</td></tr>
+<tr><td class="k">Blue lost / episode</td><td>2v1 only.</td><td>Low.</td></tr>
+</table>
+
+<h2>16.3 Charts</h2>
+<ul>
+<li><b>Outcomes</b>: win, loss, timeout and mutual shares over training. The dashed line is the advance mark.</li>
+<li><b>Exchange ratio, realised Pk, shots / episode, r / R<sub>max</sub> at shot, track fraction</b>: trends of the key numbers.</li>
+<li><b>Bank reversals / min</b>, with a line underneath: heading-choice changes per minute and the most frequent pairs, e.g. "+30↔+50° 42%". It tells you whether the agent rocks left–right or only adjusts on one side.</li>
+<li><b>Reward drivers</b>: how much each shaping term and cost moved the reward recently.</li>
+<li><b>By doctrine</b>: shots, Pk and win rate under each doctrine.</li>
+<li>Each chart has a maximise button. The history is thinned evenly, so long runs keep their whole shape.</li>
+</ul>
+
+<h2>16.4 Curriculum bar and CURRENT RUN</h2>
+<ul>
+<li>The bar shows the stage, the win rate against the advance mark, and progress, e.g. "advance at 65% → EVASIVE (held 3/5 checks)".</li>
+<li><b>CURRENT RUN</b> lists the running configuration and startup notes, such as warm-start notes when resuming an older model (chapter 22) and "self-play pool cleared".</li>
+</ul>
+</div>
+
+<div class="chap">
+<h1>17 · The WATCH page</h1>
+<h2>17.1 Fields</h2>
+<table>
+<tr><th>Field</th><th>What it does</th></tr>
+<tr><td class="k">Opponent</td><td>STRAIGHT … ADAPTIVE, or SELF PLAY (snapshots from the pool).</td></tr>
+<tr><td class="k">Playback speed</td><td>0.5× to 50×.</td></tr>
+<tr><td class="k">Episodes</td><td>Stop after 10, 25, 50, 100, 200, or play until stopped.</td></tr>
+<tr><td class="k">Missile doctrine</td><td>The cost per missile the model is told about.</td></tr>
+<tr><td class="k">Opponent flies · Format</td><td>Default: as the model was trained.</td></tr>
+<tr><td class="k">Checkpoint to load</td><td>The model to watch, or a random policy.</td></tr>
+</table>
+
+<h2>17.2 Watch statistics</h2>
+<p>Summed over the episodes since START EVAL; episodes stopped part-way are left out.</p>
+<ul>
+<li><b>Outcome counts</b> and shares.</li>
+<li><b>Win rate with its 95% range</b>, e.g. "40% (22–61%)". With 10 episodes the range is wide, so don't read much into it.</li>
+<li><b>Exchange ratio, realised Pk, shots / episode, mean r/R<sub>max</sub> at shot, mean length, timeout rate</b>; in 2v1, blue lost per episode.</li>
+<li><b>By start geometry and by start range</b>: win / mutual / loss / timeout / other for each. ⇄ marks mirrored starts, where the opponent had the better start. This shows <i>where</i> the model wins and loses.</li>
+</ul>
+
+<h2>17.3 3-D view and shot trace</h2>
+<ul>
+<li>Left-drag rotates, right-drag pans, the scroll wheel zooms. Aircraft stay vivid at any zoom.</li>
+<li><b>📋 Shot Trace</b> (log bar) lists each launch of the last episode with range, aspect, track state, uncertainty, track age and r/R<sub>max</sub>.</li>
+</ul>
+</div>
+
+<div class="chap">
+<h1>18 · The CROSS-PLAY page</h1>
+<h2>18.1 Fields</h2>
+<table>
+<tr><th>Field</th><th>What it does</th></tr>
+<tr><td class="k">Checkpoints</td><td>Models to include, with quick links for all, archive only, or none.</td></tr>
+<tr><td class="k">Scripted columns</td><td>Add scripted opponents as extra columns.</td></tr>
+<tr><td class="k">Scripted platform</td><td>What scripted opponents fly (default: each model's training opponent).</td></tr>
+<tr><td class="k">Games per cell</td><td>Games per ordered pairing; 100 is a good default.</td></tr>
+<tr><td class="k">Workers</td><td>Parallel processes.</td></tr>
+<tr><td class="k">Doctrine</td><td>Doctrine for both sides.</td></tr>
+</table>
+
+<h2>18.2 How games are scored</h2>
+<ul>
+<li>Win = KILL or BANDIT_CRASH (1). Loss = SHOT_DOWN or CRASH (0). Draw = MUTUAL_KILL, TIMEOUT or ESCAPE (0.5).</li>
+<li>The row model flies AC1; the column model AC2, with its own radar and track.</li>
+<li>Game <i>i</i> of every pairing starts from the same geometry. Both orders (A v B and B v A) are played on the same starts.</li>
+<li>Models take their most likely action (sampling can be switched on from the command line).</li>
+</ul>
+
+<h2>18.3 Seat bias</h2>
+<p>A model against itself should score 0.5. The difference is the AC1 seat's advantage. Starts used to be drawn from AC1's side, which gave AC1 a real head start (a bias of about +0.13). Since half the starts are now mirrored, the bias should sit near 0. Either way it cancels in head-to-head scores and Elo, because every pairing is played from both seats. A large bias usually means few games per cell.</p>
+
+<h2>18.4 Elo</h2>
+<p>A rating for each model and scripted opponent, fitted over all games, mean 1000. 100 points ≈ a 0.64 expected score for the higher-rated side.</p>
+</div>
+
+<div class="chap">
+<h1>19 · The LIBRARY page</h1>
+<ul>
+<li><b>Left:</b> the items by kind, built-in and yours.</li>
+<li><b>Right:</b> the selected item's values grouped by topic, each with unit, valid range and source. Advanced groups are folded.</li>
+<li><b>⧉ Copy…</b> makes an editable copy of any item. <b>✔ Save</b> checks every value against its valid range; <b>✕ Delete</b> removes one of your items.</li>
+<li><b>▶ Performance card</b> (platforms and airframes): flies the flight model and reports what it can do.</li>
+<li><b>⟳ Calibrate envelope</b> (missiles): measures the launch envelope. A missile can't be used in training without it. Calibrated missiles show ✓ cal in the list.</li>
+</ul>
+</div>
+
+<!-- ═══════════════════════ PART D ═══════════════════════ -->
+<div class="part">
+  <div class="pn">PART D</div>
+  <div class="pt">Working with results</div>
+  <div class="pd">How to judge a run, what to do when something looks wrong, where everything is stored, and reference material.</div>
+  <ol start="20"><li>Reading a training run</li><li>Symptoms and what to do</li><li>Files, checkpoints and versions</li><li>Command-line reference</li><li>DCS World: first step</li><li>Troubleshooting</li><li>Glossary</li></ol>
+</div>
+
+<div class="chap first">
+<h1>20 · Reading a training run</h1>
+<h2>A healthy run</h2>
+<ul>
+<li><b>Track fraction rises first.</b> The agent learns to point its radar at the enemy before it learns to shoot well.</li>
+<li><b>Win rate rises and timeouts fall</b> at each stage, then <b>dip after each advance</b> and recover. A dip is normal: the new opponent is harder.</li>
+<li><b>r/R<sub>max</sub> at shot settles in 0.6–0.85</b>, and Pk rises.</li>
+<li><b>Bank reversals stay at a few a minute.</b></li>
+</ul>
+
+<h2>Judging progress fairly</h2>
+<ul>
+<li><b>Training numbers move with the opponent.</b> A lower win rate after an advance, or after a change such as mirrored starts, doesn't mean a worse model.</li>
+<li><b>Compare models in CROSS-PLAY</b>, on the same starts, from both seats, many games.</li>
+<li><b>Use WATCH statistics</b> to see <i>where</i> a model wins and loses: by start geometry and range.</li>
+<li><b>Watch some episodes.</b> Several problems in this project were found by watching: the dive in 2v1, wing-rocking, hesitation at the start.</li>
+</ul>
+
+<h2>TensorBoard</h2>
+<p>Training also writes to <code>tb_logs_bvr/</code>. Start TensorBoard with <code>tensorboard --logdir tb_logs_bvr</code> for more detail: PPO internals (clip fraction, KL), every reward term, the win rate split by opponent kind in self-play, and heading switches per minute.</p>
+<div class="box"><h4>PPO health check</h4>
+<p>If the clip fraction stays around 0.25 or higher, and the KL around 0.02 (the stop threshold), updates are large. Lowering the learning rate (e.g. to 0.0001) often makes training steadier.</p></div>
+</div>
+
+<div class="chap">
+<h1>21 · Symptoms and what to do</h1>
+<p>Each row comes from something observed while developing this project.</p>
+<table>
+<tr><th style="width:24%">Symptom</th><th style="width:38%">Likely cause</th><th>What to do</th></tr>
+<tr><td class="k">Many timeouts, especially from long starts</td><td>Slow platforms can't close the distance in 300 s. With UCAVs (250 m/s) even ideal play timed out on most starts beyond 85 km.</td><td>Raise <code>MAX_STEPS</code> in <code>bvr_env.py</code> (e.g. 400–480). Check WATCH statistics by start range.</td></tr>
+<tr><td class="k">Curriculum stuck at a stage</td><td>An outmatched platform may never reach 65%.</td><td>Lower ADVANCE AT for that matchup; check whether the stage is winnable by watching.</td></tr>
+<tr><td class="k">Curriculum advances, then collapses</td><td>Advanced on a lucky streak.</td><td>Keep HOLD FOR at 5 or more; use MIN EPISODES 60+.</td></tr>
+<tr><td class="k">Bank reversals 15+ a minute</td><td>The policy keeps switching heading choice.</td><td>Read the heading-pair line under the chart. Left↔right pairs are rocking; same-side pairs are crank adjustments. The heading cost is 0.04; a fresh run learns it better than a resumed one.</td></tr>
+<tr><td class="k">Shots at r/R<sub>max</sub> above 0.9, low Pk</td><td>Shooting at the edge of the envelope; the target turns away and the missile runs out of energy.</td><td>Expect it to improve with training; try the BALANCED or CONSERVATIVE doctrine.</td></tr>
+<tr><td class="k">Low track fraction against a small target</td><td>Radar range shrinks with target size: about 38 km for a UCAV radar against a UCAV.</td><td>Expected; longer episodes help the agent close.</td></tr>
+<tr><td class="k">2v1: mostly mutual kills</td><td>Sacrificing one aircraft paid off.</td><td>Already addressed (−1.0 per loss, red targets the nearer aircraft and shoots both).</td></tr>
+<tr><td class="k">Win rate drops after resuming</td><td>The model was trained under an older simulation revision.</td><td>Read the warm-start notes in CURRENT RUN (chapter 22); give it time.</td></tr>
+<tr><td class="k">Win against snapshots rises, against scripted falls</td><td>Self-play overfitting.</td><td>Raise the self-play scripted share.</td></tr>
+<tr><td class="k">Large seat bias in cross-play</td><td>Few games per cell.</td><td>Add games; it never skews head-to-head scores or Elo.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>22 · Files, checkpoints and versions</h1>
+<h2>Where things are</h2>
+<table>
+<tr><th>Path</th><th>Contents</th></tr>
+<tr><td class="k"><code>models_bvr/&lt;name&gt;.zip</code></td><td>A run's final model, saved when the run ends or is stopped.</td></tr>
+<tr><td class="k"><code>models_bvr/archive/pre_&lt;STAGE&gt;.zip</code></td><td>The model just before the curriculum advanced to STAGE.</td></tr>
+<tr><td class="k"><code>models_bvr/archive/best_&lt;STAGE&gt;_&lt;rate&gt;.zip</code></td><td>The best win rate reached at a stage: your backup if training later makes the model worse.</td></tr>
+<tr><td class="k"><code>models_bvr/selfplay_pool/</code></td><td>Self-play snapshots of the current run. Emptied at the start of every run.</td></tr>
+<tr><td class="k"><code>tb_logs_bvr/</code></td><td>TensorBoard logs, one folder per run.</td></tr>
+<tr><td class="k"><code>bvr_metrics.json</code></td><td>What the dashboard shows, rewritten every 10 episodes.</td></tr>
+<tr><td class="k"><code>crossplay_results/</code></td><td>Cross-play matrices, Elo and raw games.</td></tr>
+<tr><td class="k"><code>library/</code></td><td>Parameter library (chapter 15).</td></tr>
+</table>
+
+<h2>Simulation revisions and warm starts</h2>
+<p>When the simulation, inputs or rewards change in a way that changes what a trained model experiences, the simulation revision goes up. Resuming a model trained under an older revision works, but the trainer prints a <b>warm-start note</b> for each change it missed, so you know it isn't a pure continuation. Older models also get new inputs added automatically, with zero weight, so they keep working.</p>
+<table>
+<tr><th class="n">Rev</th><th>Change</th></tr>
+<tr><td class="n">2</td><td>Missile time-to-go fixed; time-to-go inputs, defence reward and scripted defence changed.</td></tr>
+<tr><td class="n">3</td><td>Defence term became −0.8 × (1 − tanh(time-to-go / 25)): an inbound missile only ever lowers the score.</td></tr>
+<tr><td class="n">4</td><td>Without a track, the heading choice is an offset from the last known bearing; 4 heading inputs added.</td></tr>
+<tr><td class="n">5</td><td>2v1: red opens on the nearer aircraft and shoots both; a lost blue aircraft costs −1.0.</td></tr>
+<tr><td class="n">6</td><td>Missiles only within 60° of the nose.</td></tr>
+<tr><td class="n">7</td><td>Heading change costs 0.04 per 180° (was 0.015).</td></tr>
+<tr><td class="n">8</td><td>Half the starts mirrored.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>23 · Command-line reference</h1>
+<p>Everything the GUI does can also be run from a terminal.</p>
+<h2><code>train_bvr.py</code>: training</h2>
+<pre>python train_bvr.py --steps 2000000 --n-envs 8 --opponent straight --run-name f16_first</pre>
+<table>
+<tr><th>Option</th><th>Default</th><th>Meaning</th></tr>
+<tr><td class="k">--steps</td><td>2,000,000</td><td>Decisions to train.</td></tr>
+<tr><td class="k">--n-envs</td><td>1</td><td>Parallel environments.</td></tr>
+<tr><td class="k">--opponent</td><td>straight</td><td>Starting stage: straight, evasive, notcher, shooter, adaptive_shooter, self_play.</td></tr>
+<tr><td class="k">--resume PATH</td><td>none</td><td>Continue from a saved model.</td></tr>
+<tr><td class="k">--run-name</td><td>latest</td><td>Final model file name.</td></tr>
+<tr><td class="k">--save-dir</td><td>models_bvr</td><td>Where models go.</td></tr>
+<tr><td class="k">--no-curriculum</td><td></td><td>Stay on the starting stage.</td></tr>
+<tr><td class="k">--advance-win-rate</td><td>0.65</td><td>Curriculum mark.</td></tr>
+<tr><td class="k">--advance-min-episodes</td><td>60</td><td>Episodes at a stage before advancing.</td></tr>
+<tr><td class="k">--advance-hold-checks</td><td>5</td><td>Checks in a row at the mark.</td></tr>
+<tr><td class="k">--sp-scripted-frac · --sp-newest-frac</td><td>1/3 · 0.5</td><td>Self-play opponent mix.</td></tr>
+<tr><td class="k">--sp-snapshot-steps · --sp-pool-size</td><td>250,000 · 12</td><td>Self-play snapshots.</td></tr>
+<tr><td class="k">--doctrine</td><td>mixed</td><td>mixed, aggressive, balanced, conservative.</td></tr>
+<tr><td class="k">--platform · --opponent-platform</td><td>F-16C</td><td>Library platforms.</td></tr>
+<tr><td class="k">--format · --wingman-platform</td><td>1v1</td><td>1v1 or 2v1; the wingman's platform.</td></tr>
+<tr><td class="k">--gamma · --lr · --batch-size</td><td>0.997 · 0.00025 · 256</td><td>PPO settings.</td></tr>
+<tr><td class="k">--seed</td><td>42</td><td>Random seed.</td></tr>
+<tr><td class="k">--no-privileged</td><td></td><td>Critic without the true values.</td></tr>
+</table>
+
+<h2><code>crossplay.py</code>: comparing models</h2>
+<pre>python crossplay.py models_bvr/archive --episodes 100 --workers 8 --scripted shooter adaptive_shooter</pre>
+<p>Options: <code>--episodes</code> (games per pairing), <code>--scripted</code>, <code>--scripted-platform</code>, <code>--doctrine</code>, <code>--stochastic</code> (sample actions), <code>--workers</code>, <code>--seed</code>, <code>--out</code>.</p>
+
+<h2>Other tools</h2>
+<table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td class="k"><code>python bvr_gui.py</code></td><td>Starts the GUI (<code>--port</code>, <code>--ws-port</code>, <code>--model-dir</code>).</td></tr>
+<tr><td class="k"><code>python test_sim.py</code></td><td>Runs the 36 tests.</td></tr>
+<tr><td class="k"><code>python sweep_envelope.py --missile ID</code></td><td>Calibrates a missile's launch envelope (<code>--quick</code> for a coarse check).</td></tr>
+<tr><td class="k"><code>python bvr_perf.py PLATFORM</code></td><td>Performance card of a platform.</td></tr>
+<tr><td class="k"><code>python dcs_obs_check.py LOG.jsonl</code></td><td>Compares a DCS recording's inputs with training (chapter 24).</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>24 · DCS World: first step</h1>
+<p>The long-term aim is to fly a trained model in DCS World. Training stays in this simulator, since DCS runs in real time and has no quick reset. The first step, already built, checks whether a policy's inputs would look the same in DCS as in training.</p>
+<ol class="steps">
+<li><b>Allow file access</b> for mission scripts: in <code>&lt;DCS&gt;\Scripts\MissionScripting.lua</code>, comment out <code>sanitizeModule('io')</code> and <code>sanitizeModule('lfs')</code>. While they are off, any mission can read and write files on your computer; restore them afterwards.</li>
+<li><b>Build a mission</b> with one blue and one red jet, 60–110 km apart, and a MISSION START trigger running <code>dcs/bvr_logger.lua</code> (DO SCRIPT FILE).</li>
+<li><b>Fly it.</b> The logger writes <code>Saved Games\DCS\Logs\bvr_rl_*.jsonl</code>, 10 times a second.</li>
+<li><b>Check it:</b> <code>python dcs_obs_check.py &lt;file&gt; --platform F-16C --opp-platform F-16C --max-steps 400</code>. Inputs flagged OUTSIDE or CLIP are ones the policy has rarely or never seen.</li>
+</ol>
+<p class="small">Details in <code>dcs/README.md</code>. Only 1v1 so far. The logger has been tested against a mock of the DCS scripting API, not yet inside DCS.</p>
+</div>
+
+<div class="chap">
+<h1>25 · Troubleshooting</h1>
+<table>
+<tr><th style="width:34%">Problem</th><th>What to check</th></tr>
+<tr><td class="k">GUI page doesn't open</td><td>Is <code>bvr_gui.py</code> running? Open <b>http://localhost:5006</b>. If a port is busy, start with <code>--port</code> / <code>--ws-port</code>.</td></tr>
+<tr><td class="k">Dashboard stays empty</td><td>It fills after 10 episodes. The first may take 30–60 s.</td></tr>
+<tr><td class="k">A model isn't in the list</td><td>The list is read from <code>models_bvr/</code> when a run or eval stops; reload the page.</td></tr>
+<tr><td class="k">Changes after <code>git pull</code> don't appear</td><td>Restart the GUI. A running training keeps its old code until the next run.</td></tr>
+<tr><td class="k">"SELF_PLAY needs both sides on one platform"</td><td>Self-play only works with the same platform on both sides, in 1v1.</td></tr>
+<tr><td class="k">Training refuses: missile not calibrated</td><td>Calibrate the missile (chapter 15).</td></tr>
+<tr><td class="k">Warm-start notes when resuming</td><td>Normal: the model was trained under an older revision (chapter 22).</td></tr>
+<tr><td class="k">Warning on the TRAINING page about code or files</td><td>The GUI reports local edits or library problems. Read the message; it names the file.</td></tr>
+<tr><td class="k">Training is slow</td><td>Add parallel envs (one per spare core). Stop WATCH playback while training: it uses CPU too.</td></tr>
+<tr><td class="k">A test fails</td><td>Run <code>python test_sim.py</code> again to see the failing check and its message; pull the latest code.</td></tr>
+</table>
+</div>
+
+<div class="chap">
+<h1>26 · Glossary</h1>
+<table>
+<tr><th style="width:24%">Term</th><th>Meaning</th></tr>
+<tr><td class="k">BVR</td><td>Beyond visual range: combat by radar and radar-guided missiles at tens of kilometres.</td></tr>
+<tr><td class="k">Agent · policy · model</td><td>The neural network that flies the aircraft. A saved one is a checkpoint (<code>.zip</code>).</td></tr>
+<tr><td class="k">Episode</td><td>One engagement, from start to outcome.</td></tr>
+<tr><td class="k">Step · decision</td><td>One choice by the agent: one simulated second.</td></tr>
+<tr><td class="k">Bandit</td><td>The enemy aircraft.</td></tr>
+<tr><td class="k">Aspect</td><td>Which way the target points relative to you: 0° head-on, 180° tail-on.</td></tr>
+<tr><td class="k">Off-boresight</td><td>How far the target is off your nose.</td></tr>
+<tr><td class="k">Crank</td><td>Turning 30–50° off the bandit after a launch: keeps it on radar while slowing the closure.</td></tr>
+<tr><td class="k">Beam · notch</td><td>Flying across the enemy's line of sight (90°). It lowers the closure the enemy's radar sees and can degrade its track.</td></tr>
+<tr><td class="k">Drag</td><td>Turning away and running.</td></tr>
+<tr><td class="k">R<sub>max</sub> · R<sub>NEZ</sub></td><td>The longest range a missile can hit a target that keeps flying as it is · the range inside which it hits even if the target runs.</td></tr>
+<tr><td class="k">Pk</td><td>Probability of kill: kills per missile fired.</td></tr>
+<tr><td class="k">Support · hand-off</td><td>Guiding your missile with radar updates · the moment its own seeker takes over.</td></tr>
+<tr><td class="k">Pitbull</td><td>The missile's seeker is active; it no longer needs support.</td></tr>
+<tr><td class="k">RWR</td><td>Radar warning receiver: tells you when a missile is launched at you.</td></tr>
+<tr><td class="k">RCS</td><td>Radar cross-section: how big a target looks on radar (m²).</td></tr>
+<tr><td class="k">Track · coast</td><td>The radar's estimate of the target · continuing that estimate without new reports.</td></tr>
+<tr><td class="k">Datalink</td><td>Sharing tracks between aircraft (2v1) or guiding a missile.</td></tr>
+<tr><td class="k">Doctrine</td><td>The cost per missile the agent is told about: aggressive, balanced, conservative.</td></tr>
+<tr><td class="k">PPO</td><td>Proximal Policy Optimization: the learning method.</td></tr>
+<tr><td class="k">Actor · critic</td><td>The half of the network that chooses · the half that judges situations.</td></tr>
+<tr><td class="k">Shaping · potential</td><td>Small rewards every second · the score of a situation they are computed from.</td></tr>
+<tr><td class="k">Mask</td><td>Removing impossible choices before the network chooses.</td></tr>
+<tr><td class="k">Curriculum</td><td>Opponents of increasing difficulty.</td></tr>
+<tr><td class="k">Self-play · snapshot · pool</td><td>Training against copies of itself · a frozen copy · the set of copies.</td></tr>
+<tr><td class="k">Cross-play · Elo</td><td>Playing saved models against each other · a rating from those games.</td></tr>
+<tr><td class="k">Seat · seat bias</td><td>AC1 or AC2 in a game · how much better the AC1 seat scores on the same starts.</td></tr>
+<tr><td class="k">Mirrored start</td><td>A start in which the two aircraft swap positions, so the opponent gets the better start.</td></tr>
+<tr><td class="k">Simulation revision · warm start</td><td>The version number of what a model experiences · continuing an older model under a newer revision.</td></tr>
+</table>
+</div>
