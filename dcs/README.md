@@ -361,10 +361,13 @@ worse at first, for reasons that are useful to know:
 
 - **Flying.** BLUE-1 is flown by the DCS AI along the commanded route,
   with DCS's F-16 flight model. Turn rates, climbs and speed changes are
-  not the training autopilot's. In the first DCS runs it never flew faster
-  than 280 m/s when told 340: a DCS AI on a route seems not to use
-  afterburner. The bridge now allows afterburner and orders the speed
-  directly (rebuild the mission to get it). After each episode
+  not the training autopilot's. A DCS AI on a route does not use
+  afterburner: BLUE-1 never flew faster than its 280 m/s start speed when
+  told 340, even with afterburner allowed and the speed ordered directly
+  (the bridge does both), while RED-1, in combat, reached 490 m/s. So for
+  DCS, train the agent as **F-16C-DCS-MIL** (the F-16C on military power,
+  AIM-120C-DCS) against **F-16C-DCS**, and fly it with
+  `--platform F-16C-DCS-MIL --opp-platform F-16C-DCS`. After each episode
   `dcs_live.py` prints how often BLUE-1 flew more than 30 m/s below the
   commanded speed (`speed_short_pct` in `results.csv`); above 30% it says
   DCS is not flying the commanded speed.

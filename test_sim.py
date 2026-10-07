@@ -1075,6 +1075,23 @@ def test_envelope_target_alt():
           f"{level/1000:.0f} km level, {low/1000:.0f} km against a target at 1 km)")
 
 
+def test_platform_dcs_mil():
+    """F-16C-DCS-MIL: the F-16C as the DCS AI flies BLUE-1 on a route, without
+    afterburner. Same missile, speed choices and altitude limits as F-16C-DCS,
+    so checkpoints move between them; much lower top speed."""
+    import bvr_library as L
+    import bvr_perf as P
+    mil, ab = L.load_platform("F-16C-DCS-MIL"), L.load_platform("F-16C-DCS")
+    assert mil.missile.id == ab.missile.id and mil.speed_cmds == ab.speed_cmds
+    assert (mil.alt_min, mil.alt_max) == (ab.alt_min, ab.alt_max)
+    fm, fa = L.airframe_config("F-16C-MIL"), L.airframe_config("F-16C")
+    assert fm.T_AB_SL == fm.T_MIL_SL == fa.T_MIL_SL and fm.FF_AB == fm.FF_MIL
+    v_mil, v_ab = P.top_speed(fm, 9000.0)[0], P.top_speed(fa, 9000.0)[0]
+    assert v_mil < 330.0 < 450.0 < v_ab, (v_mil, v_ab)
+    print(f"  F-16C-DCS-MIL ............... OK  (top speed at 9 km {v_mil:.0f} m/s; "
+          f"with afterburner {v_ab:.0f})")
+
+
 def test_env_pickles():
     """The envs pickle: older stable-baselines3 (before 2.x has_attr) sends
     env.action_masks, and with it the whole env, from each worker process."""
@@ -1393,6 +1410,7 @@ if __name__ == "__main__":
         ("mutual kill 1v1",         test_mutual_kill_1v1),
         ("2v1 missiles resolve",    test_team_missiles_resolve),
         ("envelope target altitude", test_envelope_target_alt),
+        ("F-16C-DCS-MIL",           test_platform_dcs_mil),
         ("envs pickle",             test_env_pickles),
         ("ADAPTIVE defence",        test_adaptive_defence),
     ]
