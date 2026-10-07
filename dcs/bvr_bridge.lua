@@ -179,9 +179,13 @@ local AGENT, RED = agent:getName(), red:getName()
 local theatre = "unknown"
 pcall(function() theatre = env.mission.theatre end)
 local T0 = timer.getTime()
+-- Sent in the header; dcs_live.py warns when a mission's bridge is older
+-- than the options it was asked to use. 2: OPT eta.
+local BRIDGE_VERSION = 2
+
 local function header()
   send({format = "bvr_rl.dcs.v1", rate = CFG.rate, t0 = T0, theatre = theatre,
-        bridge = 1, agent = AGENT, red = RED})
+        bridge = BRIDGE_VERSION, agent = AGENT, red = RED})
 end
 
 local O = AI.Option.Air
@@ -325,7 +329,10 @@ local function on_command(msg)
   local clock = msg:match("^OPT%s+eta%s+(%a+)")
   if clock then
     local new = (clock == "mission" or clock == "abs") and clock or nil
-    if new ~= S.eta_clock then S.eta_clock = new; S.issued = nil end   -- re-route now
+    if new ~= S.eta_clock then
+      S.eta_clock = new; S.issued = nil                                 -- re-route now
+      send({ev = "bridge", t = timer.getTime(), status = "eta", clock = new or "off"})
+    end
     return
   end
   local seq, hdg, alt, spd, fire = msg:match("^CMD%s+(%d+)%s+([%-%d%.eE]+)%s+([%-%d%.eE]+)%s+([%-%d%.eE]+)%s+(%d)")

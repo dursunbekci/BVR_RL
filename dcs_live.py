@@ -118,6 +118,7 @@ class DcsLiveWorld(DcsReplayWorld):
         # --eta-lock: the bridge gives the route's points locked arrival times
         # from the commanded speed; a DCS AI uses afterburner to make a time.
         self.eta_lock = eta_lock
+        self.eta_ack = None      # the bridge's confirmation of OPT eta
         self._supported = {}                 # missile id -> last time it had support
         self._destroy_sent = {}              # missile id -> last DESTROY sent
         self.support_log = []                # (t_sim, missile id, shooter, status)
@@ -155,6 +156,8 @@ class DcsLiveWorld(DcsReplayWorld):
                 if st != "launched" and st != "requested":
                     self.log(f"  fire {st} at {float(d['t']) - self.t0:.1f} s"
                              + (f": {d.get('reason')}" if d.get("reason") else ""))
+            elif d.get("ev") == "bridge" and d.get("status") == "eta":
+                self.eta_ack = d.get("clock")
             elif d.get("ev") == "support_lost":
                 self.support_log.append((round(float(d["t"]) - self.t0, 1), d.get("id"),
                                          d.get("shooter"), d.get("status")))
@@ -362,6 +365,9 @@ def wait_for_fight(link, agent=None, red=None, after_t=None, log=print):
             notice += 30.0
 
 
+# Bridge version that understands OPT eta (--eta-lock).
+ETA_BRIDGE = 2
+
 # A decision counts as "short" when BLUE-1 flies this much below its commanded speed.
 SPEED_SHORT_MPS = 30.0
 
@@ -424,6 +430,11 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     wr.writerow(["t", "hdg_off", "alt_delta", "speed", "fire", "cmd_hdg_deg", "cmd_alt_m",
                  "cmd_spd_mps", "track", "range_true_m", *OBS_LABELS])
     info = {}
+    # The mission's bridge must be new enough for the options asked for.
+    bridge_v = int(rec.header.get("bridge", 1) or 1)
+    if getattr(args, "eta_lock", None) and bridge_v < ETA_BRIDGE and not args.shadow:
+        log(f"  WARNING: this mission's bridge (version {bridge_v}) ignores --eta-lock; rebuild "
+            f"the mission (python dcs\\make_mission.py) and open the new file in DCS")
     spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
     try:
         while True:
@@ -466,6 +477,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                speed_flown_mean=round(float(np.mean([f for _, f in spd])), 1) if spd else "",
                speed_short_pct=round(100.0 * sum(short) / len(short), 1) if short else "",
                speed_boost=world.speed_boost or "", eta_lock=world.eta_lock or "",
+               eta_confirmed=(world.eta_ack == world.eta_lock) if world.eta_lock else "",
+               bridge_version=bridge_v,
                speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
                if spd and world.speed_boost else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
@@ -476,6 +489,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             f"{row['speed_flown_mean']:.0f}; more than {SPEED_SHORT_MPS:.0f} m/s short "
             f"{row['speed_short_pct']:.0f}% of the time"
             + ("  <- DCS is not flying the commanded speed" if row["speed_short_pct"] > 30 else ""))
+        if world.eta_lock and world.eta_ack != world.eta_lock:
+            log(f"  --eta-lock was NOT confirmed by the bridge (bridge version {bridge_v}): "
+                f"DCS flew without locked arrival times; rebuild the mission")
         if world.speed_boost:
             log(f"  speed boost: asked DCS for {world.speed_boost:.0f} m/s "
                 f"{row['speed_boosted_pct']:.0f}% of the time")
