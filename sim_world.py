@@ -227,10 +227,13 @@ class SimWorld:
         # ── step aircraft ────────────────────────────────────────────
         for i, (a, cmd) in enumerate(zip(self.acs, cmds), start=1):
             if self.alive[i - 1]:
-                # A platform that climbs like the DCS AI does so whoever flies it.
+                # A platform that climbs and turns like the DCS AI does so
+                # whoever flies it.
                 p = self.platforms[i - 1]
                 if p is not None and getattr(p, "climb_mach", 0.0) and "climbMach" not in cmd:
                     cmd = {**cmd, "climbMach": p.climb_mach, "climbThrottle": p.climb_throttle}
+                if p is not None and getattr(p, "turn_bank_max", 0.0) and "bankMax" not in cmd:
+                    cmd = {**cmd, "bankMax": p.turn_bank_max}
                 a.step(self.SIM_DT, cmd)
         # Killed this frame: flown this frame (as the two-aircraft world did
         # on the frame that ended the episode), frozen from the next.

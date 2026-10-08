@@ -218,6 +218,7 @@ class F16Aircraft:
             altFPA    (rad)  FPA limit (optional)
             climbMach (-)    > 0: climb like the DCS AI (optional; see below)
             climbThrottle    the throttle it climbs at (with climbMach)
+            bankMax   (rad)  > 0: bank limit for heading changes (optional)
         """
         self._refresh_atmos()
 
@@ -294,6 +295,10 @@ class F16Aircraft:
         phi_lim  = min(self.cfg.PHI_MAX,
                        math.acos(min(1.0, math.cos(self.gamma)
                                      / (self.cfg.BANK_NZ_MARGIN * nz_avail))))
+        # bankMax: the DCS AI on a route turns at 45 deg of bank, never more.
+        bank_max = float(cmd.get("bankMax", 0.0) or 0.0)
+        if bank_max > 0.0:
+            phi_lim = min(phi_lim, bank_max)
         hdg_err  = _wrap_pi(hdg_cmd - self.chi)
         phi_cmd  = float(np.clip(self.cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
         phi_err  = phi_cmd - self.phi

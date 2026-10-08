@@ -1486,10 +1486,11 @@ def test_dcs_turn_test():
 
 
 def test_dcs_ai_climb():
-    """F-16C-DCSAI climbs like the DCS AI on a route: about Mach 0.85 whatever
-    speed is commanded, 0.02 m/s per metre still to climb, no faster than its
-    climb throttle allows; F-16C-DCS keeps the old climb; red flying F-16C-DCS
-    in the same world is unaffected; the two can meet in self-play."""
+    """F-16C-DCSAI flies like the DCS AI on a route: climbs at about Mach 0.85
+    whatever speed is commanded, 0.02 m/s per metre still to climb, no faster
+    than its climb throttle allows, and turns at 45 deg of bank; F-16C-DCS keeps
+    the old climb; red flying F-16C-DCS in the same world is unaffected; the two
+    can meet in self-play."""
     import math
     import bvr_env as E
     import bvr_library as L
@@ -1528,11 +1529,21 @@ def test_dcs_ai_climb():
     assert max(r[1] for r in old) > 0.95                               # the old climb accelerates
     # Red flies F-16C-DCS in the same world: no DCS-AI climb for it (it holds its level).
     assert L.load_platform("F-16C-DCS").climb_mach == 0.0
+    # Turns: the DCS AI on a route banks 45 deg, 1.41 g, 1.5-1.6 deg/s at 340 m/s.
+    import os, sys, tempfile
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import turn_test
+    with tempfile.TemporaryDirectory() as d:
+        turns = turn_test.main(["--sim", "--platform", "F-16C-DCSAI", "--variants", "base", "--out", d])
+    late = turns[1:]                                    # the first starts below 340 m/s
+    assert all(r["bank_max_deg"] <= 46 and 1.3 <= r["nz_median"] <= 1.5 for r in turns), turns
+    assert all(1.4 <= r["rate_bulk_dps"] <= 1.9 for r in late), late
     assert L.selfplay_compatible("F-16C-DCSAI", "F-16C-DCS")
     assert not L.selfplay_compatible("F-16C-DCS", "F-16C-DCS-MIL")
     assert not L.selfplay_compatible("F-16C", "F-16C-DCS")
-    print(f"  DCS-AI climb ................ OK  (Mach {min(machs):.2f}-{max(machs):.2f}, "
-          f"{sum(vs) / len(vs):.0f} m/s with 3 km to go, {vs12:.0f} with 1.2 km)")
+    print(f"  DCS-AI climb and turn ....... OK  (Mach {min(machs):.2f}-{max(machs):.2f}, "
+          f"{sum(vs) / len(vs):.0f} m/s with 3 km to go, {vs12:.0f} with 1.2 km; turns "
+          f"{min(r['rate_bulk_dps'] for r in late):.1f}-{max(r['rate_bulk_dps'] for r in late):.1f} deg/s)")
 
 
 def test_crossplay_reseed():

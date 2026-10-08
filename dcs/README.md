@@ -354,6 +354,16 @@ row per turn to `dcs_runs\turn_test.csv` (the raw fight goes to
 `dcs_runs\turn_<time>.jsonl`). If one variant turns much harder, the bridge
 can use it; if none does, the simulator has to fly like the DCS AI instead.
 
+**Result (8 October):** every variant turned the same way: 45° of bank,
+1.41 g, 1.5-1.6°/s at 340 m/s and 9 km (a 90° turn half done in 30 s, 90%
+in 52 s; 170° in 56 s and 97 s). That is the most bank the DCS AI uses on a
+route; the waypoint distance makes no difference. So the platform
+F-16C-DCSAI turns at no more than 45° of bank (`TURN_BANK_MAX`): 1.6°/s in
+the simulator, against 7-9°/s for F-16C-DCS. The fly-over variant was not
+measured: after about 11 minutes BLUE-1 reached bingo fuel (16%) and the
+DCS AI took it home on its own, ignoring the route. Keep turn tests (and
+episodes) shorter than that.
+
 ---
 
 ## Troubleshooting
@@ -409,9 +419,10 @@ worse at first, for reasons that are useful to know:
   with 3 km at 10 km, slower higher up), where the simulator's F-16 climbs
   with afterburner and accelerates past Mach 1. The platform
   **F-16C-DCSAI** (F-16C-DCS plus `CLIMB_MACH` 0.85, `CLIMB_THROTTLE` 0.94,
-  fitted to the recorded climbs) flies its climbs that way. Train the agent
+  fitted to the recorded climbs, and `TURN_BANK_MAX` 45° from
+  `turn_test.py`) flies its climbs and turns that way. Train the agent
   on it with red on F-16C-DCS: self-play still works, since the two differ
-  only in how they climb.
+  only in how they climb and turn.
 - **Shooting.** "Fire" is a request. The DCS AI launches when its own
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot
