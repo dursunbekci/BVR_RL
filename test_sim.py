@@ -1544,6 +1544,12 @@ def test_dcs_ai_climb():
     assert all(1.4 <= r["rate_bulk_dps"] <= 1.9 for r in late), late
     assert L.selfplay_compatible("F-16C-DCSAI", "F-16C-DCS")
     assert not L.selfplay_compatible("F-16C-DCS", "F-16C-DCS-MIL")
+    # A platform file saved with whole numbers (1000, not 1000.0) is the same aircraft.
+    import copy
+    whole = copy.deepcopy(L.get_item("platform", "F-16C-DCS"))
+    whole["params"] = {k: (int(v) if isinstance(v, float) and v == int(v) else v)
+                       for k, v in whole["params"].items()}
+    assert L._selfplay_group_of(whole) == L.selfplay_group("F-16C-DCSAI")
     assert not L.selfplay_compatible("F-16C", "F-16C-DCS")
     print(f"  DCS-AI climb and turn ....... OK  (Mach {min(machs):.2f}-{max(machs):.2f}, "
           f"{sum(vs) / len(vs):.0f} m/s with 3 km to go, {vs12:.0f} with 1.2 km; turns "

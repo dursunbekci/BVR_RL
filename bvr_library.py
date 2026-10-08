@@ -600,9 +600,27 @@ def selfplay_group(platform_id: str) -> str:
     """Platforms in one group can fly against each other in self-play: the same
     airframe, radar, missile, loadout, signature and commands, differing at most
     in how they climb and turn (F-16C-DCSAI and F-16C-DCS)."""
-    it = get_item("platform", platform_id)
-    params = {k: v for k, v in it.get("params", {}).items() if k not in _FLYING_ONLY}
-    parts = [fingerprint(get_item(k, params[k])) for k in ("airframe", "radar", "missile")]
+    return _selfplay_group_of(get_item("platform", platform_id))
+
+
+def _as_value(v):
+    """Numbers compared by value: a platform saved with 1000 and one with 1000.0
+    (the GUI editor and hand-written files differ) are the same aircraft."""
+    if isinstance(v, bool) or v is None or isinstance(v, str):
+        return v
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, (list, tuple)):
+        return [_as_value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _as_value(x) for k, x in v.items()}
+    return v
+
+
+def _selfplay_group_of(it: dict) -> str:
+    params = {k: _as_value(v) for k, v in it.get("params", {}).items() if k not in _FLYING_ONLY}
+    parts = [fingerprint({"params": _as_value(get_item(k, params[k]).get("params", {}))})
+             for k in ("airframe", "radar", "missile")]
     return fingerprint({"params": {**params, "_parts": parts}})
 
 
