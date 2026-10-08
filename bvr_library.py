@@ -452,7 +452,10 @@ _SIM_REV_NOTES = {
         "And scripted red's bearing to the agent is taken from the two positions: it "
         "was mirrored whenever the agent was on red's left (30-177 deg wrong in 15 of "
         "40 fights), so red went hot, cranked and dragged the wrong way. ADAPTIVE is "
-        "much stronger for it: dcs_v8 won 68% of 120 fights against it before, 50% after",
+        "much stronger for it: dcs_v8 won 68% of 120 fights against it before, 50% after. "
+        "ADAPTIVE also flies at DCS speeds: hot and cranking at 380-450 m/s (was 330-340), "
+        "running and defending deep at 420-500 (was 400): the DCS AI holds Mach 1.3 while "
+        "climbing and goes on to Mach 1.5",
 }
 
 

@@ -248,6 +248,15 @@ class ShooterOpponent(BvrOpponent):
     # press: turn hot again and keep attacking, as the DCS AI does (SIM_REV 12).
     PRESS = False
     LONG_SHOT = False     # ADAPTIVE's DCS-like episodes: SHOT_RMAX_FRAC 0.95-1.0 and PRESS
+    # Speeds, m/s: going hot (COMMIT, REATTACK), cranking, beaming (shallow
+    # defence), and running (DRAG, deep and last-ditch defence). ADAPTIVE flies
+    # faster since SIM_REV 13: the DCS AI holds about Mach 1.3 (385 m/s) while
+    # climbing and goes on to Mach 1.5 (446-518 m/s), where these had red at
+    # about Mach 1.1, and a faster shooter's missile reaches further.
+    COMMIT_SPEED = 330.0
+    CRANK_SPEED = 340.0
+    BEAM_SPEED = 360.0
+    FAST_SPEED = 400.0
     # A red that runs (SIM_REV 13, ADAPTIVE only): low and slower than the
     # agent's top speed, it keeps its distance: it drifts towards the agent
     # beyond RUN_FAR, runs cold (with a beam leg now and then) inside it, and
@@ -294,16 +303,16 @@ class ShooterOpponent(BvrOpponent):
         if inbound is not None:
             tgo = float(inbound.get("tgo_est", 60.0))
             if self.DEFENCE == "deep_cold":
-                return self._cmd(brg + math.pi, self.DIVE_FLOOR, 400.0)
+                return self._cmd(brg + math.pi, self.DIVE_FLOOR, self.FAST_SPEED)
             if self.DEFENCE == "deep_beam":
                 off = 100.0 if tgo < 12.0 else 90.0
-                return self._cmd(brg + self._crank_side * off * DEG2RAD, self.DIVE_FLOOR, 400.0)
+                return self._cmd(brg + self._crank_side * off * DEG2RAD, self.DIVE_FLOOR, self.FAST_SPEED)
             if tgo < 12.0:
                 # Last-ditch: hard beam and dive, maximum energy
                 hdg = brg + self._crank_side * (100.0 * DEG2RAD)
-                return self._cmd(hdg, self._base_alt - 4000.0, 400.0)
+                return self._cmd(hdg, self._base_alt - 4000.0, self.FAST_SPEED)
             hdg = brg + self._crank_side * (90.0 * DEG2RAD)
-            return self._cmd(hdg, self._base_alt - 1500.0, 360.0)
+            return self._cmd(hdg, self._base_alt - 1500.0, self.BEAM_SPEED)
 
         # ── RUN (a runner, until cornered) ──────────────────────────
         if self._phase == "RUN":
@@ -356,7 +365,7 @@ class ShooterOpponent(BvrOpponent):
             if since_shot > 4.0 and not still_supporting:
                 self._phase = "REATTACK" if self.PRESS else "DRAG"
             hdg = brg + self._crank_side * self.CRANK_ANGLE
-            cmd = self._cmd(hdg, self._base_alt + 500.0, 340.0, fire)
+            cmd = self._cmd(hdg, self._base_alt + 500.0, self.CRANK_SPEED, fire)
             if at_other:
                 cmd["target_other"] = 1
             return cmd
@@ -366,10 +375,10 @@ class ShooterOpponent(BvrOpponent):
                 self._phase = "REATTACK"
                 self._crank_side *= -1.0
             hdg = brg + math.pi
-            return self._cmd(hdg, self._base_alt - 1000.0, 400.0, fire)
+            return self._cmd(hdg, self._base_alt - 1000.0, self.FAST_SPEED, fire)
 
         # COMMIT / REATTACK: hot, climbing for launch energy
-        return self._cmd(brg, min(self._base_alt + 1500.0, 12_000.0), 330.0, fire)
+        return self._cmd(brg, min(self._base_alt + 1500.0, 12_000.0), self.COMMIT_SPEED, fire)
 
 
 class AdaptiveShooterOpponent(ShooterOpponent):
@@ -402,6 +411,10 @@ class AdaptiveShooterOpponent(ShooterOpponent):
             self.PRESS = self.LONG_SHOT
             if self.LONG_SHOT:
                 self.SHOT_RMAX_FRAC = frac
+            # DCS speeds: hot and cranking at Mach 1.3-1.5, running faster still.
+            self.COMMIT_SPEED = float(self.rng.uniform(380.0, 450.0))
+            self.CRANK_SPEED = self.BEAM_SPEED = self.COMMIT_SPEED
+            self.FAST_SPEED = float(self.rng.uniform(420.0, 500.0))
             # A runner in a quarter of the other episodes (1/6 overall).
             run = float(self.rng.random())
             self.RUNNER = (not self.LONG_SHOT) and run < 0.25
@@ -418,3 +431,4 @@ class AdaptiveShooterOpponent(ShooterOpponent):
             # set legacy_crank, and its draws would otherwise stay (they did for
             # DEFENCE from SIM_REV 10 until 12).
             self.DEFENCE, self.LONG_SHOT, self.PRESS, self.RUNNER = "shallow", False, False, False
+            self.COMMIT_SPEED, self.CRANK_SPEED, self.BEAM_SPEED, self.FAST_SPEED = 330.0, 340.0, 360.0, 400.0

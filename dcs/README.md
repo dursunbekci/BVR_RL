@@ -423,6 +423,11 @@ worse at first, for reasons that are useful to know:
   `turn_test.py`) flies its climbs and turns that way. Train the agent
   on it with red on F-16C-DCS: self-play still works, since the two differ
   only in how they climb and turn.
+  RED-1, the DCS AI in combat, is not limited this way: in five recorded
+  fights it climbed at 60-138 m/s while holding about Mach 1.3, and went on
+  to Mach 1.5 (446-518 m/s) once level. Since SIM_REV 13 the scripted
+  ADAPTIVE red flies at those speeds (hot and cranking at 380-450 m/s,
+  running at 420-500).
 - **Shooting.** "Fire" is a request. The DCS AI launches when its own
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot

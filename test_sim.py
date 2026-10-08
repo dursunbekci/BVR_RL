@@ -1079,6 +1079,9 @@ def test_adaptive_runner():
     runs = 0
     for _ in range(600):
         o.reset(ic)
+        # DCS speeds (SIM_REV 13): hot and cranking at Mach 1.3-1.5, running faster.
+        assert 380.0 <= o.COMMIT_SPEED <= 450.0 and o.CRANK_SPEED == o.COMMIT_SPEED
+        assert 420.0 <= o.FAST_SPEED <= 500.0
         if o.RUNNER:
             runs += 1
             assert o._phase == "RUN" and not o.LONG_SHOT and 1500 <= o.RUN_ALT <= 5000
@@ -1088,6 +1091,7 @@ def test_adaptive_runner():
         two = AdaptiveShooterOpponent(rng=np.random.default_rng(seed)); two.legacy_crank = True
         two.reset(ic)
         assert not two.RUNNER and two._phase == "COMMIT", seed
+        assert (two.COMMIT_SPEED, two.CRANK_SPEED, two.FAST_SPEED) == (330.0, 340.0, 400.0), seed
     while True:
         o.reset(ic)
         if o.RUNNER:
