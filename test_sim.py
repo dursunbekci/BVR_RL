@@ -1095,6 +1095,12 @@ def test_envelope_target_alt():
         assert not old.target_altitude_aware
         assert old.compute(0.9, 6000.0, 0.0, 0.9, target_alt=1000.0) == \
             old.compute(0.9, 6000.0, 0.0, 0.9)
+    # The GUI's envelope viewer serves the same numbers.
+    import bvr_gui
+    v = bvr_gui._envelope_view("AIM-120C-DCS", 0.9, 9000.0, "1000")
+    assert v["aware"] and v["aspects"][0] == 0 and v["aspects"][-1] == 180
+    assert abs(v["r_max"][0] - low) < 1e-6 and v["r_max"][0] > v["r_max"][-1]
+    assert all(n <= m + 1e-6 for n, m in zip(v["r_nez"], v["r_max"]))
     print(f"  envelope target altitude .... OK  (AIM-120C-DCS head-on from 9 km: "
           f"{level/1000:.0f} km level, {low/1000:.0f} km against a target at 1 km)")
 

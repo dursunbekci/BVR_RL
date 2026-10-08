@@ -253,6 +253,29 @@ def _library_item(kind, item_id) -> dict:
     return out
 
 
+def _envelope_view(missile_id: str, mach: float, alt: float, talt) -> dict:
+    """R-max and R-NEZ against a target at each aspect (0 = head-on, 180 =
+    tail), from the missile's calibrated table, computed exactly as training
+    does (target at Mach 0.9, the table's reference)."""
+    import numpy as np
+    import bvr_library as L
+    from bvr_envelope import Aim120Envelope
+    path = L.envelope_path(L.missile_config(missile_id))
+    if not path.exists():
+        raise L.LibraryError(f"{missile_id} is not calibrated: no launch envelope to show")
+    env = Aim120Envelope(str(path))
+    t = env._table
+    talt = float(talt) if talt not in (None, "") and env.target_altitude_aware else None
+    aspects = list(range(0, 181, 5))
+    rows = [env.compute(mach, alt, a, 0.9, target_alt=talt) for a in aspects]
+    rng = lambda g: [float(np.min(g)), float(np.max(g))]
+    return {"missile": missile_id, "aware": env.target_altitude_aware,
+            "mach": mach, "alt": alt, "talt": alt if talt is None else talt,
+            "aspects": aspects, "r_max": [r for r, _ in rows], "r_nez": [n for _, n in rows],
+            "grid": {"mach": rng(t["mach"]), "alt": rng(t["alt"]),
+                     "talt": rng(t["talt"]) if t["talt"] is not None else None}}
+
+
 def _handler_library_get(self):
     import bvr_library as L
     u = urlparse(self.path)
@@ -265,6 +288,9 @@ def _handler_library_get(self):
         elif u.path == "/library/perf":
             from bvr_perf import card_for
             self._json(card_for(q["kind"], q["id"]))
+        elif u.path == "/library/envelope":
+            self._json(_envelope_view(q["id"], float(q.get("mach", 0.9)),
+                                      float(q.get("alt", 9000)), q.get("talt")))
         else:
             self.send_error(404)
     except (L.LibraryError, KeyError, ValueError) as e:
