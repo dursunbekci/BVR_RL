@@ -524,6 +524,8 @@ class TrainingManager:
         ]
         if config.get("format") == "2v1" and config.get("wingman_platform"):
             cmd += ["--wingman-platform", str(config["wingman_platform"])]
+        if config.get("max_steps"):
+            cmd += ["--max-steps", str(int(config["max_steps"]))]
         if config.get("resume"):
             # The GUI's dropdown sends a path relative to the model dir (as
             # listed by /models, e.g. "latest.zip" or "archive/best_..."),
