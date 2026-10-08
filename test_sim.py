@@ -1393,6 +1393,25 @@ def test_team_vec_env():
     print("  2v1 vec env ................. OK")
 
 
+def test_dcs_turn_test():
+    """dcs/turn_test.py --sim: the turns go through the UDP link to the fake DCS,
+    which confirms the bridge options; the simulator's F-16 turns at 5+ deg/s
+    while 30+ deg remain (the DCS AI on the bridge's routes: about 2)."""
+    import os, sys, tempfile, csv
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import turn_test
+    with tempfile.TemporaryDirectory() as d:
+        rows = turn_test.main(["--sim", "--variants", "base", "--out", d])
+        with open(os.path.join(d, "turn_test.csv"), newline="") as fh:
+            saved = list(csv.DictReader(fh))
+        assert any(f.endswith("_sim.jsonl") for f in os.listdir(d))
+    assert [round(abs(r["turn_deg"]) / 10) for r in rows] == [9, 9, 17], rows
+    assert all(r["rate_bulk_dps"] > 5.0 and r["reached"] for r in rows), rows
+    assert len(saved) == 3 and saved[0]["mode"] == "sim" and saved[0]["variant"] == "base", saved
+    print(f"  DCS turn test (sim) ......... OK  ({min(r['rate_bulk_dps'] for r in rows):.1f}-"
+          f"{max(r['rate_bulk_dps'] for r in rows):.1f} deg/s)")
+
+
 def test_crossplay_reseed():
     """A cross-play env cached across a scripted and a policy column holds both
     radar observers (keys "opponent_radar" and False); reseeding must handle
@@ -1462,6 +1481,7 @@ if __name__ == "__main__":
         ("envs pickle",             test_env_pickles),
         ("ADAPTIVE defence",        test_adaptive_defence),
         ("cross-play reseed",       test_crossplay_reseed),
+        ("DCS turn test",           test_dcs_turn_test),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

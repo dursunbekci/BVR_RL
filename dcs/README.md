@@ -326,6 +326,34 @@ and to train with it, warm-started from a model trained on the F-16C:
 python train_bvr.py --platform F-16C-DCS --opponent-platform F-16C-DCS --resume models_bvr\latest_selfplay_v6.zip
 ```
 
+## Measuring the DCS AI's turns (turn_test.py)
+
+The DCS AI flies BLUE-1 along the bridge's route, and it turns gently: in the
+v8 fights about 45° of bank and 1.5 g, **about 2°/s**, where the simulator's
+F-16 turns at about 8°/s. `turn_test.py` measures this with no policy: BLUE-1
+flies 90° right, 90° back and 170° right, for each of four ways of building
+the route, while RED-1 holds its fire:
+
+| Variant | Route |
+|---|---|
+| `base` | first point 3 km ahead (as `dcs_live.py` flies) |
+| `near1000` | first point 1 km ahead |
+| `far_only` | no first point, only the far one (60 km) |
+| `flyover1000` | first point 1 km ahead, both "Fly Over Point" |
+
+```
+python dcs\make_mission.py              # once: the turn test needs bridge version 3
+python dcs\turn_test.py                 # start the mission; all four variants, about 15 min
+python dcs\turn_test.py --variants base far_only --speed 280 --alt 6000
+python dcs\turn_test.py --sim           # the same turns in BVR_RL's simulator, for comparison
+```
+
+For each turn it prints the turn rate while more than 30° is still to go,
+the time to half and to 90% of the turn, the bank and the g, and appends a
+row per turn to `dcs_runs\turn_test.csv` (the raw fight goes to
+`dcs_runs\turn_<time>.jsonl`). If one variant turns much harder, the bridge
+can use it; if none does, the simulator has to fly like the DCS AI instead.
+
 ---
 
 ## Troubleshooting
@@ -423,7 +451,7 @@ DCS → Python, UDP 15301, one JSON object per datagram, the same lines
 `bvr_logger.lua` writes (see its header), plus:
 
 ```
-{"format":"bvr_rl.dcs.v1", ..., "bridge":1, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
+{"format":"bvr_rl.dcs.v1", ..., "bridge":3, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
 {"ev":"fire", "t":..., "status":"requested|launched|timeout|refused", "seq":...}
 {"ev":"bridge", "t":..., "status":"control|released", "agent":...}
 {"ev":"mission_end", "t":...}
@@ -437,7 +465,14 @@ CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1
 STOP
 DESTROY <missile id>      (the support rule; answered with {"ev":"support_lost", "id", "status"})
 OPT eta <off|mission|abs> (--eta-lock: locked arrival times on the route's points)
+OPT near <m>              (turn_test.py: first route point this far ahead, 0 = none)
+OPT wpt <turn|flyover>    (turn_test.py: the route points' type)
+OPT redhold <0|1>         (turn_test.py: an AI red holds its fire)
+                          (each answered with {"ev":"bridge", "status":"opt", "near_m", "wpt", "redhold"})
 ```
+
+The header's `bridge` is the version: 2 understands OPT eta, 3 the other
+options.
 
 Commands are re-sent every second; the bridge re-issues the AI's route only
 when the command changes (2° of heading, 50 m, 1 m/s) or every 10 s.

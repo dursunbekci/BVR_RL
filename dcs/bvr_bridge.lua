@@ -28,6 +28,9 @@ policy only watches.
 Commands (UDP datagrams to CFG.port_in, plain text):
   CMD <seq> <heading deg, map north, clockwise> <altitude m> <speed m/s> <fire 0|1>
   OPT eta <off|mission|abs>   locked arrival times on the route (see route_point)
+  OPT near <m>                the route's first point this far ahead (0: no first point)
+  OPT wpt <turn|flyover>      the route points' type (Turning Point or Fly Over Point)
+  OPT redhold <0|1>           1: an AI red holds its fire (dcs/turn_test.py)
   STOP          give the aircraft back to the AI (end of an episode)
   DESTROY <id>  remove missile <id> (as numbered in the shot events): dcs_live.py's
                 support rule says it has had no guidance for too long
@@ -180,8 +183,8 @@ local theatre = "unknown"
 pcall(function() theatre = env.mission.theatre end)
 local T0 = timer.getTime()
 -- Sent in the header; dcs_live.py warns when a mission's bridge is older
--- than the options it was asked to use. 2: OPT eta.
-local BRIDGE_VERSION = 2
+-- than the options it was asked to use. 2: OPT eta. 3: OPT near, wpt, redhold.
+local BRIDGE_VERSION = 3
 
 local function header()
   send({format = "bvr_rl.dcs.v1", rate = CFG.rate, t0 = T0, theatre = theatre,
@@ -213,6 +216,9 @@ local S = {
   t_issued = -1e9,
   fire_pending = nil,      -- {seq, t} while waiting for the AI to launch
   last_fire_seq = -1,
+  near_m = CFG.near_m,     -- OPT near
+  wpt = "Turning Point",   -- OPT wpt
+  redhold = false,         -- OPT redhold
 }
 
 local function take_control()
@@ -246,7 +252,7 @@ end
 -- and the speed is not locked.
 local function route_point(p, hdg, d, alt, spd, eta)
   return {
-    type = "Turning Point", action = "Turning Point",
+    type = "Turning Point", action = S.wpt,
     x = p.x + d * math.cos(hdg), y = p.z + d * math.sin(hdg),
     alt = alt, alt_type = "BARO", speed = spd, speed_locked = eta == nil,
     ETA = eta or 0, ETA_locked = eta ~= nil,
@@ -260,13 +266,15 @@ local function issue_route(cmd)
   local eta1, eta2 = nil, nil
   if S.eta_clock then                 -- "mission": timer.getTime(); "abs": timer.getAbsTime()
     local now = (S.eta_clock == "abs") and timer.getAbsTime() or timer.getTime()
-    eta1 = now + CFG.near_m / math.max(cmd.spd, 50)
+    eta1 = now + S.near_m / math.max(cmd.spd, 50)
     eta2 = now + CFG.far_m / math.max(cmd.spd, 50)
   end
-  local task = {id = "Mission", params = {airborne = true, route = {points = {
-    route_point(p, hdg, CFG.near_m, cmd.alt, cmd.spd, eta1),
-    route_point(p, hdg, CFG.far_m, cmd.alt, cmd.spd, eta2),
-  }}}}
+  local points = {}
+  if S.near_m > 0 then
+    points[#points + 1] = route_point(p, hdg, S.near_m, cmd.alt, cmd.spd, eta1)
+  end
+  points[#points + 1] = route_point(p, hdg, CFG.far_m, cmd.alt, cmd.spd, eta2)
+  local task = {id = "Mission", params = {airborne = true, route = {points = points}}}
   local ok, err = pcall(function() ctrl_of(agent):setTask(task) end)
   if not ok then env.info("bvr_bridge route error: " .. tostring(err)) end
   -- The route's speed alone did not get the commanded speed flown; order it too.
@@ -326,6 +334,28 @@ local function on_command(msg)
   if msg:match("^STOP") then release_control(); return end
   local did = msg:match("^DESTROY%s+(%d+)")
   if did then destroy_missile(tonumber(did)); return end
+  local near = msg:match("^OPT%s+near%s+([%d%.]+)")
+  local wpt = msg:match("^OPT%s+wpt%s+(%a+)")
+  local hold = msg:match("^OPT%s+redhold%s+([01])")
+  if near or wpt or hold then
+    local was = S.near_m .. S.wpt .. tostring(S.redhold)
+    if near then S.near_m = math.min(tonumber(near), CFG.far_m / 2) end
+    if wpt then S.wpt = (wpt == "flyover") and "Fly Over Point" or "Turning Point" end
+    if hold then
+      S.redhold = hold == "1"
+      if red:isExist() and not is_player(red) then
+        set_opt(ctrl_of(red), O.id.ROE, S.redhold and O.val.ROE.WEAPON_HOLD
+                                         or O.val.ROE.OPEN_FIRE_WEAPON_FREE)
+      end
+    end
+    if was ~= S.near_m .. S.wpt .. tostring(S.redhold) then
+      S.issued = nil                                                     -- re-route now
+    end
+    -- Confirmed every time (not only on a change): UDP may drop the reply.
+    send({ev = "bridge", t = timer.getTime(), status = "opt", near_m = S.near_m,
+          wpt = (S.wpt == "Fly Over Point") and "flyover" or "turn", redhold = S.redhold})
+    return
+  end
   local clock = msg:match("^OPT%s+eta%s+(%a+)")
   if clock then
     local new = (clock == "mission" or clock == "abs") and clock or nil

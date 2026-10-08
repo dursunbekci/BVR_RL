@@ -202,10 +202,61 @@ def test_bridge_eta():
     assert absolute[1].ETA_locked and abs(absolute[1].ETA - (43200.0 + 20.0 + near / 340.0)) < 0.2
     assert off[1].speed_locked and not off[1].ETA_locked
     lines = [json.loads(d) for p, d in sent if p == 15301]
-    assert lines[0].get("bridge") == 2, lines[0]           # dcs_live.py checks the version
+    assert lines[0].get("bridge") == 3, lines[0]           # dcs_live.py checks the version
     acks = [d["clock"] for d in lines if d.get("ev") == "bridge" and d.get("status") == "eta"]
     assert acks == ["mission", "abs", "off"], acks
     print(f"  bridge ETA lock ............. OK  (point 1 due {mission[1].ETA:.1f} s at 340 m/s)")
+
+
+def test_bridge_opts():
+    """OPT near / wpt / redhold (dcs/turn_test.py): the first route point moves
+    (or goes, at 0), the points' type changes, an AI red holds its fire; every
+    option is confirmed, and a change re-routes at once."""
+    L = lua()
+    sent, inbox = [], []
+
+    class Udp:
+        def settimeout(self, t): pass
+        def setsockname(self, h, p): return 1
+        def sendto(self, data, h, p): sent.append((p, data)); return len(data)
+        def receive(self, *a): return inbox.pop(0) if inbox else None
+
+    class Sock:
+        def udp(self): return Udp()
+
+    plan = {5.0: ["CMD 1 90 10000 300 0"],
+            10.0: ["OPT near 1000", "OPT wpt flyover", "OPT redhold 1", "CMD 2 90 10000 300 0"],
+            20.0: ["OPT near 0", "CMD 3 90 10000 300 0"],
+            30.0: ["OPT near 0", "OPT wpt turn", "OPT redhold 0", "CMD 4 90 10000 300 0"]}
+
+    def on_tick(T):
+        for t in list(plan):
+            if T >= t - 1e-9:
+                inbox.extend(plan.pop(t))
+
+    with open(os.path.join(HERE, "mock", "dcs_api_mock.lua")) as fh:
+        L.execute(fh.read())
+    L.globals().bvr_rl_socket = Sock()
+    L.globals().RUN(os.path.join(HERE, "bvr_bridge.lua"), 40.0, on_tick)
+    log = L.globals().LOG
+    LOG = [tuple(log[i].values()) for i in range(1, len(log) + 1)]
+    sets = [(x[2].params.route.points) for x in LOG if x[0] == "Viper-1" and x[1] == "setTask"]
+    def first_d(pts):
+        return len(pts), pts[1].action
+    shapes = [first_d(p) for p in sets]
+    assert shapes[0] == (2, "Turning Point"), shapes
+    assert (2, "Fly Over Point") in shapes and (1, "Fly Over Point") in shapes and \
+        shapes[-1] == (1, "Turning Point"), shapes
+    near = next(p for p in sets if len(p) == 2 and p[1].action == "Fly Over Point")
+    d = math.hypot(near[1].x - near[2].x, near[1].y - near[2].y)
+    assert abs(d - 59000.0) < 300.0, d                      # first point 1 km out, far 60 km
+    roe = [x[3] for x in LOG if x[0] != "Viper-1" and x[1] == "opt" and x[2] == 0]
+    assert roe[-2:] == [4, 1], roe                           # hold, then weapons free again
+    lines = [json.loads(d) for p, d in sent if p == 15301]
+    acks = [(d["near_m"], d["wpt"], d["redhold"]) for d in lines
+            if d.get("ev") == "bridge" and d.get("status") == "opt"]
+    assert len(acks) == 7 and acks[0][0] == 1000 and acks[-1] == (0, "turn", False), acks
+    print(f"  bridge turn-test options .... OK  ({len(acks)} confirmations)")
 
 
 def test_setup_patch():
@@ -231,5 +282,6 @@ if __name__ == "__main__":
     test_bridge()
     test_bridge_destroy()
     test_bridge_eta()
+    test_bridge_opts()
     test_setup_patch()
-    print("4/4 passed")
+    print("5/5 passed")

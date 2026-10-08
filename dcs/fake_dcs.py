@@ -88,8 +88,13 @@ class FakeDcs:
         s = env._state
         hold = (float(s.get("psi", 0.0)), float(s.get("alt", 9000.0)), float(s.get("speed", 280.0)))
         cmd, controlled, last_seq, fire_at, fired_seq = hold, False, -1, None, None
+        # The bridge version whose commands this fake answers (OPT eta, near,
+        # wpt, redhold). It confirms them as the bridge does, but they change
+        # nothing here: its blue flies the simulator's autopilot, and its
+        # opponent is a scripted one.
         header = {"format": FORMAT, "rate": self.RATE, "t0": self.T(), "theatre": "fake",
-                  "bridge": 1, "agent": self.names[0], "red": self.names[1]}
+                  "bridge": 3, "agent": self.names[0], "red": self.names[1]}
+        opt = {"near_m": 3000, "wpt": "turn", "redhold": False}
         self.send(header)
         for i in (1, 2):
             self.send(sim_ammo(w, self.names, i, self.T()))
@@ -117,6 +122,19 @@ class FakeDcs:
                         continue
                     if msg[0] == "DESTROY" and len(msg) > 1:
                         self.destroy(int(msg[1]))
+                        continue
+                    if msg[0] == "OPT" and len(msg) > 2:
+                        if msg[1] == "eta":
+                            self.send({"ev": "bridge", "t": self.T(), "status": "eta",
+                                       "clock": msg[2] if msg[2] in ("mission", "abs") else "off"})
+                        elif msg[1] in ("near", "wpt", "redhold"):
+                            if msg[1] == "near":
+                                opt["near_m"] = float(msg[2])
+                            elif msg[1] == "wpt":
+                                opt["wpt"] = "flyover" if msg[2] == "flyover" else "turn"
+                            else:
+                                opt["redhold"] = msg[2] == "1"
+                            self.send({"ev": "bridge", "t": self.T(), "status": "opt", **opt})
                         continue
                     if msg[0] != "CMD" or len(msg) < 6:
                         continue
