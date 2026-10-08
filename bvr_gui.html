@@ -1567,6 +1567,13 @@ function refreshPlatformSelects() {
   engageCheck();
 }
 
+// Different platforms that differ only in how they climb (F-16C-DCSAI and
+// F-16C-DCS) can still meet in self-play: the server groups them.
+function samePlane(a, b) {
+  const g = (LIB && LIB.selfplay_groups) || {};
+  return a === b || (g[a] !== undefined && g[a] === g[b]);
+}
+
 function engageCheck() {
   const a = document.getElementById('cfg-platform').value, b = document.getElementById('cfg-opp-platform').value;
   const opp = document.getElementById('cfg-opponent').value;
@@ -1582,6 +1589,8 @@ function engageCheck() {
       ? '⚠ 2 v 1 has no self-play stage yet; pick a scripted stage.'
       : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.'
         + (a && b && a !== b ? ' Blue and red fly different platforms: if blue is outmatched it may never reach 65%; consider a lower ADVANCE AT.' : '');
+  } else if (a && b && a !== b && samePlane(a, b)) {
+    w.textContent = 'The two platforms differ only in how they climb, so self-play applies as usual.';
   } else if (a && b && a !== b) {
     w.textContent = opp === 'self_play'
       ? '⚠ self-play needs both sides on the same platform; pick another stage.'
@@ -1597,7 +1606,7 @@ function spCheck() {
   const team = document.getElementById('cfg-format').value === '2v1';
   const curr = document.getElementById('cfg-curriculum').value === '1';
   const why = team ? '2 v 1 has no self-play stage yet'
-    : (a && b && a !== b) ? 'the two sides fly different platforms'
+    : (a && b && !samePlane(a, b)) ? 'the two sides fly different platforms'
     : (!curr && opp !== 'self_play') ? 'the auto-curriculum is OFF and the run does not start at SELF_PLAY'
     : '';
   const box = document.getElementById('cfg-sp-box');

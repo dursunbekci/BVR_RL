@@ -1485,6 +1485,56 @@ def test_dcs_turn_test():
           f"{max(r['rate_bulk_dps'] for r in rows):.1f} deg/s)")
 
 
+def test_dcs_ai_climb():
+    """F-16C-DCSAI climbs like the DCS AI on a route: about Mach 0.85 whatever
+    speed is commanded, 0.02 m/s per metre still to climb, no faster than its
+    climb throttle allows; F-16C-DCS keeps the old climb; red flying F-16C-DCS
+    in the same world is unaffected; the two can meet in self-play."""
+    import math
+    import bvr_env as E
+    import bvr_library as L
+    from bvr_opponents import BvrOpponentType as T
+    from sim_world import _enu_to_latlon
+
+    def climb(plat, opp, ahead):
+        env = E.BvrEnv(opponent_type=T.STRAIGHT, seed=1, platform=plat, opponent_platform=opp)
+        def ic_fn(blue_top_speed=None):
+            ic = E.BvrEnv._random_ic(env)
+            la, lo, _ = _enu_to_latlon(0, 0, 9000); lb, lob, _ = _enu_to_latlon(0, 90000, 9000)
+            ic.update(ac1_lat=la, ac1_lon=lo, ac1_alt=9000, ac1_psi=math.pi / 2, ac1_spd=275,
+                      ac2_lat=lb, ac2_lon=lob, ac2_alt=9000, ac2_psi=math.pi / 2, ac2_spd=275,
+                      mirrored=False)
+            return ic
+        env._random_ic = ic_fn
+        env.reset()
+        beam = list(E.HDG_OFFSETS_DEG).index(90.0)
+        ia = list(E.ALT_DELTAS_M).index(ahead)
+        rows = []
+        for t in range(40):
+            z0 = env._state["alt"]
+            env.step([beam, ia, 3, 0])                         # 400 m/s commanded
+            rows.append((env._state["alt"] - z0, env._state["mach"], env._world.acs[1].mach))
+        return rows
+
+    dcsai = climb("F-16C-DCSAI", "F-16C-DCS", 3000.0)
+    vs = [r[0] for r in dcsai[15:30]]
+    machs = [r[1] for r in dcsai[15:]]
+    assert 0.80 <= min(machs) and max(machs) <= 0.90, machs           # held, not accelerating
+    assert 40.0 <= sum(vs) / len(vs) <= 65.0, vs                       # DCS: 50-60 m/s at 10-11 km
+    slow = climb("F-16C-DCSAI", "F-16C-DCS", 1200.0)
+    vs12 = sum(r[0] for r in slow[15:30]) / 15
+    assert 18.0 <= vs12 <= 30.0, vs12                                  # DCS: 22-33 m/s
+    old = climb("F-16C-DCS", "F-16C-DCS", 3000.0)
+    assert max(r[1] for r in old) > 0.95                               # the old climb accelerates
+    # Red flies F-16C-DCS in the same world: no DCS-AI climb for it (it holds its level).
+    assert L.load_platform("F-16C-DCS").climb_mach == 0.0
+    assert L.selfplay_compatible("F-16C-DCSAI", "F-16C-DCS")
+    assert not L.selfplay_compatible("F-16C-DCS", "F-16C-DCS-MIL")
+    assert not L.selfplay_compatible("F-16C", "F-16C-DCS")
+    print(f"  DCS-AI climb ................ OK  (Mach {min(machs):.2f}-{max(machs):.2f}, "
+          f"{sum(vs) / len(vs):.0f} m/s with 3 km to go, {vs12:.0f} with 1.2 km)")
+
+
 def test_crossplay_reseed():
     """A cross-play env cached across a scripted and a policy column holds both
     radar observers (keys "opponent_radar" and False); reseeding must handle
@@ -1556,6 +1606,7 @@ if __name__ == "__main__":
         ("ADAPTIVE runner",         test_adaptive_runner),
         ("cross-play reseed",       test_crossplay_reseed),
         ("DCS turn test",           test_dcs_turn_test),
+        ("DCS-AI climb",            test_dcs_ai_climb),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

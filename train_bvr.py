@@ -639,7 +639,10 @@ def main():
         print(f"[bvr] NOTE: {mid}'s launch envelope was calibrated before target altitude "
               f"was measured (SIM_REV 11), so it assumes a level target. Recalibrate it: "
               f"GUI Library -> Calibrate, or `python sweep_envelope.py --missile {mid}`")
-    heterogeneous = args.platform != args.opponent_platform
+    # Self-play needs a snapshot of the agent to be able to fly the other side:
+    # the same platform, or one that differs only in how it climbs.
+    from bvr_library import selfplay_compatible
+    heterogeneous = not selfplay_compatible(args.platform, args.opponent_platform)
     if heterogeneous and opponent == BvrOpponentType.SELF_PLAY:
         ap.error(f"self-play needs both sides on the same platform (here {args.platform} v "
                  f"{args.opponent_platform}): a snapshot of the agent cannot fly the other side")

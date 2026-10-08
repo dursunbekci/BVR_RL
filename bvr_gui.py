@@ -237,8 +237,24 @@ def _library_summary() -> dict:
                 calibrated[it["id"]] = L.envelope_path(L.missile_config(it["id"])).exists()
             except Exception:
                 calibrated[it["id"]] = False
+    groups = {}
+    for it in items:
+        if it["kind"] == "platform":
+            try:
+                groups[it["id"]] = L.selfplay_group(it["id"])
+            except Exception:
+                groups[it["id"]] = it["id"]
     return {"items": items, "schema": L.schema_json(), "calibrated": calibrated,
+            "selfplay_groups": groups,
             "problems": L.list_problems(), "library_dir": str(L.LIB_DIR)}
+
+
+def _selfplay_ok(a, b) -> bool:
+    import bvr_library as L
+    try:
+        return L.selfplay_compatible(a, b)
+    except Exception:
+        return a == b
 
 
 def _library_item(kind, item_id) -> dict:
@@ -731,7 +747,7 @@ class EvalRunner:
             if fmt == "2v1":
                 self._run_team(config, model, privileged, opponent, scen, opp_platform)
                 return
-            if opponent_name == "SELF_PLAY" and platform != opp_platform:
+            if opponent_name == "SELF_PLAY" and not _selfplay_ok(platform, opp_platform):
                 raise RuntimeError(f"SELF_PLAY needs both sides on one platform; this checkpoint "
                                    f"flies {platform} and the opponent {opp_platform}")
             env = BvrEnv(opponent_type=opponent, seed=config.get("seed", 0),

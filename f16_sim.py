@@ -164,6 +164,13 @@ class F16Aircraft:
     All state is public so sim_world can read it directly without method calls.
     """
 
+    # DCS-AI climb (cmd climbMach): climbing means this far below the target,
+    # and the climb angle steepens by K_CLIMB_V rad per unit of speed above
+    # climbMach (relative: 0.05 = 5% fast).
+    CLIMB_BAND_M = 150.0
+    K_CLIMB_V = 2.0
+    CLIMB_VS_PER_M = 0.02        # 1/s: climb rate per metre still to climb
+
     def __init__(self, rng: np.random.Generator = None, cfg=None):
         self._rng = rng or np.random.default_rng()
         # Airframe parameters: F16Cfg by default, or an airframe from the
@@ -175,6 +182,7 @@ class F16Aircraft:
         self.V = 280.0; self.gamma = 0.0; self.chi = 0.0; self.phi = 0.0
         self.throttle = 0.5; self.fuel_kg = self.cfg.FUEL_FULL * 0.5
         self._v_int = 0.0            # speed-hold integrator
+        self._drag = 0.0             # last frame's drag (DCS-AI climb)
         # derived
         self.alpha = 0.0; self.beta = 0.0; self.nz = 1.0; self.mach = 0.9
         self.theta = 0.0; self.p = 0.0; self.q = 0.0; self.r = 0.0
@@ -192,6 +200,7 @@ class F16Aircraft:
         self.phi            = 0.0
         self.throttle       = 0.55
         self._v_int         = 0.0
+        self._drag          = 0.0
         self.fuel_kg        = float(fuel_frac) * self.cfg.FUEL_FULL
         self._refresh_atmos()
         self.mach           = self.V / max(self._a_sound, 1.0)
@@ -207,6 +216,8 @@ class F16Aircraft:
             altTarget (m)    altitude target
             V         (m/s)  speed target
             altFPA    (rad)  FPA limit (optional)
+            climbMach (-)    > 0: climb like the DCS AI (optional; see below)
+            climbThrottle    the throttle it climbs at (with climbMach)
         """
         self._refresh_atmos()
 
@@ -216,6 +227,14 @@ class F16Aircraft:
         fpa_lim = abs(float(cmd.get("altFPA", self.cfg.GAMMA_MAX)))
         fpa_lim = float(np.clip(fpa_lim, 0.05, self.cfg.GAMMA_MAX))
         climb_lim = min(fpa_lim, abs(float(cmd.get("climbFPA", fpa_lim))))
+        # DCS-AI climb: while well below the altitude target, hold climbMach
+        # whatever speed is asked for, climb at CLIMB_VS_PER_M x the height
+        # still to go, and no faster than climbThrottle allows (then the nose
+        # holds the Mach). The DCS AI flying a route climbs this way: Mach
+        # 0.82-0.88 with 220, 400 or 550 m/s commanded; 22-33 m/s with 1.2 km
+        # to go; with 3 km to go 60 m/s at 10 km, falling to 30 at 13.5 km.
+        climb_mach = float(cmd.get("climbMach", 0.0) or 0.0)
+        climbing = climb_mach > 0.0 and alt_cmd - self.z > self.CLIMB_BAND_M
 
         mach = self.V / max(self._a_sound, 1.0)
         mach = float(np.clip(mach, 0.15, self.cfg.MACH_MAX))
@@ -232,8 +251,17 @@ class F16Aircraft:
         k_i = getattr(self.cfg, "K_V_INT", 0.0)
         raw = 0.55 + self.cfg.K_V_THROT * V_err + k_i * self._v_int
         throt_cmd = float(np.clip(raw, 0.0, 1.0))
-        if k_i > 0.0 and ((0.0 < raw < 1.0) or (raw >= 1.0 and V_err < 0.0)
-                          or (raw <= 0.0 and V_err > 0.0)):
+        if climbing:
+            # Hold the climb Mach on the throttle, up to the climb throttle.
+            V_err = climb_mach * self._a_sound - self.V
+            cap = float(np.clip(cmd.get("climbThrottle", 1.0), 0.0, 1.0))
+            raw = 0.55 + self.cfg.K_V_THROT * V_err + k_i * self._v_int
+            throt_cmd = float(np.clip(raw, 0.0, cap))
+            if k_i > 0.0 and ((0.0 < raw < cap) or (raw >= cap and V_err < 0.0)
+                              or (raw <= 0.0 and V_err > 0.0)):
+                self._v_int += V_err * dt
+        elif k_i > 0.0 and ((0.0 < raw < 1.0) or (raw >= 1.0 and V_err < 0.0)
+                            or (raw <= 0.0 and V_err > 0.0)):
             self._v_int += V_err * dt
         lag = float(np.clip(dt / self.cfg.THROT_TC, 0.0, 1.0))
         self.throttle += lag * (throt_cmd - self.throttle)
@@ -242,14 +270,7 @@ class F16Aircraft:
         # ── 2. thrust ────────────────────────────────────────────────
         sigma = self._rho / 1.225
         tf    = self.cfg.thrust_mach_factor(mach)
-        if self.throttle <= 0.90:
-            T = (self.throttle / 0.90) * self.cfg.T_MIL_SL * (sigma ** self.cfg.ALT_LAPSE) * tf
-        else:
-            fab   = (self.throttle - 0.90) / 0.10
-            T_mil = self.cfg.T_MIL_SL * (sigma ** self.cfg.ALT_LAPSE) * tf
-            T_ab  = self.cfg.T_AB_SL  * (sigma ** self.cfg.ALT_LAPSE) * tf
-            T     = T_mil + fab * (T_ab - T_mil)
-        T = max(0.0, T)
+        T = self._thrust(self.throttle, sigma, tf)
 
         # fuel flow
         if self.throttle <= 0.90:
@@ -284,6 +305,19 @@ class F16Aircraft:
         # ── 5. altitude autopilot → nz command ──────────────────────
         alt_err   = alt_cmd - self.z
         gamma_cmd = float(np.clip(self.cfg.K_ALT_GAM * alt_err, -fpa_lim, climb_lim))
+        if climbing:
+            # The steady climb angle the climb throttle's thrust allows (with
+            # last frame's drag), steeper when faster than climbMach, flatter
+            # when slower; the throttle loop above holds the Mach below that.
+            v_climb = climb_mach * self._a_sound
+            T_cap = self._thrust(float(np.clip(cmd.get("climbThrottle", 1.0), 0.0, 1.0)), sigma, tf)
+            g_ss = math.asin(float(np.clip((T_cap * math.cos(self.alpha) - self._drag) / W, -0.5, 0.5)))
+            # The climb rate and the thrust set the climb angle here, so the
+            # platform's climb-angle schedule (for climbs at the commanded
+            # speed) does not apply.
+            g_vs = math.asin(min(self.CLIMB_VS_PER_M * alt_err / max(self.V, 1.0), 0.9))
+            gamma_cmd = min(g_vs, fpa_lim,
+                            max(0.0, g_ss + self.K_CLIMB_V * (self.V - v_climb) / self.V))
         gamma_err = gamma_cmd - self.gamma
         # Only nz·cos φ acts vertically. Without the division a steep turn
         # spirals into the ground while altitude hold is commanded.
@@ -296,6 +330,7 @@ class F16Aircraft:
                               self.cfg.CL_MIN, self.cfg.CL_MAX))
         CD   = self.cfg.CD0 + self.cfg.K_IND * CL ** 2 + self.cfg.cd_rise(mach)
         D    = q_dyn * self.cfg.S_REF * CD
+        self._drag = D
         alpha = float(np.clip(CL / self.cfg.CL_ALPHA, -0.25, 0.45))
 
         # ── 7. equations of motion ───────────────────────────────────
@@ -347,6 +382,14 @@ class F16Aircraft:
         self.phi_dot   = phi_dot
 
     # ── helpers ──────────────────────────────────────────────────────
+    def _thrust(self, throttle, sigma, tf):
+        """Thrust (N): 0-0.9 scales military thrust, 0.9-1.0 blends to full afterburner."""
+        T_mil = self.cfg.T_MIL_SL * (sigma ** self.cfg.ALT_LAPSE) * tf
+        if throttle <= 0.90:
+            return max(0.0, (throttle / 0.90) * T_mil)
+        T_ab = self.cfg.T_AB_SL * (sigma ** self.cfg.ALT_LAPSE) * tf
+        return max(0.0, T_mil + (throttle - 0.90) / 0.10 * (T_ab - T_mil))
+
     def _refresh_atmos(self):
         rho, _, _, a = isa(self.z)
         self._rho     = rho

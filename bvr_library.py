@@ -186,6 +186,14 @@ SCHEMA = {
         P("CLIMB_FPA_ALT_LO", "Low-altitude band ends", "m", "Agent commands", 0, 25_000),
         P("CLIMB_FPA_ALT_HI", "High-altitude band starts", "m", "Agent commands", 0, 25_000,
           help="The climb angle eases linearly from the low to the high value between these."),
+        P("CLIMB_MACH", "DCS-AI climb: Mach held", "", "Agent commands", 0, 2, advanced=True,
+          default=0.0,
+          help="Above 0: while climbing, fly a fixed throttle and hold this Mach with the nose, "
+               "whatever speed is commanded, as the DCS AI does on a route. 0: climb at the "
+               "commanded speed (the climb-angle limits above)."),
+        P("CLIMB_THROTTLE", "DCS-AI climb: throttle", "", "Agent commands", 0, 1, advanced=True,
+          default=1.0,
+          help="The throttle of a DCS-AI climb: 0.9 is full military power, 1.0 full afterburner."),
     ],
 }
 
@@ -534,6 +542,8 @@ class Platform:
     climb_fpa_hi: float            # deg
     climb_alt_lo: float
     climb_alt_hi: float
+    climb_mach: float = 0.0        # > 0: climbs like the DCS AI (f16_sim climbMach)
+    climb_throttle: float = 1.0
     items: dict = field(default_factory=dict)   # every item used, for run snapshots
 
     def climb_fpa(self, alt: float) -> float:
@@ -566,9 +576,29 @@ def load_platform(item_id: str) -> Platform:
         alt_min=float(pr["ALT_MIN_OP"]), alt_max=float(pr["ALT_MAX_OP"]),
         climb_fpa_lo=float(pr["CLIMB_FPA_LO"]), climb_fpa_hi=float(pr["CLIMB_FPA_HI"]),
         climb_alt_lo=float(pr["CLIMB_FPA_ALT_LO"]), climb_alt_hi=float(pr["CLIMB_FPA_ALT_HI"]),
+        climb_mach=float(pr.get("CLIMB_MACH", 0.0)), climb_throttle=float(pr.get("CLIMB_THROTTLE", 1.0)),
         items={"platform": it, **parts})
     _PLATFORM_CACHE[key] = p
     return p
+
+
+# How the aircraft is flown through a climb (a DCS-AI climb or not), which a
+# self-play snapshot does not depend on: what it sees and can command is the same.
+_FLYING_ONLY = ("CLIMB_MACH", "CLIMB_THROTTLE")
+
+
+def selfplay_group(platform_id: str) -> str:
+    """Platforms in one group can fly against each other in self-play: the same
+    airframe, radar, missile, loadout, signature and commands, differing at most
+    in how they climb (F-16C-DCSAI and F-16C-DCS)."""
+    it = get_item("platform", platform_id)
+    params = {k: v for k, v in it.get("params", {}).items() if k not in _FLYING_ONLY}
+    parts = [fingerprint(get_item(k, params[k])) for k in ("airframe", "radar", "missile")]
+    return fingerprint({"params": {**params, "_parts": parts}})
+
+
+def selfplay_compatible(a: str, b: str) -> bool:
+    return a == b or selfplay_group(a) == selfplay_group(b)
 
 
 def rcs_scale(target_rcs: float, ref_rcs: float) -> float:

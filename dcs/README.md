@@ -403,6 +403,15 @@ worse at first, for reasons that are useful to know:
   (`speed_short_pct` in `results.csv`). `--eta-lock` (locked arrival
   times on the route) made no difference and is not needed; the platform
   F-16C-DCS-MIL (no afterburner) models BLUE-1 without the boost.
+  **Climbs** are different again: on a route the DCS AI climbs at about
+  Mach 0.85 whatever speed it is asked for (220, 400 or 550 m/s), at about
+  0.02 m/s per metre still to climb (22-33 m/s with 1.2 km to go, 50-60
+  with 3 km at 10 km, slower higher up), where the simulator's F-16 climbs
+  with afterburner and accelerates past Mach 1. The platform
+  **F-16C-DCSAI** (F-16C-DCS plus `CLIMB_MACH` 0.85, `CLIMB_THROTTLE` 0.94,
+  fitted to the recorded climbs) flies its climbs that way. Train the agent
+  on it with red on F-16C-DCS: self-play still works, since the two differ
+  only in how they climb.
 - **Shooting.** "Fire" is a request. The DCS AI launches when its own
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot
