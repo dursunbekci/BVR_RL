@@ -500,9 +500,10 @@ class BvrCallback(BaseCallback):
 
 # ═════════════════════════════════════════════════════════════════════
 def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool,
-             doctrine, platform, opponent_platform, sp_scripted_frac=None, sp_newest_frac=None):
+             doctrine, platform, opponent_platform, sp_scripted_frac=None, sp_newest_frac=None,
+             max_steps=None):
     def _init():
-        return BvrEnv(opponent_type=opponent, gamma_discount=gamma,
+        env = BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
                       privileged_critic=privileged,
                       enable_viz=(viz and idx == 0),
@@ -510,16 +511,22 @@ def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfpl
                       selfplay_pool=selfplay_pool, doctrine=doctrine,
                       platform=platform, opponent_platform=opponent_platform,
                       sp_scripted_frac=sp_scripted_frac, sp_newest_frac=sp_newest_frac)
+        if max_steps:              # set here: worker processes import the class afresh
+            env.MAX_STEPS = int(max_steps)
+        return env
     return _init
 
 
 def make_team_env(idx, opponent, seed, privileged, envelope_table, gamma, doctrine,
-                  blue_platforms, red_platform):
+                  blue_platforms, red_platform, max_steps=None):
     def _init():
-        return TeamBvrEnv(opponent_type=opponent, gamma_discount=gamma, seed=seed + idx,
-                          instance_id=idx, privileged_critic=privileged,
-                          envelope_table=envelope_table, doctrine=doctrine,
-                          blue_platforms=blue_platforms, red_platform=red_platform)
+        env = TeamBvrEnv(opponent_type=opponent, gamma_discount=gamma, seed=seed + idx,
+                         instance_id=idx, privileged_critic=privileged,
+                         envelope_table=envelope_table, doctrine=doctrine,
+                         blue_platforms=blue_platforms, red_platform=red_platform)
+        if max_steps:
+            env.MAX_STEPS = int(max_steps)
+        return env
     return _init
 
 
@@ -557,6 +564,9 @@ def main():
     ap.add_argument("--run-name", type=str, default="latest",
                      help="Base filename (no .zip) the final model is saved "
                           "as inside --save-dir, e.g. models_bvr/<run-name>.zip")
+    ap.add_argument("--max-steps", type=int, default=None,
+                    help=f"episode length in decisions (default {BvrEnv.MAX_STEPS}); slow "
+                         f"platforms and DCS runs use 400")
     ap.add_argument("--gamma", type=float, default=0.997)
     ap.add_argument("--lr",    type=float, default=2.5e-4)
     ap.add_argument("--batch-size", type=int, default=256)
@@ -636,6 +646,8 @@ def main():
     if team and opponent == BvrOpponentType.SELF_PLAY:
         ap.error("2v1 has no self-play stage yet: choose a scripted opponent")
     envelope_table = args.envelope_table
+    if args.max_steps:
+        note(f"episode length: {args.max_steps} decisions (default {BvrEnv.MAX_STEPS})")
     if team:
         note(f"2v1: agents {args.platform} + {wingman} v opponent {args.opponent_platform}")
     else:
@@ -663,13 +675,14 @@ def main():
              f"from an earlier run deleted")
     if team:
         fns = [make_team_env(i, opponent, args.seed, privileged, envelope_table, args.gamma,
-                             args.doctrine.upper(), (args.platform, wingman), args.opponent_platform)
+                             args.doctrine.upper(), (args.platform, wingman), args.opponent_platform,
+                             args.max_steps)
                for i in range(args.n_envs)]
         vec = TeamVecEnv(fns, in_process=(args.n_envs == 1))
     else:
         fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
                         selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform,
-                        args.sp_scripted_frac, args.sp_newest_frac)
+                        args.sp_scripted_frac, args.sp_newest_frac, args.max_steps)
                for i in range(args.n_envs)]
         vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 

@@ -678,7 +678,9 @@ def test_team_datalink():
     from bvr_track_adapter import TrackState
     e = TeamBvrEnv(opponent_type=T.STRAIGHT, seed=11, doctrine="AGGRESSIVE")
     own, kills, rewards = 0, 0, []
-    for ep in range(3):
+    for ep in range(10):                 # until a kill: beam and stern starts rarely give one
+        if kills:
+            break
         e.reset()
         e._obs[0]._radar.max_range = 1.0
         done = False
@@ -693,7 +695,7 @@ def test_team_datalink():
     assert own == 0 and kills >= 1, (own, kills)
     # a kill is a team reward: both agents receive it on the same step
     assert all(min(r) > 0.5 for r in rewards), rewards
-    print(f"  2v1 datalink ................ OK  ({kills}/3 kills by the blind aircraft)")
+    print(f"  2v1 datalink ................ OK  (a kill by the blind aircraft in {ep} starts)")
 
 
 def test_team_losses():
@@ -1062,6 +1064,77 @@ def test_adaptive_defence():
         assert o._phase == ("REATTACK" if press else "DRAG"), (press, o._phase)
     print(f"  ADAPTIVE defence ............ OK  ({counts['shallow']}/{counts['deep_beam']}/"
           f"{counts['deep_cold']} shallow/beam/cold of 400; {longs}/300 long shots)")
+
+
+def test_adaptive_runner():
+    """SIM_REV 13: in 1/6 of ADAPTIVE episodes red keeps its distance low and slow:
+    drifts back beyond RUN_FAR, runs cold (beaming now and then) inside it, and
+    turns to fight only inside its TURN_RANGE; 2v1 red never runs.
+    Wide start altitudes put the second aircraft 2-12.5 km high in half the starts."""
+    import collections
+    import bvr_env as E
+    from bvr_opponents import AdaptiveShooterOpponent, BvrOpponentType as T
+    ic = {"ac2_psi": math.pi, "ac2_alt": 9000.0, "ac2_spd": 280.0, "ac1_psi": 0.0}
+    o = AdaptiveShooterOpponent(rng=np.random.default_rng(5))
+    runs = 0
+    for _ in range(600):
+        o.reset(ic)
+        if o.RUNNER:
+            runs += 1
+            assert o._phase == "RUN" and not o.LONG_SHOT and 1500 <= o.RUN_ALT <= 5000
+            assert 25_000 <= o.TURN_RANGE <= 45_000 and o.RUN_SPEED <= 320 and o.RUN_FAR >= 55_000
+    assert 70 <= runs <= 130, runs
+    for seed in range(40):
+        two = AdaptiveShooterOpponent(rng=np.random.default_rng(seed)); two.legacy_crank = True
+        two.reset(ic)
+        assert not two.RUNNER and two._phase == "COMMIT", seed
+    while True:
+        o.reset(ic)
+        if o.RUNNER:
+            break
+    o.rmax_t = 30_000.0
+    far = {"range": 50_000.0, "aa_deg_t": 0.0, "psi_t": math.pi, "wpn_remaining_t": 4, "missiles": []}
+    offs = collections.Counter()
+    for t in range(0, 300, 2):
+        cmd = o.act(far, float(t))
+        assert cmd["altTarget"] == max(o.RUN_ALT, 1000.0) and cmd["V"] == o.RUN_SPEED and cmd["fire"] == 0
+        off = abs(math.degrees((cmd["hdgCmd"] - o._bearing_to_ac1(far) + math.pi) % (2 * math.pi) - math.pi))
+        offs["beam" if abs(off - 90.0) < 1.0 else "cold" if off >= 135.0 else "other"] += 1
+    assert offs["cold"] > offs["beam"] > 0 and offs["other"] == 0, offs
+    o.TURN_RANGE = 40_000.0
+    beyond = o.act(dict(far, range=90_000.0), 300.0)        # too far: it drifts back
+    off = abs(math.degrees((beyond["hdgCmd"] - o._bearing_to_ac1(far) + math.pi) % (2 * math.pi) - math.pi))
+    assert off <= 40.0 and o._phase == "RUN", off
+    near = dict(far, range=o.TURN_RANGE - 1000.0)
+    cmd = o.act(near, 300.0)
+    assert o._phase == "COMMIT", o._phase
+    off = abs(math.degrees((cmd["hdgCmd"] - o._bearing_to_ac1(near) + math.pi) % (2 * math.pi) - math.pi))
+    assert off < 1.0, off                                   # hot: it turns to fight
+    # In the environment: a runner opens the range on an agent flying at it slowly.
+    env = E.BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=4)
+    class Runner(AdaptiveShooterOpponent):          # the env resets it: draw until a runner
+        def reset(self, ic):
+            super().reset(ic)
+            while not self.RUNNER:
+                super().reset(ic)
+            self.TURN_RANGE, self.RUN_FAR = 20_000.0, 200_000.0     # running from the start
+    env._opponent_factory = lambda e: Runner(rng=np.random.default_rng(11))
+    env.reset()
+    r0 = env._state["range"]
+    hot = list(E.HDG_OFFSETS_DEG).index(0.0)
+    for _ in range(60):
+        env.step([hot, 2, 0, 0])
+    assert env._opponent._phase == "RUN" and env._state["range"] > r0 - 5_000.0, (r0, env._state["range"])
+    # Wide start altitudes.
+    alts = []
+    for i in range(300):
+        e = E.BvrEnv(opponent_type=T.STRAIGHT, seed=100 + i)
+        ic2 = e._random_ic()
+        alts.append(abs(ic2["ac2_alt"] - ic2["ac1_alt"]))
+    big = sum(a > 2600.0 for a in alts)
+    assert 60 <= big <= 200 and max(alts) > 6000.0, (big, max(alts))
+    print(f"  ADAPTIVE runner ............. OK  ({runs}/600 runners; {offs['cold']}/{offs['beam']} "
+          f"cold/beam decisions; {big}/300 starts more than 2.6 km apart in altitude)")
 
 
 def test_envelope_target_alt():
@@ -1480,6 +1553,7 @@ if __name__ == "__main__":
         ("F-16C-DCS-MIL",           test_platform_dcs_mil),
         ("envs pickle",             test_env_pickles),
         ("ADAPTIVE defence",        test_adaptive_defence),
+        ("ADAPTIVE runner",         test_adaptive_runner),
         ("cross-play reseed",       test_crossplay_reseed),
         ("DCS turn test",           test_dcs_turn_test),
     ]

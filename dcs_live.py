@@ -224,7 +224,7 @@ class DcsLiveWorld(DcsReplayWorld):
             self.send_command(cmd1, bool(cmd1.get("fire", 0)))
         if self.fire_pending is not None and self.t - self.fire_pending > 20.0:
             self.fire_pending = None            # the bridge never answered
-        t_new = self.t + self.SIM_DT
+        t_new = round(self.t + self.SIM_DT, 6)       # no drift (DcsReplayWorld.step)
         self.pump(until_t=t_new)
         self.t = min(t_new, self.rec.t_end) if self.mission_ended else t_new
         self.events = self._events_between(self._t_prev, self.t)

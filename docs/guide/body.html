@@ -26,8 +26,8 @@
   <li>10. How the agent is rewarded<span class="pg">13</span></li>
   <li>11. How the agent learns<span class="pg">15</span></li>
   <li>12. The curriculum and the opponents<span class="pg">15</span></li>
-  <li>13. Self-play<span class="pg">16</span></li>
-  <li>14. Two against one (2v1)<span class="pg">17</span></li>
+  <li>13. Self-play<span class="pg">17</span></li>
+  <li>14. Two against one (2v1)<span class="pg">18</span></li>
   <li>15. The parameter library<span class="pg">18</span></li>
   <li class="ph">Part C · The GUI, page by page</li>
   <li>16. The TRAINING page<span class="pg">21</span></li>
@@ -300,7 +300,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <div class="chap">
 <h1>7 · One episode, step by step</h1>
 <h2>7.1 The start</h2>
-<p>Each episode starts with the two aircraft 70–110 km apart, at 6–11 km altitude (within 2.5 km of each other), at 250–320 m/s (scaled to slower platforms). One of five start geometries is drawn:</p>
+<p>Each episode starts with the two aircraft 70–110 km apart, the first at 6–11 km altitude and the second within 2.5 km of it or, in half the starts (since SIM_REV 13), anywhere from 2 to 12.5 km, at 250–320 m/s (scaled to slower platforms). One of five start geometries is drawn:</p>
 <figure>{GEOMETRY_SVG}
 <figcaption>The five start geometries, drawn for AC1 (blue, bottom) and AC2 (red, top). AC1 always starts pointing at AC2. In a stern start AC2 flies away and the range is shorter, 45–75 km. Stern starts are skipped when the opponent is faster than the agent, since they could never be won.</figcaption></figure>
 <p><b>Mirrored starts.</b> In four of the five geometries, AC1 has the better start. So in half the episodes the two aircraft swap starts: the opponent gets the better one. The agent learns to fight from both sides. WATCH statistics mark mirrored starts with ⇄.</p>
@@ -398,7 +398,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><th>Term</th><th class="n">Weight</th><th>Rewards</th></tr>
 <tr><td class="k">Envelope</td><td class="n">0.60</td><td>Being inside your own missile's envelope (best inside R<sub>NEZ</sub>) and outside the enemy's.</td></tr>
 <tr><td class="k">Track</td><td class="n">0.25</td><td>Holding a firm track (1), acquiring (0.5), coasting (0.4, fading with age), none (0).</td></tr>
-<tr><td class="k">Energy</td><td class="n">0.15</td><td>Having more energy (speed and height) than the enemy.</td></tr>
+<tr><td class="k">Energy</td><td class="n">0.07</td><td>Having more energy (speed and height) than the enemy. It was 0.15 until SIM_REV 13: about a fifth of all shaping, and dcs_v8 climbed to 11–14 km in every DCS fight.</td></tr>
 <tr><td class="k">Support</td><td class="n">0.30</td><td>Keeping a good track while your own missile still needs guidance.</td></tr>
 <tr><td class="k">Defence</td><td class="n">0.80</td><td>Negative while an enemy missile is inbound, more so as its time-to-go runs out: −0.8 × (1 − tanh(time-to-go / 25 s)). Defending lengthens time-to-go.</td></tr>
 </table>
@@ -455,10 +455,11 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="k">EVASIVE</td><td>no</td><td>Slow S-turns (±35–70°, every 25–45 s) and altitude changes.</td><td>Keep the radar on a changing target.</td></tr>
 <tr><td class="k">NOTCHER</td><td>no</td><td>When spiked or within 90 km, turns 90° to the agent (beaming) and descends 2 km, switching sides every 12–25 s.</td><td>That a track isn't permanent; how to close on a beaming target.</td></tr>
 <tr><td class="k">SHOOTER</td><td>yes</td><td>Commits; fires at 80% of its R<sub>max</sub>; cranks 45° while its missile needs guidance; turns cold and runs once it doesn't; re-attacks beyond 60 km; defends (beam and dive) against inbound missiles.</td><td>Fight an armed enemy: shoot, support, defend.</td></tr>
-<tr><td class="k">ADAPTIVE</td><td>yes</td><td>SHOOTER with random settings each episode: shot at 60–95% of R<sub>max</sub>, crank 30–45°, re-attack 30–55 km, 8–20 s between shots. Against an inbound missile, half its episodes it dives to 1–2.5 km instead of descending 1.5 km: beaming (as the DCS AI does) or turning away. A third of its episodes it flies like the DCS AI: it shoots at the edge of R<sub>max</sub> and presses on after its missile goes active, so it often shoots first.</td><td>Not to overfit one opponent's habits.</td></tr>
+<tr><td class="k">ADAPTIVE</td><td>yes</td><td>SHOOTER with random settings each episode: shot at 60–95% of R<sub>max</sub>, crank 30–45°, re-attack 30–55 km, 8–20 s between shots. Against an inbound missile, half its episodes it dives to 1–2.5 km instead of descending 1.5 km: beaming (as the DCS AI does) or turning away. A third of its episodes it flies like the DCS AI: it shoots at the edge of R<sub>max</sub> and presses on after its missile goes active, so it often shoots first. In 1 of 6 (SIM_REV 13) it is a <b>runner</b>: low (1.5–5 km) and slower than the agent (240–320 m/s), it keeps its distance, drifting back beyond 55–75 km and running cold (beaming now and then) inside it, and turns to fight only within 25–45 km. Waiting it out ends in a timeout.</td><td>Not to overfit one opponent's habits.</td></tr>
 <tr><td class="k">SELF-PLAY</td><td>yes</td><td>Frozen copies of the agent itself (chapter 13).</td><td>Beat an opponent as good as itself.</td></tr>
 </table>
 <p>In 1v1, SHOOTER and ADAPTIVE fly under the agent's rules (since SIM_REV 9): each runs its own copy of the radar model, aims its missiles at its own track and fires only when the agent would be allowed to. A red that turns too far off loses its track, and its missile misses after 3 s without support, as the agent's would. Before, red's missiles were guided by the true position, so red could crank wider and still hit. The 2v1 opponents are unchanged.</p>
+<p><b>Red's bearing to the agent</b> (fixed in SIM_REV 13). Every scripted manoeuvre steers relative to the bearing from red to the agent. It used to be rebuilt from red's heading and an angle that has no sign, so with the agent on red's left it came out mirrored: 30–177° wrong in 15 of 40 fights. A red told to go hot first turned away and looped round; its cranks, drags and beams went the wrong way. It now comes from the two positions. ADAPTIVE is much stronger for it: dcs_v8 won 68% of 120 fights against it before the fix, 50% after, and was shot down three times as often.</p>
 <p>The deep dives (SIM_REV 10) matter because of the missile's energy: after its motor burns out it coasts, and the thick low air drains it. Against a level AIM-120C-DCS shot from 9 km, a red that turns away and dives escaped shots from 29 km that hit every beaming target. No ground clutter is modelled, so diving doesn't hide a target from the radar.</p>
 
 <h2>When does it advance?</h2>
@@ -757,6 +758,11 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="n">6</td><td>Missiles only within 60° of the nose.</td></tr>
 <tr><td class="n">7</td><td>Heading change costs 0.04 per 180° (was 0.015).</td></tr>
 <tr><td class="n">8</td><td>Half the starts mirrored.</td></tr>
+<tr><td class="n">9</td><td>Scripted shooters fly under the agent's rules: their own radar track, the support rule, the fire mask; cranks at most 45°.</td></tr>
+<tr><td class="n">10</td><td>ADAPTIVE defends deep in half its episodes (dives to 1–2.5 km).</td></tr>
+<tr><td class="n">11</td><td>Launch envelopes depend on the target's altitude.</td></tr>
+<tr><td class="n">12</td><td>A third of ADAPTIVE episodes shoot at the edge of R<sub>max</sub> and press on, like the DCS AI.</td></tr>
+<tr><td class="n">13</td><td>Energy weight 0.07; wide start altitudes; ADAPTIVE runner; scripted red's bearing fixed.</td></tr>
 </table>
 </div>
 
@@ -782,6 +788,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="k">--doctrine</td><td>mixed</td><td>mixed, aggressive, balanced, conservative.</td></tr>
 <tr><td class="k">--platform · --opponent-platform</td><td>F-16C</td><td>Library platforms.</td></tr>
 <tr><td class="k">--format · --wingman-platform</td><td>1v1</td><td>1v1 or 2v1; the wingman's platform.</td></tr>
+<tr><td class="k">--max-steps</td><td>300</td><td>Episode length in decisions (seconds). 400 for DCS work and slow platforms.</td></tr>
 <tr><td class="k">--gamma · --lr · --batch-size</td><td>0.997 · 0.00025 · 256</td><td>PPO settings.</td></tr>
 <tr><td class="k">--seed</td><td>42</td><td>Random seed.</td></tr>
 <tr><td class="k">--no-privileged</td><td></td><td>Critic without the true values.</td></tr>

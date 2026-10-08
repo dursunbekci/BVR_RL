@@ -391,7 +391,7 @@ _MODEL_REV = {"airframe": 2}
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 12
+SIM_REV = 13
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -432,6 +432,15 @@ _SIM_REV_NOTES = {
         "of turning cold, so it often shoots first (against dcs_v7: first in 23 of 60 "
         "fights, was 13 of 40). 2v1 red is reset to the old defence explicitly: since "
         "SIM_REV 10 it had kept the deep defence its constructor drew",
+    13: "fixes for what dcs_v8 did in DCS: the energy shaping weight is 0.07 (was "
+        "0.15; the policy climbed to 11-14 km in every fight); in half of the starts "
+        "the second aircraft is anywhere from 2 to 12.5 km high (was within 2.5 km of "
+        "the first); in 1/6 of ADAPTIVE episodes red keeps its distance, low and slow, "
+        "and only turns to fight inside 25-45 km, so waiting it out ends in a timeout. "
+        "And scripted red's bearing to the agent is taken from the two positions: it "
+        "was mirrored whenever the agent was on red's left (30-177 deg wrong in 15 of "
+        "40 fights), so red went hot, cranked and dragged the wrong way. ADAPTIVE is "
+        "much stronger for it: dcs_v8 won 68% of 120 fights against it before, 50% after",
 }
 
 

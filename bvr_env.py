@@ -186,7 +186,10 @@ class BvrEnv(gym.Env):
     MIN_ALT      = 300.0
     ESCAPE_RANGE = 150_000.0
 
-    W_ENVELOPE = 0.60; W_TRACK = 0.25; W_ENERGY = 0.15
+    # W_ENERGY was 0.15 until SIM_REV 13: the energy term was ~20% of all
+    # shaping in dcs_v8's training, the policy climbed to 11-14 km in every DCS
+    # fight, and there the DCS AI climbs at ~250 m/s whatever it is asked for.
+    W_ENVELOPE = 0.60; W_TRACK = 0.25; W_ENERGY = 0.07
     W_SUPPORT  = 0.30; W_DEFENCE = 0.80
 
     R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.5
@@ -1041,6 +1044,7 @@ class BvrEnv(gym.Env):
     # practised the worse one; a policy against itself scored 0.71 in the
     # AC1 seat. This share of episodes swaps the two aircraft's starts.
     MIRROR_START_FRAC=0.5
+    WIDE_ALT_FRAC=0.5
 
     def stern_starts(self, blue_top_speed=None) -> bool:
         """Whether stern-conversion starts are drawn.
@@ -1061,6 +1065,11 @@ class BvrEnv(gym.Env):
         br=float(self._rng.uniform(0,2*math.pi))
         a1a=float(self._rng.uniform(6000,11000))
         a2a=float(np.clip(a1a+self._rng.uniform(-2500,2500),4000,12500))
+        # In WIDE_ALT_FRAC of starts the second aircraft is anywhere from 2 to
+        # 12.5 km (SIM_REV 13): within 2.5 km of the first, 5-12 km below (as in
+        # the DCS defender fights) was never seen in training.
+        wide_alt=float(self._rng.uniform(2000,12500))
+        if self._rng.random()<self.WIDE_ALT_FRAC: a2a=wide_alt
         # Start speeds are drawn for an F-16 (250-320 m/s) and scaled by each
         # platform's fastest speed choice relative to the F-16's 400 m/s, so a
         # slower aircraft starts at a speed it can actually fly.

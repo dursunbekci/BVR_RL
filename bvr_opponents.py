@@ -113,9 +113,18 @@ class BvrOpponent:
     @staticmethod
     def _bearing_to_ac1(state: dict) -> float:
         """
-        Bearing from AC2 to AC1, rad. Derived from AC2's own heading and the
-        aspect angle the C++ side already computes (aa_deg_t = AC2 nose off AC1).
+        Bearing from AC2 to AC1, rad, from the two positions. It used to be
+        AC2's heading plus aa_deg_t (AC2's nose off AC1), but that angle has no
+        sign: with AC1 on AC2's left the bearing came out mirrored, 30-177 deg
+        wrong in 15 of 40 fights, so a red told to go hot first turned away and
+        looped round, and its cranks, drags and beams went to the wrong side
+        (until SIM_REV 13). The old estimate remains for a state without positions.
         """
+        if all(k in state for k in ("lat", "lon", "lat_t", "lon_t")):
+            north = (state["lat"] - state["lat_t"]) * DEG2RAD
+            east = (state["lon"] - state["lon_t"]) * DEG2RAD * math.cos(state["lat_t"] * DEG2RAD)
+            if north or east:
+                return math.atan2(east, north) % (2 * math.pi)
         psi_t = state.get("psi_t", 0.0)
         aa_t = state.get("aa_deg_t", 180.0) * DEG2RAD
         return (psi_t + aa_t) % (2 * math.pi)
@@ -239,6 +248,18 @@ class ShooterOpponent(BvrOpponent):
     # press: turn hot again and keep attacking, as the DCS AI does (SIM_REV 12).
     PRESS = False
     LONG_SHOT = False     # ADAPTIVE's DCS-like episodes: SHOT_RMAX_FRAC 0.95-1.0 and PRESS
+    # A red that runs (SIM_REV 13, ADAPTIVE only): low and slower than the
+    # agent's top speed, it keeps its distance: it drifts towards the agent
+    # beyond RUN_FAR, runs cold (with a beam leg now and then) inside it, and
+    # only turns to fight once the agent is within TURN_RANGE. In training red
+    # always came back to attack, so waiting paid: against a human who kept
+    # running low, dcs_v8 held 70 km at 220 m/s for 3.5 minutes. Running away
+    # for good instead took it beyond radar range, where nobody could follow.
+    RUNNER = False
+    RUN_ALT = 3000.0
+    RUN_SPEED = 300.0
+    RUN_FAR = 65_000.0
+    TURN_RANGE = 35_000.0
 
     def reset(self, ic):
         super().reset(ic)
@@ -283,6 +304,21 @@ class ShooterOpponent(BvrOpponent):
                 return self._cmd(hdg, self._base_alt - 4000.0, 400.0)
             hdg = brg + self._crank_side * (90.0 * DEG2RAD)
             return self._cmd(hdg, self._base_alt - 1500.0, 360.0)
+
+        # ── RUN (a runner, until cornered) ──────────────────────────
+        if self._phase == "RUN":
+            if rng > self.RUN_FAR:                   # too far to chase it: drift back
+                return self._cmd(brg + self._run_off, self.RUN_ALT, self.RUN_SPEED)
+            if rng > self.TURN_RANGE:
+                if t_sim >= self._leg_end:
+                    self._beam = not self._beam
+                    self._leg_end = t_sim + float(self.rng.uniform(*((12.0, 25.0) if self._beam
+                                                                     else (30.0, 70.0))))
+                    if self._beam:
+                        self._crank_side *= -1.0
+                off = (math.pi / 2 * self._crank_side) if self._beam else (math.pi + self._run_off)
+                return self._cmd(brg + off, self.RUN_ALT, self.RUN_SPEED)
+            self._phase = "COMMIT"
 
         # ── SHOOT ───────────────────────────────────────────────────
         fire = 0
@@ -366,8 +402,19 @@ class AdaptiveShooterOpponent(ShooterOpponent):
             self.PRESS = self.LONG_SHOT
             if self.LONG_SHOT:
                 self.SHOT_RMAX_FRAC = frac
+            # A runner in a quarter of the other episodes (1/6 overall).
+            run = float(self.rng.random())
+            self.RUNNER = (not self.LONG_SHOT) and run < 0.25
+            self.RUN_ALT = float(self.rng.uniform(1500.0, 5000.0))
+            self.RUN_SPEED = float(self.rng.uniform(240.0, 320.0))
+            self.RUN_FAR = float(self.rng.uniform(55_000.0, 75_000.0))
+            self.TURN_RANGE = float(self.rng.uniform(25_000.0, 45_000.0))
+            self._run_off = float(self.rng.uniform(-40.0, 40.0)) * DEG2RAD
+            self._beam, self._leg_end = True, 0.0
+            if self.RUNNER:
+                self._phase = "RUN"
         else:
             # Set, not left: the constructor's own reset() ran before the 2v1 env
             # set legacy_crank, and its draws would otherwise stay (they did for
             # DEFENCE from SIM_REV 10 until 12).
-            self.DEFENCE, self.LONG_SHOT, self.PRESS = "shallow", False, False
+            self.DEFENCE, self.LONG_SHOT, self.PRESS, self.RUNNER = "shallow", False, False, False

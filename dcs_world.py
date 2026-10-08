@@ -379,7 +379,9 @@ class DcsReplayWorld:
         return [self.rec.alive(self.names[i], self.t) for i in (1, 2)]
 
     def step(self, cmd1: dict, cmd2: dict) -> dict:
-        self.t = min(self.t + self.SIM_DT, self.t_end)
+        # Rounded: 0.02 added thousands of times drifts below the recording's
+        # times, and an aircraft killed on the last frame then counted as alive.
+        self.t = min(round(self.t + self.SIM_DT, 6), self.t_end)
         self.events = self._events_between(self._t_prev, self.t)
         self._t_prev = self.t
         return self.telemetry()
