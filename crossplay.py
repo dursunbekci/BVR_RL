@@ -63,11 +63,20 @@ SCRIPTED_PREFIX = "scripted:"
 _ENVS = {}
 
 
+# Seed slot per radar observer, by its key in env._sp_observers: the policy
+# opponent's (keyed by its privileged flag) and the scripted opponent's own
+# radar. The keys mix bools and a string, so they cannot be sorted; and a
+# fixed slot gives an observer the same noise whatever else the cached env
+# has built for earlier columns.
+_OBSERVER_SLOT = {False: 2, True: 3, "opponent_radar": 4}
+
+
 def _reseed(env, seed):
     """Put every generator that shapes an episode back to `seed`: the start
     geometry, the world (missile hand-off ranges), and both radars' noise."""
-    gens = [env._rng, env._world._rng] + [o._rng for _, o in sorted(env._sp_observers.items())]
-    for off, g in enumerate(gens):
+    gens = [(0, env._rng), (1, env._world._rng)] + \
+           [(_OBSERVER_SLOT[k], o._rng) for k, o in env._sp_observers.items()]
+    for off, g in gens:
         g.bit_generator.state = np.random.default_rng(seed * 8 + off).bit_generator.state
 
 

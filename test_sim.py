@@ -1392,6 +1392,23 @@ def test_team_vec_env():
     vec.close()
     print("  2v1 vec env ................. OK")
 
+
+def test_crossplay_reseed():
+    """A cross-play env cached across a scripted and a policy column holds both
+    radar observers (keys "opponent_radar" and False); reseeding must handle
+    the mix, and give each observer the same noise whichever exist."""
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from crossplay import _reseed
+    env = BvrEnv(opponent_type=T.SELF_PLAY, seed=5)
+    env._opponent_radar()
+    _reseed(env, 1000)
+    alone = env._sp_observers["opponent_radar"]._rng.random()
+    env.selfplay_observer(False)
+    _reseed(env, 1000)              # raised TypeError: bool < str
+    assert env._sp_observers["opponent_radar"]._rng.random() == alone
+    print("  cross-play reseed ........... OK")
+
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
 
@@ -1444,6 +1461,7 @@ if __name__ == "__main__":
         ("F-16C-DCS-MIL",           test_platform_dcs_mil),
         ("envs pickle",             test_env_pickles),
         ("ADAPTIVE defence",        test_adaptive_defence),
+        ("cross-play reseed",       test_crossplay_reseed),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)
