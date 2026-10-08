@@ -361,26 +361,20 @@ worse at first, for reasons that are useful to know:
 
 - **Flying.** BLUE-1 is flown by the DCS AI along the commanded route,
   with DCS's F-16 flight model. Turn rates, climbs and speed changes are
-  not the training autopilot's. A DCS AI on a route does not use
-  afterburner: BLUE-1 never flew faster than its 280 m/s start speed when
-  told 340, even with afterburner allowed and the speed ordered directly
-  (the bridge does both), while RED-1, in combat, reached 490 m/s. So for
-  DCS, train the agent as **F-16C-DCS-MIL** (the F-16C on military power,
-  AIM-120C-DCS) against **F-16C-DCS**, and fly it with
-  `--platform F-16C-DCS-MIL --opp-platform F-16C-DCS`. After each episode
-  `dcs_live.py` prints how often BLUE-1 flew more than 30 m/s below the
-  commanded speed (`speed_short_pct` in `results.csv`); above 30% it says
-  DCS is not flying the commanded speed.
-  `--speed-boost` tries one more way round it: while BLUE-1 is more than
-  20 m/s slow, DCS is asked for 550 m/s instead (`--speed-boost 450` for
-  another value), and for the real speed again once within 5 m/s. If that
-  gets BLUE-1 to its commanded speeds, train as F-16C-DCS (with
-  afterburner) and always fly with `--speed-boost`. It did not (BLUE-1
-  averaged 268 m/s against 315 asked). `--eta-lock` tries the one thing
-  the DCS AI is known to use afterburner for outside combat: making a
-  locked arrival time. The bridge then gives the route's points arrival
-  times from the commanded speed (`--eta-lock abs` if DCS reads them as
-  time of day rather than mission time). Rebuild the mission first.
+  not the training autopilot's. A DCS AI on a route does not light its
+  afterburner for the speed it is asked for: BLUE-1 stayed at full dry
+  thrust (99% RPM, never above 280 m/s) while RED-1, in combat, reached
+  490. **Fly with `--speed-boost`**: while BLUE-1 is more than 20 m/s
+  slow, DCS is asked for 550 m/s, and it then does use the afterburner
+  (the flame is visible). It spends the thrust mostly on climbing: in the
+  same fight BLUE-1 ended 2.3 km higher, with 2.8 km more energy height,
+  close to the simulator's F-16 with afterburner (13.8 km against 14.0,
+  but 268 m/s against 317). So train as F-16C-DCS (with afterburner) and
+  fly with `--speed-boost`. After each episode `dcs_live.py` prints how
+  often BLUE-1 flew more than 30 m/s below the commanded speed
+  (`speed_short_pct` in `results.csv`). `--eta-lock` (locked arrival
+  times on the route) made no difference and is not needed; the platform
+  F-16C-DCS-MIL (no afterburner) models BLUE-1 without the boost.
 - **Shooting.** "Fire" is a request. The DCS AI launches when its own
   logic agrees (it is set to shoot at maximum range), usually within a
   second or two, and the policy is not allowed to request another shot

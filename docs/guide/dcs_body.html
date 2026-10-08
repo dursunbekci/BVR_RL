@@ -286,7 +286,7 @@ There is no player aircraft, so you see the map (<span class="kbd">F10</span>). 
 <h1>8 · Step 6 · Let the policy fly</h1>
 <ol class="steps">
 <li><span class="where py">TERMINAL</span> Start the policy without <code>--shadow</code>:
-<pre>python dcs_live.py models_bvr\latest.zip</pre></li>
+<pre>python dcs_live.py models_bvr\latest.zip --speed-boost</pre></li>
 <li><span class="where dcs">DCS</span> Start the mission as in Step 5.</li>
 <li>From the first command the bridge flies BLUE-1:
 <ul>
@@ -354,7 +354,7 @@ The terminal output, <code>results.csv</code>, one <code>.jsonl</code> from a sh
 <pre class="out">written dcs\bvr_rl_defender.miz: BLUE-1 (F-16C, policy) v RED-1 (Su-25T, you), 90 km apart</pre>
 It puts you in RED-1 at 6000 m and 200 m/s (the Su-25T is slow: about 950 km/h at most), 90 km from BLUE-1, flying towards it. BLUE-1 is unchanged: an F-16C with four AIM-120Cs. The mission's briefing screen repeats the essentials.</li>
 <li><span class="where py">TERMINAL</span> Start the policy, for several fights:
-<pre>python dcs_live.py models_bvr\latest_selfplay_v6.zip --episodes 5</pre></li>
+<pre>python dcs_live.py models_bvr\latest_selfplay_v6.zip --episodes 5 --speed-boost</pre></li>
 <li><span class="where dcs">DCS</span> <i>Mission</i> → <code>bvr_rl_defender</code> → <i>Fly</i>. You start in the cockpit, in the air. Keep time acceleration at 1×.</li>
 <li>Survive. BLUE-1 will turn towards you and shoot from long range.</li>
 <li>After each fight: <span class="kbd">Esc</span> → <i>Quit</i> → <i>FLY AGAIN</i>. The terminal starts the next episode by itself.</li>
@@ -420,7 +420,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <p>Expect the policy to do worse in DCS than in training at first. These are the reasons, and where to see each one.</p>
 <table>
 <tr><th>Difference</th><th>What it means</th><th>Where to see it</th></tr>
-<tr><td class="k">Flying</td><td>BLUE-1 is flown by the DCS AI along the commanded route, with DCS's F-16 flight model. Turns, climbs and speed changes differ from the training autopilot. A DCS AI on a route does not use afterburner: BLUE-1 never flew faster than its 280 m/s start speed when told 340, even with afterburner allowed and the speed ordered directly, while RED-1, in combat, reached 490 m/s. Train for DCS as <b>F-16C-DCS-MIL</b> (military power only) against <b>F-16C-DCS</b>, and fly with <code>--platform F-16C-DCS-MIL --opp-platform F-16C-DCS</code>.</td><td>The terminal's <code>speed:</code> line; <code>speed_cmd_mean</code>, <code>speed_flown_mean</code>, <code>speed_short_pct</code> in <code>results.csv</code>.</td></tr>
+<tr><td class="k">Flying</td><td>BLUE-1 is flown by the DCS AI along the commanded route, with DCS's F-16 flight model. Turns, climbs and speed changes differ from the training autopilot. A DCS AI on a route does not light its afterburner for the speed it is asked for (BLUE-1 stayed at 99% RPM, never above 280 m/s; RED-1, in combat, reached 490). <b>Fly with <code>--speed-boost</code></b>: DCS is then asked for 550 m/s while BLUE-1 is slow, and does use the afterburner, mostly to climb, which comes close to the simulator's F-16 with afterburner. Train as <b>F-16C-DCS</b>. <code>--eta-lock</code> made no difference.</td><td>The terminal's <code>speed:</code> line; <code>speed_cmd_mean</code>, <code>speed_flown_mean</code>, <code>speed_short_pct</code> in <code>results.csv</code>.</td></tr>
 <tr><td class="k">Shooting</td><td>"Fire" is a request. The AI launches when its own logic agrees (set to shoot at maximum range), usually within a second or two. No second shot is allowed until the launch is seen.</td><td><code>results.csv</code>: fire timeouts.</td></tr>
 <tr><td class="k">Missile support</td><td>In training a missile misses after 3 s without guidance from its shooter's radar track, until its own seeker takes over; since SIM_REV 9 this holds for scripted opponents too. DCS is more forgiving. By default <code>dcs_live.py</code> applies the training rule to both aircraft (red's track comes from the same radar model run from red's side on DCS's positions) and has the bridge remove a missile that loses support; <code>--support-rule dcs</code> leaves it to DCS.</td><td>Terminal; <code>missiles_removed</code> in <code>results.csv</code>.</td></tr>
 <tr><td class="k">Radar</td><td>The track comes from BVR_RL's radar model on DCS's true positions, as in training. DCS's radar is not used, so this part matches training by design.</td><td>—</td></tr>
@@ -469,9 +469,9 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k"><code>--max-steps N</code></td><td class="n">300</td><td>Episode length in seconds; match training</td></tr>
 <tr><td class="k"><code>--doctrine D</code></td><td class="n">BALANCED</td><td>Shot doctrine the policy is told</td></tr>
 <tr><td class="k"><code>--opp-platform P</code></td><td class="n">checkpoint's</td><td>Library platform assumed for red's envelopes</td></tr>
-<tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (for DCS: <code>F-16C-DCS-MIL</code>, the F-16C without afterburner, as the DCS AI flies BLUE-1)</td></tr>
-<tr><td class="k"><code>--eta-lock [C]</code></td><td class="n">off</td><td>Give the route's points locked arrival times from the commanded speed: the DCS AI uses afterburner to make a time. C: <code>mission</code> (default) or <code>abs</code> (time of day). Needs a rebuilt mission.</td></tr>
-<tr><td class="k"><code>--speed-boost [V]</code></td><td class="n">off</td><td>While BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for V m/s (default 550) instead, to make the DCS AI use afterburner; the real speed again once within 5 m/s</td></tr>
+<tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (e.g. <code>F-16C-DCS</code>; <code>F-16C-DCS-MIL</code> is the F-16C without afterburner, as DCS flies BLUE-1 without <code>--speed-boost</code>)</td></tr>
+<tr><td class="k"><code>--eta-lock [C]</code></td><td class="n">off</td><td>Give the route's points locked arrival times from the commanded speed (said to make the DCS AI use afterburner; in our tests it made no difference). C: <code>mission</code> (default) or <code>abs</code> (time of day).</td></tr>
+<tr><td class="k"><code>--speed-boost [V]</code></td><td class="n">off</td><td>While BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for V m/s (default 550) instead; the real speed again once within 5 m/s. This makes the DCS AI use its afterburner: use it whenever the policy was trained with afterburner</td></tr>
 <tr><td class="k"><code>--support-rule R</code></td><td class="n">training</td><td><code>training</code>: 3 s without support before the seeker takes over removes the missile (blue's and red's); <code>dcs</code>: DCS decides</td></tr>
 <tr><td class="k"><code>--agent</code> / <code>--red</code></td><td class="n">from bridge</td><td>DCS unit names, if not the bridge's choice</td></tr>
 <tr><td class="k"><code>--port-in</code> / <code>--port-out</code></td><td class="n">15301 / 15302</td><td>UDP ports</td></tr>
