@@ -95,9 +95,19 @@ function MOCK_RED_GONE() if RED_MSL then RED_MSL.alive = false end end
 
 local msl
 local attack_since
+local GUNS = 805306368
 local function step_blue(dt)
   local c = blue.ctrl
   local top = c.tasks[#c.tasks]
+  if top and top.id == "AttackUnit" and top.params.weaponType == GUNS then
+    -- a guns-only attack from far away: a hard turn toward red (7 deg/s), no shot
+    local want = math.atan2(red.z - blue.z, red.x - blue.x)
+    local d = (want - blue.hdg + 3 * math.pi) % (2 * math.pi) - math.pi
+    local mx = math.rad(7) * dt
+    blue.hdg = blue.hdg + math.max(-mx, math.min(mx, d))
+    attack_since = nil
+    return
+  end
   if top and top.id == "AttackUnit" and c.opts[0] == 2 then
     attack_since = attack_since or T
     if T - attack_since >= LAUNCH_DELAY and not msl and blue.ammo > 0 then

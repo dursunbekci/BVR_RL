@@ -199,6 +199,12 @@ SCHEMA = {
           default=0.0,
           help="Above 0: heading changes are flown at no more than this bank, as the DCS AI on a "
                "route flies them (45 deg). 0: the airframe's own limits."),
+        P("HOT_TURN_BANK", "Turns toward the enemy: bank", "deg", "Agent commands", 0, 90,
+          advanced=True, default=0.0,
+          help="Above 0: a heading command within 15 deg of the bearing to the enemy, with "
+               "the aircraft more than 30 deg off it, is flown at this bank until within 10 deg, "
+               "as the DCS bridge flies it (OPT hotturn: a guns-only attack, about 7 deg/s at "
+               "4 g where a route turns at 1.6). Other turns keep TURN_BANK_MAX. 0: off."),
         P("AUTO_DEFEND", "Automatic missile defence", "", "Agent commands", 0, 1, kind="int",
           advanced=True, default=0,
           help="1: while an enemy missile is inbound the aircraft defends itself, as the DCS AI "
@@ -573,6 +579,7 @@ class Platform:
     climb_throttle: float = 1.0
     turn_bank_max: float = 0.0     # rad; > 0: heading changes at no more bank (f16_sim bankMax)
     auto_defend: bool = False      # defends itself from inbound missiles (sim_world)
+    hot_turn_bank: float = 0.0     # rad; > 0: turns toward the enemy at this bank (sim_world)
     items: dict = field(default_factory=dict)   # every item used, for run snapshots
 
     def climb_fpa(self, alt: float) -> float:
@@ -608,6 +615,7 @@ def load_platform(item_id: str) -> Platform:
         climb_mach=float(pr.get("CLIMB_MACH", 0.0)), climb_throttle=float(pr.get("CLIMB_THROTTLE", 1.0)),
         turn_bank_max=float(pr.get("TURN_BANK_MAX", 0.0)) * DEG2RAD,
         auto_defend=bool(int(pr.get("AUTO_DEFEND", 0))),
+        hot_turn_bank=float(pr.get("HOT_TURN_BANK", 0.0)) * DEG2RAD,
         items={"platform": it, **parts})
     _PLATFORM_CACHE[key] = p
     return p
@@ -616,7 +624,8 @@ def load_platform(item_id: str) -> Platform:
 # How the aircraft is flown (a DCS-AI climb and turn, an automatic missile
 # defence) and which four speeds its speed choices mean, which a self-play
 # snapshot does not depend on: what it sees and the choices it has are the same.
-_FLYING_ONLY = ("CLIMB_MACH", "CLIMB_THROTTLE", "TURN_BANK_MAX", "AUTO_DEFEND", "SPEED_CMDS")
+_FLYING_ONLY = ("CLIMB_MACH", "CLIMB_THROTTLE", "TURN_BANK_MAX", "HOT_TURN_BANK", "AUTO_DEFEND",
+                "SPEED_CMDS")
 
 
 def selfplay_group(platform_id: str) -> str:

@@ -35,6 +35,9 @@ Commands (UDP datagrams to CFG.port_in, plain text):
                               (reaction to threats: evade) and routes and shots wait
   OPT hot <0|1>               1: an attack task on the red aircraft with guns only, to make the
                               AI turn hard towards it (dcs/turn_test.py); 0 ends it
+  OPT hotturn <0|1>           1: a commanded heading within 15 deg of red's bearing, with the
+                              agent more than 30 deg off it, is flown as such an attack until
+                              the agent is within 10 deg of it, then the route again
   STOP          give the aircraft back to the AI (end of an episode)
   DESTROY <id>  remove missile <id> (as numbered in the shot events): dcs_live.py's
                 support rule says it has had no guidance for too long
@@ -62,6 +65,14 @@ local CFG = {
   -- Set to nil to let the AI choose, if it never shoots with this set.
   fire_weapon = 134217728,
   resend_s    = 2.0,        -- header and ammunition repeated this often (late starters)
+  -- OPT hotturn: a command within hotturn_toward_deg of the bearing to red,
+  -- with the agent more than hotturn_start_deg off it, is flown as a guns-only
+  -- attack on red (about 7 deg/s at 4 g, where the route turns at 1.6) until
+  -- the agent is within hotturn_done_deg of the command, or hotturn_max_s.
+  hotturn_toward_deg = 15.0,
+  hotturn_start_deg  = 30.0,
+  hotturn_done_deg   = 10.0,
+  hotturn_max_s      = 30.0,
 }
 
 -- ── LuaSocket ────────────────────────────────────────────────────────
@@ -188,8 +199,8 @@ pcall(function() theatre = env.mission.theatre end)
 local T0 = timer.getTime()
 -- Sent in the header; dcs_live.py warns when a mission's bridge is older
 -- than the options it was asked to use. 2: OPT eta. 3: OPT near, wpt, redhold.
--- 4: OPT autodefend, hot; no return to base at bingo fuel.
-local BRIDGE_VERSION = 4
+-- 4: OPT autodefend, hot; no return to base at bingo fuel. 5: OPT hotturn.
+local BRIDGE_VERSION = 5
 -- Weapon.flag for guns (gun pods and built-in cannons): OPT hot attacks with
 -- these only, so the AI manoeuvres to attack but cannot shoot from BVR range.
 local GUNS_FLAG = 805306368
@@ -232,6 +243,10 @@ local S = {
   autodefend = false,      -- OPT autodefend
   defending = false,       -- the DCS AI is defending the agent now
   hot = false,             -- OPT hot: a guns-only attack task is flying the agent
+  hotturn = false,         -- OPT hotturn: turns toward red are flown as an attack
+  hotturning = false,      -- such a turn is being flown now
+  t_hotturn = -1e9,
+  hotturn_wait = -1e9,     -- after a turn that timed out, none before this time
 }
 
 local function take_control()
@@ -344,8 +359,67 @@ local function destroy_missile(id)
   send({ev = "support_lost", t = timer.getTime(), id = id, shooter = shooter, status = status})
 end
 
+-- A guns-only attack task on red: the AI manoeuvres to attack (it turns at
+-- about 7 deg/s, 4 g; on a route 1.6 deg/s) but cannot shoot from BVR range.
+local function attack_task(on)
+  local c = ctrl_of(agent)
+  if on then
+    set_opt(c, O.id.ROE, O.val.ROE.OPEN_FIRE)
+    pcall(function()
+      c:pushTask({id = "AttackUnit", params = {unitId = red:getID(), weaponType = GUNS_FLAG,
+                                               groupAttack = false}})
+    end)
+  else
+    set_opt(c, O.id.ROE, O.val.ROE.WEAPON_HOLD)
+    pcall(function() c:popTask() end)
+    S.issued = nil                         -- the policy's route again
+  end
+end
+
+-- OPT hotturn: a turn toward red flown as an attack, then the route again.
+local function heading_of(u)
+  local v = u:getVelocity()
+  return math.deg(math.atan2(v.z, v.x)) % 360
+end
+
+local function bearing_to_red()
+  local a, r = agent:getPoint(), red:getPoint()
+  return math.deg(math.atan2(r.z - a.z, r.x - a.x)) % 360
+end
+
+local function end_hotturn(reroute)
+  if not S.hotturning then return end
+  attack_task(false)
+  S.hotturning = false
+  if reroute and S.cmd then issue_route(S.cmd) end
+  send({ev = "bridge", t = timer.getTime(), status = "hotturn", on = false})
+end
+
+local function check_hotturn(now)
+  if not (S.controlled and S.hotturn and S.cmd and agent:isExist() and red:isExist()) then
+    end_hotturn(S.controlled and S.cmd ~= nil)
+    return
+  end
+  if S.defending or S.hot or S.fire_pending then return end
+  local toward = hdg_diff(S.cmd.hdg, bearing_to_red()) <= CFG.hotturn_toward_deg
+  local err = hdg_diff(heading_of(agent), S.cmd.hdg)
+  if S.hotturning then
+    if now - S.t_hotturn > CFG.hotturn_max_s then
+      S.hotturn_wait = now + 10.0
+      end_hotturn(true)
+    elseif not toward or err <= CFG.hotturn_done_deg then
+      end_hotturn(true)
+    end
+  elseif toward and err > CFG.hotturn_start_deg and now >= S.hotturn_wait then
+    attack_task(true)
+    S.hotturning, S.t_hotturn = true, now
+    send({ev = "bridge", t = now, status = "hotturn", on = true})
+  end
+end
+
 -- OPT autodefend: the DCS AI defends the agent while a missile is inbound at it.
 local function start_defence()
+  end_hotturn(false)                     -- the defence comes first
   local c = ctrl_of(agent)
   set_opt(c, O.id.REACTION_ON_THREAT, O.val.REACTION_ON_THREAT.EVADE_FIRE)
   S.defending = true
@@ -364,18 +438,8 @@ end
 -- OPT hot: a guns-only attack task on red, which the AI flies as an attack.
 local function set_hot(on)
   if on == S.hot or not red:isExist() then return end
-  local c = ctrl_of(agent)
-  if on then
-    set_opt(c, O.id.ROE, O.val.ROE.OPEN_FIRE)
-    pcall(function()
-      c:pushTask({id = "AttackUnit", params = {unitId = red:getID(), weaponType = GUNS_FLAG,
-                                               groupAttack = false}})
-    end)
-  else
-    set_opt(c, O.id.ROE, O.val.ROE.WEAPON_HOLD)
-    pcall(function() c:popTask() end)
-    S.issued = nil
-  end
+  if on then end_hotturn(false) end
+  attack_task(on)
   S.hot = on
 end
 
@@ -388,7 +452,12 @@ local function on_command(msg)
   local hold = msg:match("^OPT%s+redhold%s+([01])")
   local adef = msg:match("^OPT%s+autodefend%s+([01])")
   local hot = msg:match("^OPT%s+hot%s+([01])")
-  if near or wpt or hold or adef or hot then
+  local hturn = msg:match("^OPT%s+hotturn%s+([01])")
+  if near or wpt or hold or adef or hot or hturn then
+    if hturn then
+      S.hotturn = hturn == "1"
+      if not S.hotturn then end_hotturn(true) end
+    end
     if adef then
       S.autodefend = adef == "1"
       if not S.autodefend and S.defending then end_defence() end
@@ -410,7 +479,7 @@ local function on_command(msg)
     -- Confirmed every time (not only on a change): UDP may drop the reply.
     send({ev = "bridge", t = timer.getTime(), status = "opt", near_m = S.near_m,
           wpt = (S.wpt == "Fly Over Point") and "flyover" or "turn", redhold = S.redhold,
-          autodefend = S.autodefend, hot = S.hot})
+          autodefend = S.autodefend, hot = S.hot, hotturn = S.hotturn})
     return
   end
   local clock = msg:match("^OPT%s+eta%s+(%a+)")
@@ -440,9 +509,11 @@ local function on_command(msg)
   end
   if cmd.fire == 1 and cmd.seq ~= S.last_fire_seq then
     S.last_fire_seq = cmd.seq
+    end_hotturn(false)                       -- a shot ends a turn toward red
     request_fire(cmd.seq)
   end
   if S.fire_pending then return end          -- the attack task flies until the launch
+  if S.hotturning then return end            -- a route now would replace the attack task
   local i = S.issued
   if i == nil or hdg_diff(cmd.hdg, i.hdg) >= CFG.reissue_deg or math.abs(cmd.alt - i.alt) > 50
      or math.abs(cmd.spd - i.spd) > 1 or timer.getTime() - S.t_issued >= CFG.reissue_s then
@@ -561,6 +632,7 @@ local function tick(_, now)
       if inbound and not S.defending then start_defence()
       elseif not inbound and S.defending then end_defence() end
     end
+    check_hotturn(now)
   end)
   if not ok then env.info("bvr_bridge tick error: " .. tostring(err)) end
   return now + CFG.rate

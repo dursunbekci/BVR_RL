@@ -104,6 +104,13 @@ class SimWorld:
                             for p in self.platforms]
         self.defending = [False] * self.n
         self._defend_alt = [0.0] * self.n
+        # Turns toward the enemy at this bank (rad; 0: off), as the DCS bridge
+        # flies them with OPT hotturn (platform HOT_TURN_BANK; the fake DCS
+        # bridge switches it on as OPT hotturn does).
+        self.hot_turn = [float(getattr(p, "hot_turn_bank", 0.0) or 0.0) if p is not None else 0.0
+                         for p in self.platforms]
+        self.hot_turning = [False] * self.n
+        self._hot_turn_since = [0.0] * self.n
 
     # 1v1 names, kept for readers of the two-aircraft world
     ac1  = property(lambda self: self.acs[0])
@@ -142,6 +149,8 @@ class SimWorld:
         self._rwr_t_warn = {}
         self.defending   = [False] * self.n
         self._defend_alt = [0.0] * self.n
+        self.hot_turning = [False] * self.n
+        self._hot_turn_since = [0.0] * self.n
         legacy = {1: "wpn", 2: "wpn_t"} if self.n == 2 else {}
         self.wpn = [int(ic.get(f"wpn{i}", ic.get(legacy.get(i, ""), self.wpn_count[i - 1])))
                     for i in range(1, self.n + 1)]
@@ -203,6 +212,42 @@ class SimWorld:
         return {**cmd, "hdgCmd": hdg % (2 * math.pi), "altTarget": self._defend_alt[i - 1],
                 "V": v_top, "altFPA": self.DEFEND_FPA,
                 "climbFPA": self.DEFEND_FPA, "climbMach": 0.0, "bankMax": 0.0, "fire": 0}
+
+    # ── turns toward the enemy (platform HOT_TURN_BANK) ──────────────
+    # The DCS bridge (OPT hotturn) flies a turn toward red as a guns-only
+    # attack: 7 deg/s at about 4 g in DCS, where a route turns at 1.6. The
+    # same rules: a command within HOT_TOWARD of the bearing to the nearest
+    # live enemy, with the aircraft more than HOT_START off it, until within
+    # HOT_DONE (or HOT_MAX_S).
+    HOT_TOWARD = math.radians(15.0)
+    HOT_START  = math.radians(30.0)
+    HOT_DONE   = math.radians(10.0)
+    HOT_MAX_S  = 30.0
+
+    def _hot_turn_bank(self, i: int, cmd: dict) -> float:
+        """The bank limit for aircraft i's command this frame: its hot-turn
+        bank while it turns toward the enemy, else 0 (none set here)."""
+        if not self.hot_turn[i - 1] or self.defending[i - 1] or "hdgCmd" not in cmd:
+            self.hot_turning[i - 1] = False
+            return 0.0
+        live = [j for j in self.enemies(i) if self.alive[j - 1]]
+        if not live:
+            self.hot_turning[i - 1] = False
+            return 0.0
+        pos = self.pos(i)
+        j = min(live, key=lambda j: float(np.linalg.norm(self.pos(j) - pos)))
+        d = self.pos(j) - pos
+        hdg = float(cmd["hdgCmd"])
+        toward = abs(_wrap_pi(hdg - math.atan2(float(d[0]), float(d[1])))) <= self.HOT_TOWARD
+        err = abs(_wrap_pi(self.acs[i - 1].chi - hdg))
+        if self.hot_turning[i - 1]:
+            if (not toward or err <= self.HOT_DONE
+                    or self.t_sim - self._hot_turn_since[i - 1] > self.HOT_MAX_S):
+                self.hot_turning[i - 1] = False
+        elif toward and err > self.HOT_START:
+            self.hot_turning[i - 1] = True
+            self._hot_turn_since[i - 1] = self.t_sim
+        return self.hot_turn[i - 1] if self.hot_turning[i - 1] else 0.0
 
     # ── main step ───────────────────────────────────────────────────
     def step(self, cmd1: dict, cmd2: dict) -> dict:
@@ -280,6 +325,9 @@ class SimWorld:
                 # A platform that climbs and turns like the DCS AI does so
                 # whoever flies it.
                 p = self.platforms[i - 1]
+                hot = self._hot_turn_bank(i, cmd)
+                if hot:
+                    cmd = {**cmd, "bankMax": hot}
                 if p is not None and getattr(p, "climb_mach", 0.0) and "climbMach" not in cmd:
                     cmd = {**cmd, "climbMach": p.climb_mach, "climbThrottle": p.climb_throttle}
                 if p is not None and getattr(p, "turn_bank_max", 0.0) and "bankMax" not in cmd:

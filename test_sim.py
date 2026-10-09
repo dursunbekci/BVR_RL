@@ -944,7 +944,7 @@ def test_dcs_speed_boost():
     import dcs_live
     w = dcs_live.DcsLiveWorld.__new__(dcs_live.DcsLiveWorld)
     w.speed_boost, w._boosting, w.boost_steps = 550.0, False, 0
-    w.auto_defend = False
+    w.auto_defend = w.hot_turn = False
     flown = iter([280.0, 300.0, 330.0, 336.0, 320.0, 300.0, 400.0])
     w._flown_speed = lambda: next(flown)
     sent = [w._speed_to_send(340.0) for _ in range(7)]
@@ -1531,14 +1531,22 @@ def test_dcs_turn_test():
     assert all(r["rate_bulk_dps"] > 5.0 and r["reached"] for r in rows), rows
     assert len(saved) == 3 and saved[0]["mode"] == "sim" and saved[0]["variant"] == "base", saved
     # hot (bridge 4): red off a wing on the route (45 deg of bank), then the
-    # attack task, which the fake flies at the airframe's full agility.
+    # attack task, which the fake flies at the platform's hot-turn bank (77 deg).
+    # hotturn (bridge 5): the heading to red is commanded and the fake bridge
+    # flies the turn that way itself.
     with tempfile.TemporaryDirectory() as d:
-        hot = turn_test.main(["--sim", "--platform", "F-16C-DCSAI", "--variants", "hot", "--out", d])
+        hot = turn_test.main(["--sim", "--platform", "F-16C-DCSAI-AD", "--variants", "hot", "hotturn",
+                              "--out", d])
+    auto = [r for r in hot if r["variant"] == "hotturn"]
+    hot = [r for r in hot if r["variant"] == "hot"]
+    assert len(auto) == 2 and all(r["rate_bulk_dps"] > 5.0 and r["bank_max_deg"] > 70 for r in auto), auto
     # (red off the wing within 5 deg, and it moves: 80-100 deg to turn)
     assert [r["turn_deg"] > 0 for r in hot] == [True, False], hot
     assert all(80 <= abs(r["turn_deg"]) <= 100 for r in hot), hot
     assert all(r["rate_bulk_dps"] > 5.0 and r["bank_max_deg"] > 60 and r["wpt"] == "attack"
                for r in hot), hot
+    at340 = [r for r in hot + auto if r["speed_mps"] >= 320]       # DCS: 7.0-7.1 deg/s at 340 m/s
+    assert at340 and all(5.5 < r["rate_bulk_dps"] < 8.5 for r in at340), at340
     print(f"  DCS turn test (sim) ......... OK  ({min(r['rate_bulk_dps'] for r in rows):.1f}-"
           f"{max(r['rate_bulk_dps'] for r in rows):.1f} deg/s; hot "
           f"{min(r['rate_bulk_dps'] for r in hot):.1f}-{max(r['rate_bulk_dps'] for r in hot):.1f})")
@@ -1737,12 +1745,59 @@ def test_dcs_auto_defend():
                                       log=lines.append)
         th.join(timeout=120)
     link.close(); fake.close()
-    assert row["auto_defend"] == 1 and row["bridge_version"] == 4, row
+    assert row["auto_defend"] == 1 and row["bridge_version"] == 5, row
+    assert row["hot_turn"] == 1, row                    # the platform's HOT_TURN_BANK turns it on
     assert row["defences"] >= 1 and row["defend_s"] > 0, (row, lines)
     assert any("the DCS AI defends BLUE-1" in ln for ln in lines), lines
-    assert not any("never confirmed" in ln for ln in lines), lines
+    assert not any("never confirmed" in ln for ln in lines), lines      # autodefend and hotturn
     print(f"  DCS auto-defend ............. OK  ({row['defences']} defence(s), {row['defend_s']:.0f} s; "
           f"{row['outcome']})")
+
+
+def test_hot_turn():
+    """HOT_TURN_BANK (F-16C-DCSAI-AD): a command toward the enemy with the
+    aircraft far off it is flown at 77 deg of bank (about 7 deg/s at 340 m/s,
+    as the DCS bridge flies it as an attack) until within 10 deg; a turn away
+    keeps the 45 deg of a route; without it, every turn is 45 deg."""
+    import math
+    import bvr_library as L
+    from sim_world import SimWorld, _enu_to_latlon
+
+    def fly(blue, hdgs):
+        """Blue heading east, red 60 km north; hdgs: [(t_from, commanded heading deg)]."""
+        w = SimWorld(platforms=[L.load_platform(blue), L.load_platform("F-16C-DCS")], teams=[1, 2])
+        la, lo, _ = _enu_to_latlon(0, 0, 9000); lb, lob, _ = _enu_to_latlon(0, 60000, 9000)
+        w.reset({"ac1_lat": la, "ac1_lon": lo, "ac1_alt": 9000, "ac1_psi": math.pi / 2, "ac1_spd": 340,
+                 "ac2_lat": lb, "ac2_lon": lob, "ac2_alt": 9000, "ac2_psi": math.pi / 2, "ac2_spd": 340})
+        rows = []
+        for k in range(int(70 / w.SIM_DT)):
+            t = k * w.SIM_DT
+            hdg = [h for t0, h in hdgs if t >= t0][-1]
+            red = {"hdgCmd": math.pi / 2, "altTarget": 9000.0, "V": 340.0}
+            w.step_all([{"hdgCmd": math.radians(hdg), "altTarget": 9000.0, "V": 340.0}, red])
+            rows.append((t, math.degrees(w.acs[0].chi) % 360, abs(math.degrees(w.acs[0].phi)),
+                         w.hot_turning[0]))
+        return rows
+
+    def rate(rows, t0, t1):
+        a, b = [r for r in rows if r[0] >= t0][0], [r for r in rows if r[0] >= t1][0]
+        return abs((b[1] - a[1] + 180) % 360 - 180) / (t1 - t0)
+
+    # 0-20 s: turn to red (north, ~0 deg); 40 s on: a 50 deg crank away
+    hot = fly("F-16C-DCSAI-AD", [(0, 0.0), (40, 50.0)])
+    on = [r for r in hot if r[3]]
+    assert on and on[0][0] < 0.1, "no hot turn"
+    assert max(r[2] for r in on) > 74, max(r[2] for r in on)
+    assert 5.5 <= rate(hot, 2, 8) <= 8.5, rate(hot, 2, 8)
+    t_off = on[-1][0]
+    assert t_off < 25 and abs((hot[int(t_off / 0.02)][1] + 180) % 360 - 180) < 12, t_off
+    assert not any(r[3] for r in hot if r[0] >= 40)                      # away: the route's bank
+    assert max(r[2] for r in hot if r[0] >= 40) <= 46.5
+    slow = fly("F-16C-DCSAI", [(0, 0.0)])
+    assert not any(r[3] for r in slow) and max(r[2] for r in slow) <= 46.5
+    assert rate(slow, 2, 8) < 2.2, rate(slow, 2, 8)
+    print(f"  hot turns ................... OK  ({rate(hot, 2, 8):.1f} deg/s toward red, "
+          f"{rate(slow, 2, 8):.1f} on a route; ended {t_off:.0f} s)")
 
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
@@ -1802,6 +1857,7 @@ if __name__ == "__main__":
         ("DCS-AI climb",            test_dcs_ai_climb),
         ("auto-defend",             test_auto_defend),
         ("DCS auto-defend",         test_dcs_auto_defend),
+        ("hot turns",               test_hot_turn),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

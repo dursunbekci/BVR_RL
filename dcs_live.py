@@ -94,7 +94,7 @@ class DcsLiveWorld(DcsReplayWorld):
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
                  shadow=False, log=print, support_rule="training", speed_boost=None,
-                 eta_lock=None, auto_defend=False):
+                 eta_lock=None, auto_defend=False, hot_turn=False):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
         self.link, self.shadow, self.log = link, bool(shadow), log
@@ -127,6 +127,14 @@ class DcsLiveWorld(DcsReplayWorld):
         self.t_defend_opt = -math.inf
         self.defending = False
         self.defences = 0        # times the DCS AI took over
+        # --hot-turn (or a platform with HOT_TURN_BANK): a command toward red,
+        # with BLUE-1 far off it, is flown as a guns-only attack (7 deg/s, not
+        # the route's 1.6) until BLUE-1 is within 10 deg of it.
+        self.hot_turn = bool(hot_turn)
+        self.hotturn_ack = None
+        self.t_hotturn_opt = -math.inf
+        self.hot_turning = False
+        self.hot_turns = 0       # turns flown as an attack
         self._supported = {}                 # missile id -> last time it had support
         self._destroy_sent = {}              # missile id -> last DESTROY sent
         self.support_log = []                # (t_sim, missile id, shooter, status)
@@ -169,6 +177,13 @@ class DcsLiveWorld(DcsReplayWorld):
             elif d.get("ev") == "bridge" and d.get("status") == "opt":
                 if "autodefend" in d:
                     self.defend_ack = bool(d.get("autodefend"))
+                if "hotturn" in d:
+                    self.hotturn_ack = bool(d.get("hotturn"))
+            elif d.get("ev") == "bridge" and d.get("status") == "hotturn":
+                on = bool(d.get("on"))
+                if on and not self.hot_turning:
+                    self.hot_turns += 1
+                self.hot_turning = on
             elif d.get("ev") == "bridge" and d.get("status") == "defend":
                 on = bool(d.get("on"))
                 if on and not self.defending:
@@ -231,6 +246,9 @@ class DcsLiveWorld(DcsReplayWorld):
         if self.auto_defend and (not self.defend_ack or self.t - self.t_defend_opt >= 10.0):
             self.link.send("OPT autodefend 1")
             self.t_defend_opt = self.t
+        if self.hot_turn and (not self.hotturn_ack or self.t - self.t_hotturn_opt >= 10.0):
+            self.link.send("OPT hotturn 1")
+            self.t_hotturn_opt = self.t
         # The trailing mission time is ignored by the bridge; fake_dcs.py --lockstep
         # uses it to wait for us.
         self.link.send(f"CMD {self.seq} {hdg:.2f} {alt:.1f} {spd:.1f} {1 if fire else 0} {self.t:.1f}")
@@ -400,6 +418,8 @@ ETA_BRIDGE = 2
 # ... and OPT autodefend (--auto-defend), and keeps both aircraft from flying
 # home at bingo fuel.
 DEFEND_BRIDGE = 4
+# ... and OPT hotturn (--hot-turn).
+HOTTURN_BRIDGE = 5
 
 # A decision counts as "short" when BLUE-1 flies this much below its commanded speed.
 SPEED_SHORT_MPS = 30.0
@@ -448,7 +468,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                                                  speed_boost=getattr(args, "speed_boost", None),
                                                  eta_lock=getattr(args, "eta_lock", None),
                                                  auto_defend=bool(getattr(args, "auto_defend", False))
-                                                 or bp.auto_defend),
+                                                 or bp.auto_defend,
+                                                 hot_turn=bool(getattr(args, "hot_turn", False))
+                                                 or bool(getattr(bp, "hot_turn_bank", 0.0))),
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
@@ -476,7 +498,13 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             f"(python dcs\\make_mission.py) and open the new file in DCS")
     elif world.auto_defend and not args.shadow:
         log("  auto-defend: the DCS AI defends BLUE-1 while a missile is inbound")
-    defend_steps = 0
+    if world.hot_turn and bridge_v < HOTTURN_BRIDGE and not args.shadow:
+        log(f"  WARNING: this mission's bridge (version {bridge_v}) flies every turn on the route "
+            f"(--hot-turn, or the platform's HOT_TURN_BANK); rebuild the mission "
+            f"(python dcs\\make_mission.py) and open the new file in DCS")
+    elif world.hot_turn and not args.shadow:
+        log("  hot turns: turns toward red are flown as an attack (about 7 deg/s)")
+    defend_steps = hot_steps = 0
     spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
     try:
         while True:
@@ -487,6 +515,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
             world.boost_steps += int(world._boosting)    # once per decision, not per frame
             defend_steps += int(world.defending)
+            hot_steps += int(world.hot_turning)
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
             wr.writerow([round(env._t_sim, 1), HDG_OFFSETS_DEG[a[0]], ALT_DELTAS_M[a[1]],
@@ -525,6 +554,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                auto_defend=int(world.auto_defend),
                defences=world.defences if world.auto_defend else "",
                defend_s=round(defend_steps / env.DECISION_HZ, 1) if world.auto_defend else "",
+               hot_turn=int(world.hot_turn),
+               hot_turns=world.hot_turns if world.hot_turn else "",
+               hot_turn_s=round(hot_steps / env.DECISION_HZ, 1) if world.hot_turn else "",
                speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
                if spd and world.speed_boost else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
@@ -543,6 +575,11 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                 f"{row['defend_s']:.0f} s in all"
                 + ("" if world.defend_ack else
                    "  <- the bridge never confirmed OPT autodefend: rebuild the mission"))
+        if world.hot_turn:
+            log(f"  hot turns: {world.hot_turns} turn(s) toward red flown as an attack, "
+                f"{row['hot_turn_s']:.0f} s in all"
+                + ("" if world.hotturn_ack else
+                   "  <- the bridge never confirmed OPT hotturn: rebuild the mission"))
         if world.speed_boost:
             log(f"  speed boost: asked DCS for {world.speed_boost:.0f} m/s "
                 f"{row['speed_boosted_pct']:.0f}% of the time")
@@ -579,6 +616,11 @@ def main(argv=None):
                     help="while a missile is inbound at BLUE-1 the DCS AI defends it at its full "
                          "agility (beam, dive, chaff), then hands it back to the policy; on by "
                          "default for a platform with AUTO_DEFEND (F-16C-DCSAI-AD). Bridge 4")
+    ap.add_argument("--hot-turn", action="store_true",
+                    help="a heading command toward red, with BLUE-1 more than 30 deg off it, is "
+                         "flown as a guns-only attack (about 7 deg/s, where the route turns at "
+                         "1.6) until within 10 deg; on by default for a platform with "
+                         "HOT_TURN_BANK (F-16C-DCSAI-AD). Bridge 5")
     ap.add_argument("--doctrine", default="BALANCED")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)
