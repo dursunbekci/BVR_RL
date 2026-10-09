@@ -128,6 +128,10 @@ SCHEMA = {
         P("THRUST", "Average thrust", "N", "Mass and motor", 500, 200_000),
         P("S_REF", "Body cross-section", "m²", "Aerodynamics", 0.001, 0.5),
         P("DRAG_TABLE", "Drag coefficient vs Mach", "[Mach, CD]", "Aerodynamics", kind="table"),
+        P("K_INDUCED", "Induced drag factor", "", "Aerodynamics", 0, 2, advanced=True, default=0.0,
+          help="Drag of the lift a turn takes: CD += K × CL², CL = lift / (q·S). The same pull "
+               "costs more in thin air. 0: drag depends on Mach only (DRAG_TABLE then has to "
+               "include the turning a typical flight does)."),
         P("N_PRO_NAV", "Proportional-navigation gain", "-", "Guidance", 2, 8),
         P("MAX_G", "Maximum manoeuvre", "g", "Guidance", 5, 80),
         P("MIN_MANOEUVRE_V", "Speed below which manoeuvre degrades", "m/s", "Guidance", 50, 800),

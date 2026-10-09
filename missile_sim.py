@@ -46,6 +46,7 @@ class MslCfg:
     SUPPORT_TIMEOUT  = 3.0        # s — the rule
     MAX_FLIGHT       = 120.0      # s hard lifetime
     MIN_MANOEUVRE_V  = 200.0      # m/s below which manoeuvrability degrades
+    K_INDUCED        = 0.0        # induced drag: CD += K_INDUCED * CL^2 (0: none)
 
     @staticmethod
     def drag_cd(mach): return _drag_cd(mach)
@@ -235,10 +236,6 @@ class AIM120:
         else:
             a_thrust = np.zeros(3)
 
-        # ── drag ─────────────────────────────────────────────────────
-        cd    = self.cfg.drag_cd(mach)
-        a_drag = -(q_dyn * cd * self.cfg.S_REF / self.mass) * (self.vel / max(speed, 1.0))
-
         # ── clamp PN acceleration ────────────────────────────────────
         # Available g falls with dynamic pressure (a real missile bleeds
         # manoeuvrability at altitude — this is what makes NEZ narrow on
@@ -250,6 +247,18 @@ class AIM120:
         an = float(np.linalg.norm(a_nav))
         if an > g_avail:
             a_nav = a_nav * (g_avail / an)
+            an = g_avail
+
+        # ── drag ─────────────────────────────────────────────────────
+        # Body drag by Mach, plus the drag of the lift the turn takes
+        # (K_INDUCED * CL^2): the same pull costs far more in thin air, where
+        # it needs a higher lift coefficient. Fitted to DCS (dcs/missile_fit.py).
+        cd    = self.cfg.drag_cd(mach)
+        k_ind = getattr(self.cfg, "K_INDUCED", 0.0)
+        if k_ind > 0.0 and q_dyn > 1.0:
+            cl = an * self.mass / (q_dyn * self.cfg.S_REF)
+            cd += k_ind * cl * cl
+        a_drag = -(q_dyn * cd * self.cfg.S_REF / self.mass) * (self.vel / max(speed, 1.0))
 
         # ── integrate ────────────────────────────────────────────────
         gravity = np.array([0.0, 0.0, -G])
