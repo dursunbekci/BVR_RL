@@ -1828,6 +1828,30 @@ def test_hot_turn():
     print(f"  hot turns ................... OK  ({rate(hot, 2, 8):.1f} deg/s toward red, "
           f"{rate(slow, 2, 8):.1f} on a route; ended {t_off:.0f} s)")
 
+
+def test_reward_balance():
+    """The terminal rewards are ordered kill > mutual > timeout > shot down, and
+    the heading cost cannot outweigh them: wing-rocking for a whole 400-step
+    episode (a 60 deg flip every other step) costs less, discounted, than a
+    kill is worth, and a timeout's discounted terminal reward plus that cost
+    still comes to no worse than being shot down at the same time of day.
+    (dcs_v8's audit: heading cost -0.7 to -2.8 an episode against terminal
+    rewards of 1, so dying beat a timeout.)"""
+    from bvr_env import BvrEnv
+    from bvr_team import TeamBvrEnv
+    g, T = 0.997, 400
+    assert BvrEnv.R_KILL > BvrEnv.R_MUTUAL > BvrEnv.R_TIMEOUT > BvrEnv.R_KILLED
+    assert TeamBvrEnv.R_TIMEOUT == BvrEnv.R_TIMEOUT
+    flip = BvrEnv.W_HDG_CHANGE * 60 / 180                     # a +30 <-> -30 flip
+    rocking = sum(flip * g ** t for t in range(0, T, 2))      # every other step
+    assert rocking < BvrEnv.R_KILL, rocking
+    # a timeout (terminal at the end, rocking all along) against a loss halfway
+    timeout = BvrEnv.R_TIMEOUT * g ** T - rocking
+    loss_mid = BvrEnv.R_KILLED * g ** (T // 2) - sum(flip * g ** t for t in range(0, T // 2, 2))
+    assert timeout > loss_mid - 0.5, (timeout, loss_mid)
+    print(f"  reward balance .............. OK  (rocking all episode costs {rocking:.2f} discounted; "
+          f"timeout {timeout:+.2f}, loss at half time {loss_mid:+.2f})")
+
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
 
@@ -1887,6 +1911,7 @@ if __name__ == "__main__":
         ("auto-defend",             test_auto_defend),
         ("DCS auto-defend",         test_dcs_auto_defend),
         ("hot turns",               test_hot_turn),
+        ("reward balance",          test_reward_balance),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

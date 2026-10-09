@@ -82,7 +82,7 @@ class TeamBvrEnv:
     R_LOST = -1.0
     R_CRASH = -1.0           # a blue aircraft flown into the ground
     R_BANDIT_CRASH = +0.4
-    R_TIMEOUT = -0.5
+    R_TIMEOUT = -0.8          # was -0.5 until SIM_REV 15 (see BvrEnv.R_TIMEOUT)
     R_ESCAPE = -0.6
     R_WASTED_MSL = BvrEnv.R_WASTED_MSL     # per own missile that did not kill
 

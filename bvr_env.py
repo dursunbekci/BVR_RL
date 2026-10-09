@@ -65,7 +65,7 @@ ACTION_NVEC     = [len(HDG_OFFSETS_DEG),len(ALT_DELTAS_M),len(SPEED_CMDS),len(FI
 # Reward cost charged per missile fired, at launch. The policy sees the value
 # (last observation input), so one network learns all three and the doctrine
 # is picked at eval time. A shot pays for itself when it raises the kill
-# probability by more than about cost / 1.5 (kill +1 vs timeout -0.5):
+# probability by more than about cost / 1.8 (kill +1 vs timeout -0.8):
 # AGGRESSIVE fires whenever in range, BALANCED needs about +7%, CONSERVATIVE
 # about +20%.
 DOCTRINES = {"AGGRESSIVE":0.0,"BALANCED":0.10,"CONSERVATIVE":0.30}
@@ -198,7 +198,12 @@ class BvrEnv(gym.Env):
     W_ENVELOPE = 0.60; W_TRACK = 0.25; W_ENERGY = 0.07
     W_SUPPORT  = 0.30; W_DEFENCE = 0.80
 
-    R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.5
+    # R_TIMEOUT was -0.5 until SIM_REV 15. A reward at the end of a 400-step
+    # episode is worth gamma^400 = 0.30 of its face value (0.997), while the
+    # heading cost is paid as it goes: measured on dcs_v8 against ADAPTIVE
+    # (discounted, per episode) a kill came to about -0.2, a mutual kill -1.2,
+    # a loss -1.4 and a TIMEOUT -1.9: dying beat surviving.
+    R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.8
     R_ESCAPE=-0.6; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
     # Longest wait for missiles still in flight after the agent is killed; a
     # missile's own lifetime (MAX_FLIGHT, 120 s) ends it sooner.
@@ -215,7 +220,12 @@ class BvrEnv(gym.Env):
     # shaping terms it competes with (0.006-0.010 a step). At 0.04 that flip
     # costs 0.013, about the largest shaping term; a deliberate 135°
     # defensive turn costs 0.03, still negligible next to the defence term.
-    W_HDG_CHANGE = 0.04
+    # SIM_REV 15: 0.02. It is the one reward that is not potential-based, it
+    # adds up over a long episode (-0.7 to -2.8 on dcs_v8's 400-step fights,
+    # as large as the terminal rewards) and the later terminal rewards are
+    # discounted; a flip every other step for 400 steps now costs 0.8
+    # (discounted), under a kill's +1. A 30° flip costs 0.007, a 135° turn 0.015.
+    W_HDG_CHANGE = 0.02
     # A bank reversal is counted when bank passes this far to the other side.
     BANK_REV_DEG = 15.0
     # A missile may only be launched at a target within this angle of the

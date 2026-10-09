@@ -372,7 +372,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <p>Inside that window, choosing <i>when</i> to fire is up to the agent. The reward encourages shots at 0.6–0.85 of R<sub>max</sub>, where hits are likely.</p>
 
 <h2>Changing heading costs a little</h2>
-<p>Each change of the heading choice costs 0.04 per 180° of change (chapter 10). Without it, policies flipped between two similar choices every few seconds, rocking their wings. A deliberate defensive turn still costs very little.</p>
+<p>Each change of the heading choice costs 0.02 per 180° of change (chapter 10; 0.04 until SIM_REV 15). Without it, policies flipped between two similar choices every few seconds, rocking their wings. A deliberate defensive turn still costs very little.</p>
 </div>
 
 <div class="chap">
@@ -385,7 +385,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="k">KILL</td><td class="n">+1.0</td><td>The goal.</td></tr>
 <tr><td class="k">SHOT_DOWN</td><td class="n">−1.0</td><td>The worst result.</td></tr>
 <tr><td class="k">MUTUAL_KILL</td><td class="n">−0.4</td><td>Trading aircraft is bad, but better than only losing.</td></tr>
-<tr><td class="k">TIMEOUT</td><td class="n">−0.5</td><td>Avoiding the fight is not a solution.</td></tr>
+<tr><td class="k">TIMEOUT</td><td class="n">−0.8</td><td>Avoiding the fight is not a solution. (−0.5 until SIM_REV 15: a reward at the end of a 400-step episode is worth only 0.30 of its face value at γ = 0.997, and the heading cost, paid as it goes, made a timeout worse than being shot down.)</td></tr>
 <tr><td class="k">ESCAPE</td><td class="n">−0.6</td><td>Running away is worse than a timeout.</td></tr>
 <tr><td class="k">CRASH</td><td class="n">−1.0</td><td>Flying into the ground is as bad as being shot down.</td></tr>
 <tr><td class="k">BANDIT_CRASH</td><td class="n">+0.4</td><td>The opponent crashed, often while defending.</td></tr>
@@ -407,12 +407,12 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <h2>10.3 Costs</h2>
 <table>
 <tr><th>Cost</th><th>Size</th><th>Purpose</th></tr>
-<tr><td class="k">Heading change</td><td>0.04 per 180° of change</td><td>Stops wing-rocking. Flipping +30° ↔ −30° costs 0.013; a 135° defensive turn 0.03.</td></tr>
+<tr><td class="k">Heading change</td><td>0.02 per 180° of change</td><td>Stops wing-rocking. Flipping +30° ↔ −30° costs 0.007; a 135° defensive turn 0.015. The only reward that is not potential-based, so it is kept small: at 0.04 it came to −0.7 to −2.8 an episode (dcs_v8, 400 steps), as large as the terminal rewards.</td></tr>
 <tr><td class="k">Shot (doctrine)</td><td>per missile fired: AGGRESSIVE 0 · BALANCED 0.10 · CONSERVATIVE 0.30</td><td>A price per missile. The agent sees the price as an input, so one model learns all three styles. MIXED training draws one per episode.</td></tr>
 </table>
 
 <h2>10.4 2v1 team rewards</h2>
-<p>In 2v1 both aircraft share a team reward: <b>+1.0</b> when the enemy is destroyed, <b>−1.0</b> for each blue aircraft shot down, −1.0 for a crash, −0.5 for a timeout, −0.6 for an escape, +0.4 if the enemy crashes. Each aircraft also gets its own shaping and costs.</p>
+<p>In 2v1 both aircraft share a team reward: <b>+1.0</b> when the enemy is destroyed, <b>−1.0</b> for each blue aircraft shot down, −1.0 for a crash, −0.8 for a timeout, −0.6 for an escape, +0.4 if the enemy crashes. Each aircraft also gets its own shaping and costs.</p>
 <div class="box"><h4>Where to see it</h4>
 <p>On the TRAINING page, <b>REWARD DRIVERS</b> shows how much each shaping term and cost has moved the reward recently. A term near zero isn't influencing learning; a dominant one may be steering it too much.</p></div>
 </div>
@@ -517,7 +517,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <li><b>Wingman inputs.</b> 17 of the 68 inputs describe the wingman: position, heading, speed, track, missiles, threats.</li>
 <li><b>Formation.</b> The wingman starts beside the lead (abreast), behind it (trail) or behind and to the side (echelon).</li>
 <li><b>Red's targeting.</b> Red opens on the nearer blue aircraft and switches only if the other gets much closer. While cranking, SHOOTER and ADAPTIVE also fire at the other blue aircraft if it is in range and within 60° of red's nose.</li>
-<li><b>Rewards.</b> Team rewards (chapter 10.4). A mutual kill (red destroyed, one blue lost) is worth 0, between a clean kill (+1) and a timeout (−0.5).</li>
+<li><b>Rewards.</b> Team rewards (chapter 10.4). A mutual kill (red destroyed, one blue lost) is worth 0, between a clean kill (+1) and a timeout (−0.8).</li>
 <li><b>No self-play yet.</b> Red is always scripted, so the 2v1 curriculum ends at ADAPTIVE.</li>
 </ul>
 <div class="warn"><h4>Lessons from 2v1 training</h4>
@@ -765,6 +765,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="n">12</td><td>A third of ADAPTIVE episodes shoot at the edge of R<sub>max</sub> and press on, like the DCS AI.</td></tr>
 <tr><td class="n">13</td><td>Energy weight 0.07; wide start altitudes; ADAPTIVE runner and DCS speeds; scripted red's bearing fixed.</td></tr>
 <tr><td class="n">14</td><td>Headings ±15 and ±40 added (14 choices); five speeds (460 m/s added for the F-16s). Older checkpoints are converted on loading.</td></tr>
+<tr><td class="n">15</td><td>Reward balance: heading cost 0.04 → 0.02 per 180°, timeout −0.5 → −0.8 (2v1 too). Audit of dcs_v8's returns: dying beat a timeout.</td></tr>
 </table>
 </div>
 

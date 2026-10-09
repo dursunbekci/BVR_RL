@@ -427,7 +427,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 14
+SIM_REV = 15
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -491,6 +491,12 @@ _SIM_REV_NOTES = {
         "split-S break toward the beam once the missile is 12-15 km away) and turns "
         "toward the enemy at 77 deg of bank (HOT_TURN_BANK); while it defends, the "
         "heading, altitude and speed choices are masked to one (they are not flown)",
+    15: "reward balance, from an audit of dcs_v8's returns against ADAPTIVE (400 steps): "
+        "the heading-change cost, the one reward that is not potential-based, added up to "
+        "-0.7 to -2.8 an episode, as large as the terminal rewards, which are discounted "
+        "(0.997^400 = 0.30 at the end of a long episode); discounted, a kill came to about "
+        "-0.2, a mutual kill -1.2, a loss -1.4 and a timeout -1.9, so dying beat surviving. "
+        "Heading cost 0.04 -> 0.02 per 180 deg, timeout -0.5 -> -0.8 (2v1 too)",
 }
 
 
