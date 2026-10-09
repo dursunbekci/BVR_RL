@@ -420,7 +420,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <p>Expect the policy to do worse in DCS than in training at first. These are the reasons, and where to see each one.</p>
 <table>
 <tr><th>Difference</th><th>What it means</th><th>Where to see it</th></tr>
-<tr><td class="k">Flying</td><td>BLUE-1 is flown by the DCS AI along the commanded route, with DCS's F-16 flight model. Turns, climbs and speed changes differ from the training autopilot. A DCS AI on a route does not light its afterburner for the speed it is asked for (BLUE-1 stayed at 99% RPM, never above 280 m/s; RED-1, in combat, reached 490). <b>Fly with <code>--speed-boost</code></b>: DCS is then asked for 550 m/s while BLUE-1 is slow, and does use the afterburner, mostly to climb, which comes close to the simulator's F-16 with afterburner. Train as <b>F-16C-DCS</b>. <code>--eta-lock</code> made no difference. <b>Turns</b> are the bigger gap: on the route the AI banks about 45° and pulls about 1.5 g, about <b>2°/s</b>, where the simulator's F-16 turns at about 8°/s, so every crank, beam and turn away takes four times longer than the policy expects. <code>dcs/turn_test.py</code> measured it (chapter 14): with the first route point 3 km, 1 km or not at all ahead, every turn was flown at exactly 45° of bank and 1.41 g, 1.5–1.6°/s at 340 m/s. The bridge cannot make it turn harder. <b>Climbs</b> are flown at about Mach 0.85 whatever speed is asked for, at about 0.02 m/s per metre still to climb (50–60 m/s at 10 km with 3 km to go), where the simulator's F-16 climbs with afterburner and accelerates. The platform <b>F-16C-DCSAI</b> climbs and turns the DCS AI's way (at most 45° of bank): train the agent on it, with red on F-16C-DCS (self-play still works, as the two differ only in how they climb and turn).</td><td>The terminal's <code>speed:</code> line; <code>speed_cmd_mean</code>, <code>speed_flown_mean</code>, <code>speed_short_pct</code> in <code>results.csv</code>.</td></tr>
+<tr><td class="k">Flying</td><td>BLUE-1 is flown by the DCS AI along the commanded route, with DCS's F-16 flight model. Turns, climbs and speed changes differ from the training autopilot. A DCS AI on a route does not light its afterburner for the speed it is asked for (BLUE-1 stayed at 99% RPM, never above 280 m/s; RED-1, in combat, reached 490). <b>Fly with <code>--speed-boost</code></b>: DCS is then asked for 550 m/s while BLUE-1 is slow, and does use the afterburner, mostly to climb, which comes close to the simulator's F-16 with afterburner. Train as <b>F-16C-DCS</b>. <code>--eta-lock</code> made no difference. <b>Turns</b> are the bigger gap: on the route the AI banks about 45° and pulls about 1.5 g, about <b>2°/s</b>, where the simulator's F-16 turns at about 8°/s, so every crank, beam and turn away takes four times longer than the policy expects. <code>dcs/turn_test.py</code> measured it (chapter 14): with the first route point 3 km, 1 km or not at all ahead, every turn was flown at exactly 45° of bank and 1.41 g, 1.5–1.6°/s at 340 m/s. The bridge cannot make it turn harder. <b>Climbs</b> are flown at about Mach 0.85 whatever speed is asked for, at about 0.02 m/s per metre still to climb (50–60 m/s at 10 km with 3 km to go), where the simulator's F-16 climbs with afterburner and accelerates. The platform <b>F-16C-DCSAI</b> climbs and turns the DCS AI's way (at most 45° of bank): train the agent on it, with red on F-16C-DCS (self-play still works, as the two differ only in how they climb and turn). <b>Defending</b> is where 2°/s hurts most, so since bridge version 4 the DCS AI can defend BLUE-1 itself: with <code>--auto-defend</code> (on by itself for a checkpoint trained on <b>F-16C-DCSAI-AD</b>) the bridge hands BLUE-1 to the DCS AI's own missile defence while a missile is in flight at it, and back to the policy when it is gone. F-16C-DCSAI-AD does the same in training (beam the missile, dive 3 km, fastest speed, full agility, no shots) and has faster speed choices, 240–450 m/s.</td><td>The terminal's <code>speed:</code> line; <code>speed_cmd_mean</code>, <code>speed_flown_mean</code>, <code>speed_short_pct</code> in <code>results.csv</code>.</td></tr>
 <tr><td class="k">Shooting</td><td>"Fire" is a request. The AI launches when its own logic agrees (set to shoot at maximum range), usually within a second or two. No second shot is allowed until the launch is seen.</td><td><code>results.csv</code>: fire timeouts.</td></tr>
 <tr><td class="k">Missile support</td><td>In training a missile misses after 3 s without guidance from its shooter's radar track, until its own seeker takes over; since SIM_REV 9 this holds for scripted opponents too. DCS is more forgiving. By default <code>dcs_live.py</code> applies the training rule to both aircraft (red's track comes from the same radar model run from red's side on DCS's positions) and has the bridge remove a missile that loses support; <code>--support-rule dcs</code> leaves it to DCS.</td><td>Terminal; <code>missiles_removed</code> in <code>results.csv</code>.</td></tr>
 <tr><td class="k">Radar</td><td>The track comes from BVR_RL's radar model on DCS's true positions, as in training. DCS's radar is not used, so this part matches training by design.</td><td>—</td></tr>
@@ -471,6 +471,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k"><code>--opp-platform P</code></td><td class="n">checkpoint's</td><td>Library platform assumed for red's envelopes</td></tr>
 <tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (e.g. <code>F-16C-DCS</code>; <code>F-16C-DCS-MIL</code> is the F-16C without afterburner, as DCS flies BLUE-1 without <code>--speed-boost</code>; <code>F-16C-DCSAI</code> climbs like the DCS AI)</td></tr>
 <tr><td class="k"><code>--eta-lock [C]</code></td><td class="n">off</td><td>Give the route's points locked arrival times from the commanded speed (said to make the DCS AI use afterburner; in our tests it made no difference). C: <code>mission</code> (default) or <code>abs</code> (time of day).</td></tr>
+<tr><td class="k"><code>--auto-defend</code></td><td class="n">platform's</td><td>While a missile is in flight at BLUE-1, the DCS AI defends it at its full agility (beam, dive, chaff) and the policy may not fire; the policy flies again when the missile is gone. On by itself for a platform with <code>AUTO_DEFEND</code> (F-16C-DCSAI-AD). Needs bridge version 4. <code>results.csv</code>: <code>defences</code>, <code>defend_s</code></td></tr>
 <tr><td class="k"><code>--speed-boost [V]</code></td><td class="n">off</td><td>While BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for V m/s (default 550) instead; the real speed again once within 5 m/s. This makes the DCS AI use its afterburner: use it whenever the policy was trained with afterburner</td></tr>
 <tr><td class="k"><code>--support-rule R</code></td><td class="n">training</td><td><code>training</code>: 3 s without support before the seeker takes over removes the missile (blue's and red's); <code>dcs</code>: DCS decides</td></tr>
 <tr><td class="k"><code>--agent</code> / <code>--red</code></td><td class="n">from bridge</td><td>DCS unit names, if not the bridge's choice</td></tr>
@@ -509,15 +510,15 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k"><code>--seed</code></td><td class="n">0</td><td>Start geometry</td></tr>
 </table>
 <h2>dcs/turn_test.py</h2>
-<p>Flies BLUE-1 through 90° right, 90° back and 170° right, no policy, for each of four ways of building the route, while RED-1 holds its fire, and reports how fast it turned. Needs a mission with bridge version 3 (rebuild it with <code>make_mission.py</code>). About 15 minutes of mission time for all four.</p>
+<p>Flies BLUE-1 through 90° right, 90° back and 170° right, no policy, for each of four ways of building the route, while RED-1 holds its fire, and reports how fast it turned. Needs a mission with bridge version 3 (rebuild it with <code>make_mission.py</code>). About 15 minutes of mission time for all four. The fifth variant, <code>hot</code> (bridge version 4, only when asked for), puts RED-1 90° off a wing on the route, then gives BLUE-1 an attack task on it with guns only and measures the turn to it: does an attacking AI turn harder than one on a route? It stops before RED-1 is within 25 km.</p>
 <table>
 <tr><th>Option</th><th class="n">Default</th><th>Meaning</th></tr>
-<tr><td class="k"><code>--variants</code></td><td class="n">all four</td><td><code>base</code> (first point 3 km ahead, as <code>dcs_live.py</code>), <code>near1000</code> (1 km), <code>far_only</code> (no first point), <code>flyover1000</code> (1 km, fly-over points)</td></tr>
+<tr><td class="k"><code>--variants</code></td><td class="n">the four route ones</td><td><code>base</code> (first point 3 km ahead, as <code>dcs_live.py</code>), <code>near1000</code> (1 km), <code>far_only</code> (no first point), <code>flyover1000</code> (1 km, fly-over points), <code>hot</code> (an attack task on RED-1)</td></tr>
 <tr><td class="k"><code>--speed</code> / <code>--alt</code></td><td class="n">340 / start</td><td>The flight condition</td></tr>
 <tr><td class="k"><code>--boost</code></td><td class="n">550</td><td>As <code>dcs_live.py --speed-boost</code>; 0 turns it off</td></tr>
 <tr><td class="k"><code>--sim</code></td><td class="n">—</td><td>The same turns in BVR_RL's simulator, through <code>fake_dcs.py</code>, for comparison</td></tr>
 </table>
-<p>For each turn: the turn rate while more than 30° is still to go, the time to half and to 90% of the turn, the bank and the g. One row per turn is added to <code>dcs_runs\turn_test.csv</code>. Keep a run under about 10 minutes: at bingo fuel (16%) the DCS AI flies home and ignores the route.</p>
+<p>For each turn: the turn rate while more than 30° is still to go, the time to half and to 90% of the turn, the bank and the g. One row per turn is added to <code>dcs_runs\turn_test.csv</code>. With bridge version 3, keep a run under about 10 minutes: at bingo fuel (16%) the DCS AI flies home and ignores the route. Version 4 turns that off for both aircraft.</p>
 <h2>dcs_obs_check.py</h2>
 <table>
 <tr><th>Option</th><th class="n">Default</th><th>Meaning</th></tr>
@@ -537,11 +538,12 @@ python dcs\test_bridge.py       (bvr_bridge.lua and the setup patch, in Lua 5.1)
 <h1>15 · Protocol and files</h1>
 <h2>DCS → Python (UDP 15301)</h2>
 <p>One JSON object per message: the same lines <code>bvr_logger.lua</code> writes (state samples, shots, hits, deaths, ammunition), plus:</p>
-<pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":3, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
+<pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":4, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
 {"ev":"fire", "t":..., "status":"requested|launched|timeout|refused", "seq":...}
 {"ev":"bridge", "t":..., "status":"control|released", "agent":...}
 {"ev":"bridge", "t":..., "status":"eta", "clock":...}                        (OPT eta)
-{"ev":"bridge", "t":..., "status":"opt", "near_m":..., "wpt":..., "redhold":...}  (OPT near, wpt, redhold)
+{"ev":"bridge", "t":..., "status":"opt", "near_m":..., "wpt":..., "redhold":..., "autodefend":..., "hot":...}  (any OPT but eta)
+{"ev":"bridge", "t":..., "status":"defend", "on":true|false}                 (OPT autodefend: the DCS AI takes over / hands back)
 {"ev":"support_lost", "t":..., "id":..., "status":"destroyed|gone|failed"}
 {"ev":"kill", "t":..., "unit":..., "killer":..., "id":...}
 {"ev":"mission_end", "t":...}</pre>
@@ -552,8 +554,10 @@ DESTROY &lt;missile id&gt;
 OPT eta &lt;off|mission|abs&gt;
 OPT near &lt;m&gt;                first route point this far ahead (0: none)
 OPT wpt &lt;turn|flyover&gt;      route points' type
-OPT redhold &lt;0|1&gt;           an AI red holds its fire</pre>
-<p>The header's <code>bridge</code> is the version: 2 understands OPT eta, 3 the other options.</p>
+OPT redhold &lt;0|1&gt;           an AI red holds its fire
+OPT autodefend &lt;0|1&gt;        the DCS AI defends BLUE-1 while a missile is in flight at it
+OPT hot &lt;0|1&gt;               an attack task on red, guns only (turn_test.py)</pre>
+<p>The header's <code>bridge</code> is the version: 2 understands OPT eta, 3 OPT near, wpt and redhold, 4 OPT autodefend and hot; since 4 neither aircraft flies home at bingo fuel. While BLUE-1 defends (or attacks), fire requests are refused with reason <code>defending</code> (<code>hot</code>).</p>
 <p>Commands are re-sent every second, so a lost message costs at most a second.</p>
 <h2>Where things are</h2>
 <table>

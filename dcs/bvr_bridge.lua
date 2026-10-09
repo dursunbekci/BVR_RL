@@ -31,6 +31,10 @@ Commands (UDP datagrams to CFG.port_in, plain text):
   OPT near <m>                the route's first point this far ahead (0: no first point)
   OPT wpt <turn|flyover>      the route points' type (Turning Point or Fly Over Point)
   OPT redhold <0|1>           1: an AI red holds its fire (dcs/turn_test.py)
+  OPT autodefend <0|1>        1: while a missile is inbound at the agent, the DCS AI defends it
+                              (reaction to threats: evade) and routes and shots wait
+  OPT hot <0|1>               1: an attack task on the red aircraft with guns only, to make the
+                              AI turn hard towards it (dcs/turn_test.py); 0 ends it
   STOP          give the aircraft back to the AI (end of an episode)
   DESTROY <id>  remove missile <id> (as numbered in the shot events): dcs_live.py's
                 support rule says it has had no guidance for too long
@@ -184,7 +188,11 @@ pcall(function() theatre = env.mission.theatre end)
 local T0 = timer.getTime()
 -- Sent in the header; dcs_live.py warns when a mission's bridge is older
 -- than the options it was asked to use. 2: OPT eta. 3: OPT near, wpt, redhold.
-local BRIDGE_VERSION = 3
+-- 4: OPT autodefend, hot; no return to base at bingo fuel.
+local BRIDGE_VERSION = 4
+-- Weapon.flag for guns (gun pods and built-in cannons): OPT hot attacks with
+-- these only, so the AI manoeuvres to attack but cannot shoot from BVR range.
+local GUNS_FLAG = 805306368
 
 local function header()
   send({format = "bvr_rl.dcs.v1", rate = CFG.rate, t0 = T0, theatre = theatre,
@@ -203,6 +211,8 @@ end
 if CFG.red_attack and not is_player(red) then
   local rc = ctrl_of(red)
   set_opt(rc, O.id.ROE, O.val.ROE.OPEN_FIRE_WEAPON_FREE)
+  -- At bingo fuel (16%) the DCS AI flies home, ignoring its tasks: not in a test.
+  set_opt(rc, O.id.RTB_ON_BINGO, false)
   pcall(function()
     rc:pushTask({id = "AttackUnit", params = {unitId = agent:getID(), groupAttack = false}})
   end)
@@ -219,6 +229,9 @@ local S = {
   near_m = CFG.near_m,     -- OPT near
   wpt = "Turning Point",   -- OPT wpt
   redhold = false,         -- OPT redhold
+  autodefend = false,      -- OPT autodefend
+  defending = false,       -- the DCS AI is defending the agent now
+  hot = false,             -- OPT hot: a guns-only attack task is flying the agent
 }
 
 local function take_control()
@@ -232,6 +245,7 @@ local function take_control()
   -- speed with full thrust, but a DCS AI following a route stayed at ~280 m/s
   -- (Mach 0.9 at 10 km) when told 340.
   set_opt(c, O.id.PROHIBIT_AB, false)
+  set_opt(c, O.id.RTB_ON_BINGO, false)
   S.controlled = true
   send({ev = "bridge", t = timer.getTime(), status = "control", agent = AGENT})
 end
@@ -330,6 +344,41 @@ local function destroy_missile(id)
   send({ev = "support_lost", t = timer.getTime(), id = id, shooter = shooter, status = status})
 end
 
+-- OPT autodefend: the DCS AI defends the agent while a missile is inbound at it.
+local function start_defence()
+  local c = ctrl_of(agent)
+  set_opt(c, O.id.REACTION_ON_THREAT, O.val.REACTION_ON_THREAT.EVADE_FIRE)
+  S.defending = true
+  send({ev = "bridge", t = timer.getTime(), status = "defend", on = true})
+end
+
+local function end_defence()
+  local c = ctrl_of(agent)
+  set_opt(c, O.id.REACTION_ON_THREAT, O.val.REACTION_ON_THREAT.NO_REACTION)
+  S.defending = false
+  S.issued = nil                         -- the policy's route again, at once
+  if S.cmd then issue_route(S.cmd) end
+  send({ev = "bridge", t = timer.getTime(), status = "defend", on = false})
+end
+
+-- OPT hot: a guns-only attack task on red, which the AI flies as an attack.
+local function set_hot(on)
+  if on == S.hot or not red:isExist() then return end
+  local c = ctrl_of(agent)
+  if on then
+    set_opt(c, O.id.ROE, O.val.ROE.OPEN_FIRE)
+    pcall(function()
+      c:pushTask({id = "AttackUnit", params = {unitId = red:getID(), weaponType = GUNS_FLAG,
+                                               groupAttack = false}})
+    end)
+  else
+    set_opt(c, O.id.ROE, O.val.ROE.WEAPON_HOLD)
+    pcall(function() c:popTask() end)
+    S.issued = nil
+  end
+  S.hot = on
+end
+
 local function on_command(msg)
   if msg:match("^STOP") then release_control(); return end
   local did = msg:match("^DESTROY%s+(%d+)")
@@ -337,7 +386,14 @@ local function on_command(msg)
   local near = msg:match("^OPT%s+near%s+([%d%.]+)")
   local wpt = msg:match("^OPT%s+wpt%s+(%a+)")
   local hold = msg:match("^OPT%s+redhold%s+([01])")
-  if near or wpt or hold then
+  local adef = msg:match("^OPT%s+autodefend%s+([01])")
+  local hot = msg:match("^OPT%s+hot%s+([01])")
+  if near or wpt or hold or adef or hot then
+    if adef then
+      S.autodefend = adef == "1"
+      if not S.autodefend and S.defending then end_defence() end
+    end
+    if hot then set_hot(hot == "1") end
     local was = S.near_m .. S.wpt .. tostring(S.redhold)
     if near then S.near_m = math.min(tonumber(near), CFG.far_m / 2) end
     if wpt then S.wpt = (wpt == "flyover") and "Fly Over Point" or "Turning Point" end
@@ -353,7 +409,8 @@ local function on_command(msg)
     end
     -- Confirmed every time (not only on a change): UDP may drop the reply.
     send({ev = "bridge", t = timer.getTime(), status = "opt", near_m = S.near_m,
-          wpt = (S.wpt == "Fly Over Point") and "flyover" or "turn", redhold = S.redhold})
+          wpt = (S.wpt == "Fly Over Point") and "flyover" or "turn", redhold = S.redhold,
+          autodefend = S.autodefend, hot = S.hot})
     return
   end
   local clock = msg:match("^OPT%s+eta%s+(%a+)")
@@ -371,6 +428,16 @@ local function on_command(msg)
                spd = tonumber(spd), fire = tonumber(fire)}
   if not S.controlled then take_control() end
   S.cmd = cmd
+  -- While the DCS AI defends the agent, or flies it hot, the policy's route
+  -- and shots wait (a shot is refused, so dcs_live.py frees the fire mask).
+  if S.defending or S.hot then
+    if cmd.fire == 1 and cmd.seq ~= S.last_fire_seq then
+      S.last_fire_seq = cmd.seq
+      send({ev = "fire", t = timer.getTime(), status = "refused", seq = cmd.seq,
+            reason = S.defending and "defending" or "hot"})
+    end
+    return
+  end
   if cmd.fire == 1 and cmd.seq ~= S.last_fire_seq then
     S.last_fire_seq = cmd.seq
     request_fire(cmd.seq)
@@ -474,12 +541,14 @@ local function tick(_, now)
       for _, u in ipairs(airplanes(side)) do units[#units + 1] = unit_entry(u) end
     end
     local wlist = {}
+    local inbound = false
     for key, w in pairs(weapons) do
       if w.obj:isExist() then
         local p = w.obj:getPoint()
         local v = w.obj:getVelocity()
         local tgt = nil
         pcall(function() tgt = name_of(w.obj:getTarget()) end)
+        if tgt == AGENT and w.shooter ~= AGENT then inbound = true end
         wlist[#wlist + 1] = {id = w.id, type = w.type, shooter = w.shooter, target = tgt,
                              x = p.x, y = p.y, z = p.z, vx = v.x, vy = v.y, vz = v.z}
       else
@@ -488,6 +557,10 @@ local function tick(_, now)
       end
     end
     send({t = now, units = units, weapons = wlist})
+    if S.controlled and S.autodefend and agent:isExist() then
+      if inbound and not S.defending then start_defence()
+      elseif not inbound and S.defending then end_defence() end
+    end
   end)
   if not ok then env.info("bvr_bridge tick error: " .. tostring(err)) end
   return now + CFG.rate

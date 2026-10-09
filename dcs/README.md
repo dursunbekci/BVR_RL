@@ -361,8 +361,58 @@ route; the waypoint distance makes no difference. So the platform
 F-16C-DCSAI turns at no more than 45° of bank (`TURN_BANK_MAX`): 1.6°/s in
 the simulator, against 7-9°/s for F-16C-DCS. The fly-over variant was not
 measured: after about 11 minutes BLUE-1 reached bingo fuel (16%) and the
-DCS AI took it home on its own, ignoring the route. Keep turn tests (and
-episodes) shorter than that.
+DCS AI took it home on its own, ignoring the route. Since bridge version 4
+neither aircraft goes home at bingo fuel (`RTB_ON_BINGO` off).
+
+**The attack-task turn (`hot`, bridge 4).** An AI that *attacks* is not
+flying a route, and may turn as hard as it can. The `hot` variant tests
+that: on the route it puts RED-1 90° off one wing, then gives BLUE-1 an
+attack task on RED-1 with guns only (`OPT hot 1`) and measures the turn to
+it; then the same off the other wing. It stops before RED-1 comes within
+25 km, so the attack never gets near gun range, and RED-1 holds its fire.
+
+```
+python dcs\make_mission.py              # once: the hot variant needs bridge version 4
+python dcs\turn_test.py --variants hot
+```
+
+In the simulator (`--sim`) the attack turn is flown at the airframe's full
+agility (about 9°/s with 80° of bank): what the policy would get. If DCS
+turns anywhere near that, the bridge can attack-steer the policy's big
+heading changes; if not, the stick-and-throttle link (`Export.lua`, for a
+player-flown F-16C) is the way.
+
+## Letting the DCS AI defend BLUE-1 (--auto-defend)
+
+The DCS AI on a route does not defend BLUE-1 hard: it flies the policy's
+heading at 45° of bank while a missile comes in. In combat the DCS AI
+turns at 6-12°/s, beams, dives and drops chaff. With `--auto-defend`
+(bridge version 4) the bridge hands BLUE-1 to the DCS AI's own missile
+defence (`REACTION_ON_THREAT EVADE_FIRE`) as soon as a missile is in
+flight at it, and gives it back to the policy when the missile is gone.
+While it defends, the policy's commands are kept but not flown and it may
+not fire.
+
+The simulator does the same for a platform with **`AUTO_DEFEND` 1**:
+while an enemy missile is in flight at it, the aircraft beams the missile
+on the side nearer its heading, dives 3 km (not below 1.5 km), flies its
+fastest speed at the airframe's full agility, and holds fire. The platform
+**F-16C-DCSAI-AD** is F-16C-DCSAI with `AUTO_DEFEND` 1 and faster speed
+choices (240, 300, 370 and 450 m/s, as BLUE-1 does fly supersonic when
+level). Train on it, and `dcs_live.py` turns the bridge's auto-defence on
+by itself for a checkpoint trained on it (or use `--auto-defend` with any
+checkpoint):
+
+```
+python train_bvr.py --platform F-16C-DCSAI-AD --opponent-platform F-16C-DCS ...
+python dcs\make_mission.py              # once: bridge version 4
+python dcs_live.py models_bvr\<model>.zip --platform F-16C-DCSAI-AD --opp-platform F-16C-DCS --speed-boost
+```
+
+The terminal says when the DCS AI takes over and hands back, and
+`results.csv` gets `auto_defend`, `defences` (how many times it took
+over) and `defend_s` (seconds in all). F-16C-DCSAI-AD can meet F-16C-DCS in
+self-play: the two see and choose the same things.
 
 ---
 
@@ -493,11 +543,20 @@ OPT eta <off|mission|abs> (--eta-lock: locked arrival times on the route's point
 OPT near <m>              (turn_test.py: first route point this far ahead, 0 = none)
 OPT wpt <turn|flyover>    (turn_test.py: the route points' type)
 OPT redhold <0|1>         (turn_test.py: an AI red holds its fire)
-                          (each answered with {"ev":"bridge", "status":"opt", "near_m", "wpt", "redhold"})
+OPT autodefend <0|1>      (--auto-defend: the DCS AI defends BLUE-1 while a missile is inbound)
+OPT hot <0|1>             (turn_test.py: an attack task on red, guns only)
+                          (each answered with {"ev":"bridge", "status":"opt", "near_m", "wpt",
+                           "redhold", "autodefend", "hot"})
 ```
 
-The header's `bridge` is the version: 2 understands OPT eta, 3 the other
-options.
+While it defends BLUE-1 the bridge sends
+`{"ev":"bridge", "status":"defend", "on":true}` (and `false` when it hands
+back), and refuses a fire request with reason `defending` (`hot` while an
+attack task flies).
+
+The header's `bridge` is the version: 2 understands OPT eta, 3 OPT near,
+wpt and redhold, 4 OPT autodefend and hot (and no aircraft goes home at
+bingo fuel).
 
 Commands are re-sent every second; the bridge re-issues the AI's route only
 when the command changes (2° of heading, 50 m, 1 m/s) or every 10 s.

@@ -89,12 +89,14 @@ class FakeDcs:
         hold = (float(s.get("psi", 0.0)), float(s.get("alt", 9000.0)), float(s.get("speed", 280.0)))
         cmd, controlled, last_seq, fire_at, fired_seq = hold, False, -1, None, None
         # The bridge version whose commands this fake answers (OPT eta, near,
-        # wpt, redhold). It confirms them as the bridge does, but they change
-        # nothing here: its blue flies the simulator's autopilot, and its
-        # opponent is a scripted one.
+        # wpt, redhold, autodefend, hot). It confirms them as the bridge does;
+        # only autodefend changes anything here (the simulator's automatic
+        # defence stands in for the DCS AI's): its blue flies the simulator's
+        # autopilot, and its opponent is a scripted one.
         header = {"format": FORMAT, "rate": self.RATE, "t0": self.T(), "theatre": "fake",
-                  "bridge": 3, "agent": self.names[0], "red": self.names[1]}
-        opt = {"near_m": 3000, "wpt": "turn", "redhold": False}
+                  "bridge": 4, "agent": self.names[0], "red": self.names[1]}
+        opt = {"near_m": 3000, "wpt": "turn", "redhold": False, "autodefend": False, "hot": False}
+        defending = False
         self.send(header)
         for i in (1, 2):
             self.send(sim_ammo(w, self.names, i, self.T()))
@@ -127,13 +129,14 @@ class FakeDcs:
                         if msg[1] == "eta":
                             self.send({"ev": "bridge", "t": self.T(), "status": "eta",
                                        "clock": msg[2] if msg[2] in ("mission", "abs") else "off"})
-                        elif msg[1] in ("near", "wpt", "redhold"):
+                        elif msg[1] in ("near", "wpt", "redhold", "autodefend", "hot"):
                             if msg[1] == "near":
                                 opt["near_m"] = float(msg[2])
                             elif msg[1] == "wpt":
                                 opt["wpt"] = "flyover" if msg[2] == "flyover" else "turn"
                             else:
-                                opt["redhold"] = msg[2] == "1"
+                                opt[msg[1]] = msg[2] == "1"
+                            w.auto_defend[0] = opt["autodefend"]
                             self.send({"ev": "bridge", "t": self.T(), "status": "opt", **opt})
                         continue
                     if msg[0] != "CMD" or len(msg) < 6:
@@ -165,13 +168,24 @@ class FakeDcs:
                 hdg, alt, spd = cmd if controlled else hold
                 pkt = env._encode_cmd(0, 2, 0, 0)
                 pkt.update({"hdgCmd": hdg % (2 * math.pi), "altTarget": alt, "V": spd})
+                if opt["hot"] and w.alive[1]:
+                    # As OPT hot: an attack on red, so straight for it at the
+                    # airframe's full agility, not the route's 45 deg of bank.
+                    d = w.pos(2) - w.pos(1)
+                    pkt.update({"hdgCmd": math.atan2(d[0], d[1]) % (2 * math.pi),
+                                "bankMax": 0.0, "climbMach": 0.0})
                 fire = fire_at is not None and w.t_sim >= fire_at
                 n_before = env._shots_fired
                 env._advance(self.RATE, pkt, fire=fire and w.wpn[0] > 0 and w.alive[1])
                 if fire:
                     status = "launched" if env._shots_fired > n_before else "refused"
-                    self.send({"ev": "fire", "t": self.T(), "status": status, "seq": fired_seq})
+                    self.send({"ev": "fire", "t": self.T(), "status": status, "seq": fired_seq,
+                               **({"reason": "defending"} if status == "refused" and defending
+                                  else {})})
                     fire_at = None
+                if w.defending[0] != defending:      # as the bridge: start and end of a defence
+                    defending = w.defending[0]
+                    self.send({"ev": "bridge", "t": self.T(), "status": "defend", "on": defending})
                 if w.t_sim - t_resend >= 2.0:       # as the bridge: for a late listener
                     t_resend = w.t_sim
                     self.send(header)

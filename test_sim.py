@@ -911,6 +911,7 @@ def test_dcs_speed_boost():
     import dcs_live
     w = dcs_live.DcsLiveWorld.__new__(dcs_live.DcsLiveWorld)
     w.speed_boost, w._boosting, w.boost_steps = 550.0, False, 0
+    w.auto_defend = False
     flown = iter([280.0, 300.0, 330.0, 336.0, 320.0, 300.0, 400.0])
     w._flown_speed = lambda: next(flown)
     sent = [w._speed_to_send(340.0) for _ in range(7)]
@@ -926,7 +927,18 @@ def test_dcs_speed_boost():
         w.shadow, w.sent, w.t, w.t_sent, w.seq, w.fire_pending = False, None, 0.0, 0.0, 0, None
         w.send_command({"hdgCmd": 0.0, "altTarget": 9000.0, "V": 340.0}, False)
         assert w.link.lines[0].startswith(first) and w.link.lines[-1].startswith("CMD 1 "), w.link.lines
-    print("  DCS speed boost ............. OK  (and --eta-lock)")
+    # --auto-defend: OPT autodefend with each command until the bridge confirms
+    # it, then every 10 s.
+    w.link, w.eta_lock, w.auto_defend, w.defend_ack, w.t_defend_opt = Link(), None, True, None, -math.inf
+    w.sent, w.t_sent = None, -math.inf
+    for t in (0.0, 1.0, 2.0, 5.0, 13.0):
+        w.t = t
+        if t == 2.0:
+            w.defend_ack = True
+        w.send_command({"hdgCmd": t / 10, "altTarget": 9000.0, "V": 340.0}, False)
+    opts = [ln for ln in w.link.lines if ln.startswith("OPT autodefend 1")]
+    assert len(opts) == 3, w.link.lines            # t 0, 1 (unconfirmed), 13 (10 s later)
+    print("  DCS speed boost ............. OK  (and --eta-lock, --auto-defend)")
 
 
 def test_dcs_red_support():
@@ -1485,8 +1497,18 @@ def test_dcs_turn_test():
     assert [round(abs(r["turn_deg"]) / 10) for r in rows] == [9, 9, 17], rows
     assert all(r["rate_bulk_dps"] > 5.0 and r["reached"] for r in rows), rows
     assert len(saved) == 3 and saved[0]["mode"] == "sim" and saved[0]["variant"] == "base", saved
+    # hot (bridge 4): red off a wing on the route (45 deg of bank), then the
+    # attack task, which the fake flies at the airframe's full agility.
+    with tempfile.TemporaryDirectory() as d:
+        hot = turn_test.main(["--sim", "--platform", "F-16C-DCSAI", "--variants", "hot", "--out", d])
+    # (red off the wing within 5 deg, and it moves: 80-100 deg to turn)
+    assert [r["turn_deg"] > 0 for r in hot] == [True, False], hot
+    assert all(80 <= abs(r["turn_deg"]) <= 100 for r in hot), hot
+    assert all(r["rate_bulk_dps"] > 5.0 and r["bank_max_deg"] > 60 and r["wpt"] == "attack"
+               for r in hot), hot
     print(f"  DCS turn test (sim) ......... OK  ({min(r['rate_bulk_dps'] for r in rows):.1f}-"
-          f"{max(r['rate_bulk_dps'] for r in rows):.1f} deg/s)")
+          f"{max(r['rate_bulk_dps'] for r in rows):.1f} deg/s; hot "
+          f"{min(r['rate_bulk_dps'] for r in hot):.1f}-{max(r['rate_bulk_dps'] for r in hot):.1f})")
 
 
 def test_dcs_ai_climb():
@@ -1572,6 +1594,123 @@ def test_crossplay_reseed():
     assert env._sp_observers["opponent_radar"]._rng.random() == alone
     print("  cross-play reseed ........... OK")
 
+
+def test_auto_defend():
+    """A platform with AUTO_DEFEND defends itself while an enemy missile is in
+    flight at it, as the DCS AI does when the bridge hands it BLUE-1: it beams
+    the missile, dives 3 km, flies its fastest speed at full agility and holds
+    fire; then it flies its commands again. Without AUTO_DEFEND, nothing changes."""
+    import math
+    import bvr_library as L
+    from sim_world import SimWorld, _enu_to_latlon
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+
+    def fight(blue):
+        w = SimWorld(platforms=[L.load_platform(blue), L.load_platform("F-16C-DCS")], teams=[1, 2])
+        la, lo, _ = _enu_to_latlon(0, 0, 9000); lb, lob, _ = _enu_to_latlon(0, 30000, 9000)
+        w.reset({"ac1_lat": la, "ac1_lon": lo, "ac1_alt": 9000, "ac1_psi": 0.0, "ac1_spd": 300,
+                 "ac2_lat": lb, "ac2_lon": lob, "ac2_alt": 9000, "ac2_psi": math.pi, "ac2_spd": 300})
+        blue_cmd = {"hdgCmd": 0.0, "altTarget": 9000.0, "V": 300.0, "fire": 0}
+        red_cmd = {"hdgCmd": math.pi, "altTarget": 9000.0, "V": 300.0, "fire": 0}
+        rows = []
+        for k in range(int(80 / w.SIM_DT)):
+            fire2 = 1 if k == 5 else 0
+            fire1 = 1 if k % 100 == 50 else 0                  # blue keeps trying to shoot
+            w.step_all([{**blue_cmd, "fire": fire1}, {**red_cmd, "fire": fire2}])
+            tl = w.telemetry(1)
+            inb = w._inbound(1)
+            brg = (math.atan2(*(inb[0].pos - w.pos(1))[:2]) if inb else 0.0)
+            rows.append((w.t_sim, tl["defending"], w.acs[0].chi, w.acs[0].z, w.acs[0].V,
+                         w.wpn[0], len(inb), abs(w.acs[0].phi), brg))
+            if not w.alive[0]:
+                break
+        return w, rows
+
+    w, rows = fight("F-16C-DCSAI-AD")
+    on = [r for r in rows if r[1]]
+    assert on and rows[0][1] == 0, "no defence"
+    # (decided at the start of each frame: the frame the missile ends in still defends)
+    assert all(r[6] > 0 for r in on[:-1]), "defending with nothing inbound"
+    assert all(r[5] == 4 for r in on), "fired while defending"
+    t_on = on[0][0]
+    later = [r for r in on if t_on + 20 < r[0] < t_on + 30]       # (not the fly-by)
+    # beamed: heading 90 deg off the missile's bearing
+    off = [abs(abs(_wrap_pi(r[2] - r[8])) - math.pi / 2) for r in later]
+    assert later and max(off) < 0.3, (t_on, max(off), later[off.index(max(off))])
+    assert max(r[7] for r in on) > math.radians(60), "turned at the 45-deg route bank"
+    assert min(r[3] for r in on) < 7500, "did not dive"
+    assert max(r[4] for r in on) > 360, "not at its fastest speed"
+    if w.alive[0]:                   # missile gone: the commands again, and blue may fire
+        after = [r for r in rows if r[0] > on[-1][0]]
+        assert after and all(r[1] == 0 for r in after) and rows[-1][5] < 4, rows[-1]
+    # The same fight without AUTO_DEFEND: no defence, the commands are flown.
+    w2, rows2 = fight("F-16C-DCSAI")
+    assert not any(r[1] for r in rows2) and rows2[0][5] == 4
+    # The fire mask in the env follows the telemetry.
+    env = BvrEnv(opponent_type=T.STRAIGHT, seed=3, platform="F-16C-DCSAI-AD", opponent_platform="F-16C-DCS")
+    env.reset()
+    env._state["defending"] = 1
+    assert not env._can_fire()
+    assert L.selfplay_compatible("F-16C-DCSAI-AD", "F-16C-DCS")
+    print(f"  auto-defend .................. OK  (defended {on[-1][0] - t_on:.0f} s, dove to "
+          f"{min(r[3] for r in on):.0f} m, {max(r[4] for r in on):.0f} m/s, "
+          f"bank {math.degrees(max(r[7] for r in on)):.0f} deg; blue "
+          f"{'survived' if w.alive[0] else 'was hit'})")
+
+
+def test_dcs_auto_defend():
+    """dcs_live.py --auto-defend against dcs/fake_dcs.py with a red that shoots:
+    the bridge option is sent and confirmed, the bridge's defence events hold
+    the policy's fire, and results.csv counts the defences."""
+    import os, sys, tempfile, threading
+    from types import SimpleNamespace
+    from gymnasium import spaces
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
+    import dcs_live
+    from fake_dcs import FakeDcs
+    from bvr_env import BvrEnv, OBS_DIM, PRIV_DIM, HDG_OFFSETS_DEG
+
+    masks = []
+    class Scripted:          # straight at the bandit, fire whenever allowed
+        observation_space = spaces.Dict({"obs": spaces.Box(-1, 1, (OBS_DIM,)),
+                                         "priv": spaces.Box(-1, 1, (PRIV_DIM,))})
+        def predict(self, obs, deterministic=True, action_masks=None):
+            masks.append(bool(action_masks[-1]))
+            return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 2, int(action_masks[-1])]), None
+
+    fake = FakeDcs(opponent="SHOOTER", seed=4, speed=8.0, max_time=250.0, lockstep=True,
+                   platform="F-16C-DCSAI", opp_platform="F-16C-DCS", log=lambda m: None)
+    from sim_world import _enu_to_latlon
+    def head_on(blue_top_speed=None):        # 50 km head-on: red shoots early
+        ic = BvrEnv._random_ic(fake.env)
+        la, lo, _ = _enu_to_latlon(0, 0, 9000); lb, lob, _ = _enu_to_latlon(50000, 0, 9000)
+        ic.update(ac1_lat=la, ac1_lon=lo, ac1_alt=9000, ac1_psi=math.pi / 2, ac1_spd=300,
+                  ac2_lat=lb, ac2_lon=lob, ac2_alt=9000, ac2_psi=3 * math.pi / 2, ac2_spd=300,
+                  mirrored=False, start_range=50000.0)
+        return ic
+    fake.env._random_ic = head_on
+    th = threading.Thread(target=fake.run, daemon=True)
+    link = dcs_live.UdpLink()
+    th.start()
+    lines = []
+    with tempfile.TemporaryDirectory() as d:
+        args = SimpleNamespace(shadow=False, out=d, opp_platform="F-16C-DCS", max_steps=250,
+                               doctrine="AGGRESSIVE", auto_defend=False)
+        # The platform turns it on, without the flag.
+        scen = {"platform": "F-16C-DCSAI-AD", "opponent_platform": "F-16C-DCS"}
+        rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
+        row, _ = dcs_live.run_episode(link, Scripted(), args, scen, rec, agent, red, 1,
+                                      log=lines.append)
+        th.join(timeout=120)
+    link.close(); fake.close()
+    assert row["auto_defend"] == 1 and row["bridge_version"] == 4, row
+    assert row["defences"] >= 1 and row["defend_s"] > 0, (row, lines)
+    assert any("the DCS AI defends BLUE-1" in ln for ln in lines), lines
+    assert not any("never confirmed" in ln for ln in lines), lines
+    print(f"  DCS auto-defend ............. OK  ({row['defences']} defence(s), {row['defend_s']:.0f} s; "
+          f"{row['outcome']})")
+
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi
 
@@ -1628,6 +1767,8 @@ if __name__ == "__main__":
         ("cross-play reseed",       test_crossplay_reseed),
         ("DCS turn test",           test_dcs_turn_test),
         ("DCS-AI climb",            test_dcs_ai_climb),
+        ("auto-defend",             test_auto_defend),
+        ("DCS auto-defend",         test_dcs_auto_defend),
     ]
 
     print("\nPure-Python sim tests\n" + "─"*50)

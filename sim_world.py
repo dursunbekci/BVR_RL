@@ -98,6 +98,12 @@ class SimWorld:
         self.alive     = [True] * self.n
         self._prev_fire = [0] * self.n
         self._rwr_t_warn: dict = {}
+        # Which aircraft defend themselves: their platform's AUTO_DEFEND (the
+        # fake DCS bridge also switches it on, as OPT autodefend does).
+        self.auto_defend = [bool(p is not None and getattr(p, "auto_defend", False))
+                            for p in self.platforms]
+        self.defending = [False] * self.n
+        self._defend_alt = [0.0] * self.n
 
     # 1v1 names, kept for readers of the two-aircraft world
     ac1  = property(lambda self: self.acs[0])
@@ -134,6 +140,8 @@ class SimWorld:
         self._prev_fire  = [0] * self.n
         self.alive       = [True] * self.n
         self._rwr_t_warn = {}
+        self.defending   = [False] * self.n
+        self._defend_alt = [0.0] * self.n
         legacy = {1: "wpn", 2: "wpn_t"} if self.n == 2 else {}
         self.wpn = [int(ic.get(f"wpn{i}", ic.get(legacy.get(i, ""), self.wpn_count[i - 1])))
                     for i in range(1, self.n + 1)]
@@ -160,6 +168,42 @@ class SimWorld:
         return any(m.phase not in (MslPhase.HIT, MslPhase.MISS) and self.alive[m.target - 1]
                    for m in self.missiles)
 
+    # ── automatic missile defence (platform AUTO_DEFEND) ─────────────
+    # What the DCS AI does when the bridge hands it the aircraft while a
+    # missile is inbound (dcs/bvr_bridge.lua, OPT autodefend): beam the
+    # missile, dive, fastest speed, full agility, no shots.
+    DEFEND_DIVE_M    = 3000.0     # dive this far below the altitude it started defending at
+    DEFEND_ALT_FLOOR = 1500.0     # ...but no lower than this
+    DEFEND_FPA       = 0.44       # rad (25 deg): dive angle limit
+
+    def _inbound(self, i: int) -> list:
+        """Enemy missiles in flight at aircraft i."""
+        return [m for m in self.missiles
+                if self.teams[m.owner - 1] != self.teams[i - 1] and m.target == i
+                and m.phase not in (MslPhase.HIT, MslPhase.MISS)]
+
+    def _update_defence(self) -> None:
+        for i, a in enumerate(self.acs, start=1):
+            on = bool(self.auto_defend[i - 1] and self.alive[i - 1] and self._inbound(i))
+            if on and not self.defending[i - 1]:
+                self._defend_alt[i - 1] = max(self.DEFEND_ALT_FLOOR, a.z - self.DEFEND_DIVE_M)
+            self.defending[i - 1] = on
+
+    def _defence_cmd(self, i: int, cmd: dict) -> dict:
+        """Aircraft i's command while it defends: beam the nearest inbound
+        missile on the side nearer its heading."""
+        a, p = self.acs[i - 1], self.platforms[i - 1]
+        v_top = float(max(p.speed_cmds)) if p is not None else 400.0
+        pos = self.pos(i)
+        m = min(self._inbound(i), key=lambda m: float(np.linalg.norm(m.pos - pos)))
+        d = m.pos - pos
+        bear = math.atan2(float(d[0]), float(d[1]))
+        hdg = min((bear + math.pi / 2, bear - math.pi / 2),
+                  key=lambda h: abs((h - a.chi + math.pi) % (2 * math.pi) - math.pi))
+        return {**cmd, "hdgCmd": hdg % (2 * math.pi), "altTarget": self._defend_alt[i - 1],
+                "V": v_top, "altFPA": self.DEFEND_FPA,
+                "climbFPA": self.DEFEND_FPA, "climbMach": 0.0, "bankMax": 0.0, "fire": 0}
+
     # ── main step ───────────────────────────────────────────────────
     def step(self, cmd1: dict, cmd2: dict) -> dict:
         """
@@ -176,6 +220,12 @@ class SimWorld:
         # Remove missiles that hit or missed last frame
         self.missiles       = [m for m in self.missiles if m not in self._despawn_next]
         self._despawn_next  = []
+
+        # An aircraft defending itself flies the defence, not its command.
+        self._update_defence()
+        if any(self.defending):
+            cmds = [self._defence_cmd(i, c) if self.defending[i - 1] else c
+                    for i, c in enumerate(cmds, start=1)]
 
         # ── guidance updates ─────────────────────────────────────────
         # From the shooter's own estimate when its command carries one;
@@ -391,6 +441,7 @@ class SimWorld:
             "nz":    a1.nz,    "speed": a1.V,     "mach":  a1.mach,
             "gamma_fpa": a1.gamma, "fuel_frac": a1.fuel_frac,
             "maneuver_running": False,
+            "defending": int(self.defending[me - 1]),
 
             # ── AC2 truth (privileged critic + termination) ───────────
             "lat_t":  lat2, "lon_t":  lon2, "alt_t":  alt2,

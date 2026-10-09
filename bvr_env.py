@@ -460,6 +460,8 @@ class BvrEnv(gym.Env):
 
     def _can_fire(self) -> bool:
         if self._state.get("wpn_remaining",0)<=0: return False
+        # An aircraft defending itself (platform AUTO_DEFEND) holds fire.
+        if self._state.get("defending",0):        return False
         if self._trk_state()!=TrackState.TRACK:   return False
         if (self._t_sim-self._last_shot_t)<3.0:   return False
         est=self._est()
