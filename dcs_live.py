@@ -415,9 +415,9 @@ def wait_for_fight(link, agent=None, red=None, after_t=None, log=print):
 
 # Bridge version that understands OPT eta (--eta-lock).
 ETA_BRIDGE = 2
-# ... and OPT autodefend (--auto-defend), and keeps both aircraft from flying
-# home at bingo fuel.
-DEFEND_BRIDGE = 4
+# ... and OPT autodefend (--auto-defend) as trained: the DCS AI takes over
+# once the missile is within 15 km (4 and 5 took over at launch).
+DEFEND_BRIDGE = 6
 # ... and OPT hotturn (--hot-turn).
 HOTTURN_BRIDGE = 5
 
@@ -493,9 +493,11 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         log(f"  WARNING: this mission's bridge (version {bridge_v}) ignores --eta-lock; rebuild "
             f"the mission (python dcs\\make_mission.py) and open the new file in DCS")
     if world.auto_defend and bridge_v < DEFEND_BRIDGE and not args.shadow:
-        log(f"  WARNING: this mission's bridge (version {bridge_v}) cannot defend BLUE-1 "
-            f"(--auto-defend, or the platform's AUTO_DEFEND); rebuild the mission "
-            f"(python dcs\\make_mission.py) and open the new file in DCS")
+        log(f"  WARNING: this mission's bridge (version {bridge_v}) "
+            + ("cannot defend BLUE-1" if bridge_v < 4 else
+               "hands BLUE-1 to the DCS AI at the launch, not within 15 km as trained")
+            + " (--auto-defend, or the platform's AUTO_DEFEND); rebuild the mission "
+              "(python dcs\\make_mission.py) and open the new file in DCS")
     elif world.auto_defend and not args.shadow:
         log("  auto-defend: the DCS AI defends BLUE-1 while a missile is inbound")
     if world.hot_turn and bridge_v < HOTTURN_BRIDGE and not args.shadow:

@@ -425,7 +425,7 @@ RED-1): end the mission in DCS.
 
 The DCS AI on a route does not defend BLUE-1 hard: it flies the policy's
 heading at 45° of bank while a missile comes in. With `--auto-defend`
-(bridge version 4) the bridge hands BLUE-1 to the DCS AI's own missile
+(bridge version 6; 4 and 5 took over at the launch) the bridge hands BLUE-1 to the DCS AI's own missile
 defence (`REACTION_ON_THREAT EVADE_FIRE`) once a missile aimed at it is
 within 15 km, and gives it back to the policy when the missile is gone.
 While it defends, the policy's commands are kept but not flown and it may
@@ -457,7 +457,7 @@ checkpoint):
 
 ```
 python train_bvr.py --platform F-16C-DCSAI-AD --opponent-platform F-16C-DCS ...
-python dcs\make_mission.py              # once: bridge version 5
+python dcs\make_mission.py              # once: bridge version 6
 python dcs_live.py models_bvr\<model>.zip --platform F-16C-DCSAI-AD --opp-platform F-16C-DCS --speed-boost
 ```
 
@@ -613,7 +613,8 @@ attack task flies).
 
 The header's `bridge` is the version: 2 understands OPT eta, 3 OPT near,
 wpt and redhold, 4 OPT autodefend and hot (and no aircraft goes home at
-bingo fuel), 5 OPT hotturn.
+bingo fuel), 5 OPT hotturn, 6 OPT autodefend from 15 km (4 and 5: from the
+launch).
 
 Commands are re-sent every second; the bridge re-issues the AI's route only
 when the command changes (2° of heading, 50 m, 1 m/s) or every 10 s.

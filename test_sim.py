@@ -1774,7 +1774,7 @@ def test_dcs_auto_defend():
                                       log=lines.append)
         th.join(timeout=120)
     link.close(); fake.close()
-    assert row["auto_defend"] == 1 and row["bridge_version"] == 5, row
+    assert row["auto_defend"] == 1 and row["bridge_version"] == 6, row
     assert row["hot_turn"] == 1, row                    # the platform's HOT_TURN_BANK turns it on
     assert row["defences"] >= 1 and row["defend_s"] > 0, (row, lines)
     assert any("the DCS AI defends BLUE-1" in ln for ln in lines), lines

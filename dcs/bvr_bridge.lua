@@ -206,7 +206,8 @@ local T0 = timer.getTime()
 -- Sent in the header; dcs_live.py warns when a mission's bridge is older
 -- than the options it was asked to use. 2: OPT eta. 3: OPT near, wpt, redhold.
 -- 4: OPT autodefend, hot; no return to base at bingo fuel. 5: OPT hotturn.
-local BRIDGE_VERSION = 5
+-- 6: OPT autodefend takes over only within defend_range_m (was: at launch).
+local BRIDGE_VERSION = 6
 -- Weapon.flag for guns (gun pods and built-in cannons): OPT hot attacks with
 -- these only, so the AI manoeuvres to attack but cannot shoot from BVR range.
 local GUNS_FLAG = 805306368

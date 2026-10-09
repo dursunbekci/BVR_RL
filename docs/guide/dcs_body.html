@@ -471,7 +471,7 @@ So read these fights as a check of how it tracks, shoots and follows up against 
 <tr><td class="k"><code>--opp-platform P</code></td><td class="n">checkpoint's</td><td>Library platform assumed for red's envelopes</td></tr>
 <tr><td class="k"><code>--platform P</code></td><td class="n">checkpoint's</td><td>Library platform the policy is told it flies (e.g. <code>F-16C-DCS</code>; <code>F-16C-DCS-MIL</code> is the F-16C without afterburner, as DCS flies BLUE-1 without <code>--speed-boost</code>; <code>F-16C-DCSAI</code> climbs like the DCS AI)</td></tr>
 <tr><td class="k"><code>--eta-lock [C]</code></td><td class="n">off</td><td>Give the route's points locked arrival times from the commanded speed (said to make the DCS AI use afterburner; in our tests it made no difference). C: <code>mission</code> (default) or <code>abs</code> (time of day).</td></tr>
-<tr><td class="k"><code>--auto-defend</code></td><td class="n">platform's</td><td>Once a missile aimed at BLUE-1 is within 15 km, the DCS AI defends it at its full agility (beam, dive, chaff) and the policy may not fire; the policy flies again when the missile is gone. On by itself for a platform with <code>AUTO_DEFEND</code> (F-16C-DCSAI-AD). Needs bridge version 4. <code>results.csv</code>: <code>defences</code>, <code>defend_s</code></td></tr>
+<tr><td class="k"><code>--auto-defend</code></td><td class="n">platform's</td><td>Once a missile aimed at BLUE-1 is within 15 km, the DCS AI defends it at its full agility (beam, dive, chaff) and the policy may not fire; the policy flies again when the missile is gone. On by itself for a platform with <code>AUTO_DEFEND</code> (F-16C-DCSAI-AD). Needs bridge version 6 (4–5 took over at the launch). <code>results.csv</code>: <code>defences</code>, <code>defend_s</code></td></tr>
 <tr><td class="k"><code>--hot-turn</code></td><td class="n">platform's</td><td>A heading command toward RED-1 (within 15° of its bearing), with BLUE-1 more than 30° off it, is flown as a guns-only attack, about 7°/s instead of the route's 1.6, until BLUE-1 is within 10° of it. On by itself for a platform with <code>HOT_TURN_BANK</code> (F-16C-DCSAI-AD). Needs bridge version 5. <code>results.csv</code>: <code>hot_turns</code>, <code>hot_turn_s</code></td></tr>
 <tr><td class="k"><code>--speed-boost [V]</code></td><td class="n">off</td><td>While BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for V m/s (default 550) instead; the real speed again once within 5 m/s. This makes the DCS AI use its afterburner: use it whenever the policy was trained with afterburner</td></tr>
 <tr><td class="k"><code>--support-rule R</code></td><td class="n">training</td><td><code>training</code>: 3 s without support before the seeker takes over removes the missile (blue's and red's); <code>dcs</code>: DCS decides</td></tr>
@@ -539,7 +539,7 @@ python dcs\test_bridge.py       (bvr_bridge.lua and the setup patch, in Lua 5.1)
 <h1>15 · Protocol and files</h1>
 <h2>DCS → Python (UDP 15301)</h2>
 <p>One JSON object per message: the same lines <code>bvr_logger.lua</code> writes (state samples, shots, hits, deaths, ammunition), plus:</p>
-<pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":5, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
+<pre>{"format":"bvr_rl.dcs.v1", ..., "bridge":6, "agent":"BLUE-1", "red":"RED-1"}   every 2 s
 {"ev":"fire", "t":..., "status":"requested|launched|timeout|refused", "seq":...}
 {"ev":"bridge", "t":..., "status":"control|released", "agent":...}
 {"ev":"bridge", "t":..., "status":"eta", "clock":...}                        (OPT eta)
@@ -560,7 +560,7 @@ OPT redhold &lt;0|1&gt;           an AI red holds its fire
 OPT autodefend &lt;0|1&gt;        the DCS AI defends BLUE-1 while a missile is in flight at it
 OPT hot &lt;0|1&gt;               an attack task on red, guns only (turn_test.py)
 OPT hotturn &lt;0|1&gt;           turns toward red flown as such an attack</pre>
-<p>The header's <code>bridge</code> is the version: 2 understands OPT eta, 3 OPT near, wpt and redhold, 4 OPT autodefend and hot, 5 OPT hotturn; since 4 neither aircraft flies home at bingo fuel. While BLUE-1 defends (or attacks), fire requests are refused with reason <code>defending</code> (<code>hot</code>).</p>
+<p>The header's <code>bridge</code> is the version: 2 understands OPT eta, 3 OPT near, wpt and redhold, 4 OPT autodefend and hot, 5 OPT hotturn, 6 OPT autodefend only within 15 km (4–5: from the launch); since 4 neither aircraft flies home at bingo fuel. While BLUE-1 defends (or attacks), fire requests are refused with reason <code>defending</code> (<code>hot</code>).</p>
 <p>Commands are re-sent every second, so a lost message costs at most a second.</p>
 <h2>Where things are</h2>
 <table>
