@@ -424,18 +424,31 @@ RED-1): end the mission in DCS.
 ## Letting the DCS AI defend BLUE-1 (--auto-defend)
 
 The DCS AI on a route does not defend BLUE-1 hard: it flies the policy's
-heading at 45° of bank while a missile comes in. In combat the DCS AI
-turns at 6-12°/s, beams, dives and drops chaff. With `--auto-defend`
+heading at 45° of bank while a missile comes in. With `--auto-defend`
 (bridge version 4) the bridge hands BLUE-1 to the DCS AI's own missile
-defence (`REACTION_ON_THREAT EVADE_FIRE`) as soon as a missile is in
-flight at it, and gives it back to the policy when the missile is gone.
+defence (`REACTION_ON_THREAT EVADE_FIRE`) once a missile aimed at it is
+within 15 km, and gives it back to the policy when the missile is gone.
 While it defends, the policy's commands are kept but not flown and it may
-not fire.
+not fire. Until the missile is that close, the policy flies (and may
+shoot, or keep supporting its own missile).
 
-The simulator does the same for a platform with **`AUTO_DEFEND` 1**:
-while an enemy missile is in flight at it, the aircraft beams the missile
-on the side nearer its heading, dives 3 km (not below 1.5 km), flies its
-fastest speed at the airframe's full agility, and holds fire. The platform
+Why 15 km: in the recorded fights the DCS AI (RED-1, defending against
+BLUE-1's AIM-120 on 2 and 3 October) flew on, nose to the missile, until
+it was **13.4-13.5 km** away (its seeker about to take over), then broke
+hard: rolled to 90-170° of bank, turning toward the beam at about 5°/s and
+diving (1.1 and 3.4 km lost, 100-230 m/s down), 57-100° off the missile by
+the time it hit (both hit). Missiles that never went active (8 October)
+got no reaction at all.
+
+The simulator does the same for a platform with **`AUTO_DEFEND` 1**, fitted
+to those defences: once the missile is 12-15 km away the aircraft breaks
+toward the beam (70-110° off the missile, on the side nearer its heading,
+kept for the whole defence) at 3-4.5 g, rolled past the vertical as far as
+the dive needs (a split-S), diving 1.5-4 km at 15-35° (not below 1.5 km), at
+its fastest speed, holding fire. Each defence draws its own numbers in
+those ranges. While it defends, the policy's heading, altitude and speed
+choices are masked to one each (they are not flown), so those steps teach
+it nothing either way. The platform
 **F-16C-DCSAI-AD** is F-16C-DCSAI with `AUTO_DEFEND` 1 (and, like every
 F-16 platform since SIM_REV 14, speed choices up to 460 m/s: BLUE-1 does
 fly supersonic when level). Train on it, and `dcs_live.py` turns the bridge's auto-defence on

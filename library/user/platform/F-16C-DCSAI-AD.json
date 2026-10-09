@@ -2,7 +2,7 @@
   "id": "F-16C-DCSAI-AD",
   "kind": "platform",
   "name": "F-16C with 4 × AIM-120 (AIM-120C-DCS), flown like the DCS AI, defended by it",
-  "description": "F-16C-DCSAI with what the DCS bridge (version 5) adds for BLUE-1: while an enemy missile is inbound the DCS AI defends the aircraft at its full agility (beam the missile, dive, fastest speed, no shots), and the policy's commands resume when the missile is gone; turns toward the enemy are flown as a guns-only attack (OPT hotturn: 77 deg of bank, about 7 deg/s, where other turns keep 45 deg and 1.6 deg/s). Five speed choices up to 460 m/s (Mach 1.5 at 9 km). Train the agent on it for DCS runs with dcs_live.py, which then turns both bridge options on.",
+  "description": "F-16C-DCSAI with what the DCS bridge (version 5) adds for BLUE-1: once an enemy missile is within 15 km the DCS AI defends the aircraft (a late, hard break toward the beam, diving, no shots), and the policy's commands resume when the missile is gone; turns toward the enemy are flown as a guns-only attack (OPT hotturn: 77 deg of bank, about 7 deg/s, where other turns keep 45 deg and 1.6 deg/s). Five speed choices up to 460 m/s (Mach 1.5 at 9 km). Train the agent on it for DCS runs with dcs_live.py, which then turns both bridge options on.",
   "params": {
     "airframe": "F-16C",
     "radar": "APG-68",
@@ -41,7 +41,7 @@
     "CLIMB_MACH": "DCS climbs in 4 recorded fights (dcs_v8 v the DCS AI, 3 runs; the defender mission, 2 runs): Mach 0.82-0.88 with 220, 400 or 550 m/s commanded",
     "CLIMB_THROTTLE": "fitted: with 3 km still to climb the model climbs 49-60 m/s at 10-11.5 km (DCS 50-60) and from 9 to 13 km in 89 s (DCS 75-82 s); with 1.2 km to go 23-24 m/s (DCS 22-33)",
     "TURN_BANK_MAX": "dcs/turn_test.py in DCS: 90, 90 and 170 deg turns at 340 m/s and 9 km with the first route point 3 km, 1 km or not at all ahead were all flown at 45 deg of bank and 1.41 g, 1.5-1.6 deg/s",
-    "AUTO_DEFEND": "dcs/bvr_bridge.lua version 4, OPT autodefend: the DCS AI's own missile defence (REACTION_ON_THREAT EVADE_FIRE), which turns at more than 45 deg of bank; the simulator stands in with a beam of the missile, a 3 km dive (not below 1.5 km) and the fastest speed choice",
+    "AUTO_DEFEND": "dcs/bvr_bridge.lua (version 4+), OPT autodefend: the DCS AI's own missile defence (REACTION_ON_THREAT EVADE_FIRE) once the missile is within 15 km. The simulator's stand-in is fitted to the DCS AI's defences in the recorded fights (RED-1 against BLUE-1's AIM-120, 2-3 October): nose-on until the missile was 13.4-13.5 km away, then a break toward the beam with 90-170 deg of bank at about 5 deg/s, diving 1.1 and 3.4 km at 100-230 m/s, 57-100 deg off the missile by the hit (both were hit); missiles that never went active (8 October) got no reaction. Drawn per defence: start 12-15 km, 3-4.5 g, 70-110 deg off, dive 1.5-4 km at 15-35 deg",
     "HOT_TURN_BANK": "dcs/turn_test.py --variants hot in DCS (9 October): 90 deg turns toward red as a guns-only attack at 340 m/s and 9 km: 7.0-7.1 deg/s while 30+ deg remained (route: 1.5-1.6), half done in 6.5-6.7 s, 80-94 deg of bank, 4.1-4.2 g, 35 m/s and 450 m lost. 77 deg gives 6.9 deg/s (half in 5.9 s) in the simulator at 340 m/s; 74 gave 5.6, 80 gave 8.4"
   }
 }

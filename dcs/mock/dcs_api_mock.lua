@@ -77,8 +77,9 @@ coalition = {side = {NEUTRAL = 0, RED = 1, BLUE = 2},
     return {u:getGroup()}
   end}
 
--- A red missile aimed at blue (auto-defend tests): MOCK_RED_SHOT() fires it,
--- MOCK_RED_GONE() ends it.
+-- A red missile aimed at blue (auto-defend tests): MOCK_RED_SHOT() fires it
+-- (at red, far away), MOCK_RED_CLOSE() puts it 10 km from blue, MOCK_RED_GONE()
+-- ends it.
 function MOCK_RED_SHOT()
   local m = {x = red.x, y = red.y, z = red.z, alive = true, id_ = 888, v = {x = 0, y = 0, z = 0}}
   function m:isExist() return self.alive end
@@ -90,6 +91,9 @@ function MOCK_RED_SHOT()
   function m:destroy() self.alive = false end
   RED_MSL = m
   HANDLER:onEvent({id = world.event.S_EVENT_SHOT, initiator = red, weapon = m, time = T})
+end
+function MOCK_RED_CLOSE()
+  if RED_MSL then RED_MSL.x, RED_MSL.y, RED_MSL.z = blue.x + 10000, blue.y, blue.z end
 end
 function MOCK_RED_GONE() if RED_MSL then RED_MSL.alive = false end end
 

@@ -207,11 +207,12 @@ SCHEMA = {
                "4 g where a route turns at 1.6). Other turns keep TURN_BANK_MAX. 0: off."),
         P("AUTO_DEFEND", "Automatic missile defence", "", "Agent commands", 0, 1, kind="int",
           advanced=True, default=0,
-          help="1: while an enemy missile is inbound the aircraft defends itself, as the DCS AI "
-               "does when the DCS bridge hands it the aircraft (OPT autodefend): it beams the "
-               "missile, dives, flies its fastest speed at its full agility, and holds fire. "
-               "The agent's commands resume when the missile is gone. 0: the agent flies "
-               "throughout."),
+          help="1: once an enemy missile is 12-15 km away the aircraft defends itself, as the "
+               "DCS AI does when the DCS bridge hands it the aircraft (OPT autodefend), fitted "
+               "to the DCS AI's recorded defences: a break toward the beam (70-110 deg off the "
+               "missile) at 3-4.5 g, rolled past the vertical to dive 1.5-4 km at 15-35 deg, at "
+               "its fastest speed, holding fire; each defence draws its numbers. Until then, "
+               "and when the missile is gone, the agent flies. 0: the agent flies throughout."),
     ],
 }
 
@@ -481,7 +482,11 @@ _SIM_REV_NOTES = {
         "start just below their neighbours in the converted checkpoint, so it flies as "
         "before until training finds a use for them. Start speeds are scaled by the "
         "platform's fastest choice over the F-16's 460 (was 400): F-16 starts are "
-        "unchanged, a UCAV's 13% slower",
+        "unchanged, a UCAV's 13% slower. And for the DCS platforms: F-16C-DCSAI-AD "
+        "defends itself (AUTO_DEFEND, fitted to the DCS AI's recorded defences: a late "
+        "split-S break toward the beam once the missile is 12-15 km away) and turns "
+        "toward the enemy at 77 deg of bank (HOT_TURN_BANK); while it defends, the "
+        "heading, altitude and speed choices are masked to one (they are not flown)",
 }
 
 

@@ -260,9 +260,9 @@ def test_bridge_opts():
 
 
 def test_bridge_autodefend():
-    """OPT autodefend: while a red missile is inbound at the agent the DCS AI
-    defends it (evade), routes wait and a shot is refused; when it is gone, the
-    route is back. OPT hot pushes a guns-only attack task and pops it. Neither
+    """OPT autodefend: once a red missile aimed at the agent is within 15 km the
+    DCS AI defends it (evade), routes wait and a shot is refused; when it is
+    gone, the route is back. Farther away, the policy flies. OPT hot pushes a guns-only attack task and pops it. Neither
     aircraft returns home at bingo fuel."""
     L = lua()
     sent, inbox = [], []
@@ -279,7 +279,7 @@ def test_bridge_autodefend():
     plan = {5.0: ["CMD 1 90 10000 300 0"], 6.0: ["OPT autodefend 1", "CMD 2 90 10000 300 0"],
             12.0: ["CMD 3 120 10000 300 1"], 25.0: ["CMD 4 120 10000 300 0"],
             30.0: ["OPT hot 1"], 35.0: ["OPT hot 0", "CMD 5 120 10000 300 0"]}
-    calls = {10.0: "MOCK_RED_SHOT", 20.0: "MOCK_RED_GONE"}
+    calls = {8.0: "MOCK_RED_SHOT", 10.0: "MOCK_RED_CLOSE", 20.0: "MOCK_RED_GONE"}
 
     def on_tick(T):
         for t in list(plan):
