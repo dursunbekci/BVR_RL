@@ -397,9 +397,9 @@ The simulator does the same for a platform with **`AUTO_DEFEND` 1**:
 while an enemy missile is in flight at it, the aircraft beams the missile
 on the side nearer its heading, dives 3 km (not below 1.5 km), flies its
 fastest speed at the airframe's full agility, and holds fire. The platform
-**F-16C-DCSAI-AD** is F-16C-DCSAI with `AUTO_DEFEND` 1 and faster speed
-choices (240, 300, 370 and 450 m/s, as BLUE-1 does fly supersonic when
-level). Train on it, and `dcs_live.py` turns the bridge's auto-defence on
+**F-16C-DCSAI-AD** is F-16C-DCSAI with `AUTO_DEFEND` 1 (and, like every
+F-16 platform since SIM_REV 14, speed choices up to 460 m/s: BLUE-1 does
+fly supersonic when level). Train on it, and `dcs_live.py` turns the bridge's auto-defence on
 by itself for a checkpoint trained on it (or use `--auto-defend` with any
 checkpoint):
 

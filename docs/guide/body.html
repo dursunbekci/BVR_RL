@@ -353,11 +353,12 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <p>Once per second the agent makes four choices at once:</p>
 <table>
 <tr><th>Choice</th><th>Options</th><th>Meaning</th></tr>
-<tr><td class="k">Heading</td><td>0, ±30, ±50, ±90, ±135, 180°</td><td>An offset from the bearing to the enemy. 0 = straight at it, ±50 = crank, ±90 = beam, 180 = straight away. Positive = to the right. With no track, the offset is from the last known bearing.</td></tr>
+<tr><td class="k">Heading</td><td>0, ±15, ±30, ±40, ±50, ±90, ±135, 180°</td><td>An offset from the bearing to the enemy. 0 = straight at it, ±40–50 = crank, ±90 = beam, 180 = straight away. Positive = to the right. With no track, the offset is from the last known bearing. ±15 and ±40 since SIM_REV 14: the policy kept alternating 0 ↔ 30 and 30 ↔ 50 (its two most frequent heading changes) to fly something in between.</td></tr>
 <tr><td class="k">Altitude</td><td>−3000, −1200, 0, +1200, +3000 m</td><td>Change of target altitude from the current one, kept inside the platform's operating band.</td></tr>
-<tr><td class="k">Speed</td><td>the platform's 4 speeds</td><td>F-16C: 220, 280, 340, 400 m/s.</td></tr>
+<tr><td class="k">Speed</td><td>the platform's 5 speeds</td><td>F-16C: 220, 280, 340, 400, 460 m/s; at 9 km Mach 0.73, 0.92, 1.12, 1.32 and 1.52 (the fifth, since SIM_REV 14, is the DCS AI's Mach 1.5 dash in combat).</td></tr>
 <tr><td class="k">Fire</td><td>no / yes</td><td>Launch a missile this second.</td></tr>
 </table>
+<p>An older checkpoint (10 headings, 4 speeds) is converted when it is loaded: each old choice keeps its own output, and each new one starts from the average of its neighbours' (±15 between 0 and ±30, ±40 between ±30 and ±50, 460 from 400), a quarter as likely as they are. It flies as before until training finds a use for the new choices, so a resume is a warm start.</p>
 
 <h2>The fire rule</h2>
 <p>"Fire" can only be chosen when all of these hold. Otherwise it is <b>masked</b>, meaning the network cannot pick it:</p>
@@ -475,7 +476,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 
 <div class="chap">
 <h1>13 · Self-play</h1>
-<p>In self-play the opponent is a frozen copy ("snapshot") of the agent itself. It only exists in 1v1 with both sides on the same platform, since a copy of the agent can only fly the aircraft it was trained on. The exception is two platforms that differ only in how they are flown and in what their four speed choices are, such as <code>F-16C-DCSAI</code> (the agent, flown like the DCS AI on a route: climbs at Mach 0.85, turns at no more than 45° of bank) or <code>F-16C-DCSAI-AD</code> (the same, defended automatically while a missile is inbound, with speed choices up to 450 m/s) and <code>F-16C-DCS</code> (red): the same aircraft, inputs and choices.</p>
+<p>In self-play the opponent is a frozen copy ("snapshot") of the agent itself. It only exists in 1v1 with both sides on the same platform, since a copy of the agent can only fly the aircraft it was trained on. The exception is two platforms that differ only in how they are flown and in what their five speed choices are, such as <code>F-16C-DCSAI</code> (the agent, flown like the DCS AI on a route: climbs at Mach 0.85, turns at no more than 45° of bank) or <code>F-16C-DCSAI-AD</code> (the same, defended automatically while a missile is inbound) and <code>F-16C-DCS</code> (red): the same aircraft, inputs and choices.</p>
 
 <h2>Step by step</h2>
 <ol class="steps">
@@ -763,6 +764,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="n">11</td><td>Launch envelopes depend on the target's altitude.</td></tr>
 <tr><td class="n">12</td><td>A third of ADAPTIVE episodes shoot at the edge of R<sub>max</sub> and press on, like the DCS AI.</td></tr>
 <tr><td class="n">13</td><td>Energy weight 0.07; wide start altitudes; ADAPTIVE runner and DCS speeds; scripted red's bearing fixed.</td></tr>
+<tr><td class="n">14</td><td>Headings ±15 and ±40 added (14 choices); five speeds (460 m/s added for the F-16s). Older checkpoints are converted on loading.</td></tr>
 </table>
 </div>
 

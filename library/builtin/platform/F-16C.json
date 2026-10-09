@@ -13,7 +13,8 @@
       220.0,
       280.0,
       340.0,
-      400.0
+      400.0,
+      460.0
     ],
     "ALT_MIN_OP": 1000.0,
     "ALT_MAX_OP": 14000.0,
@@ -25,7 +26,7 @@
   "sources": {
     "WPN_COUNT": "standard BVR loadout in this project",
     "RCS_M2": "commonly cited open-source frontal estimate (≈ 1.2 m²)",
-    "SPEED_CMDS": "the action set existing checkpoints were trained with",
+    "SPEED_CMDS": "the action set existing checkpoints were trained with; 460 m/s added in SIM_REV 14 (Mach 1.5 at 9 km, the DCS AI's dash in combat)",
     "ALT_MIN_OP": "as trained",
     "ALT_MAX_OP": "as trained",
     "CLIMB_FPA_LO": "holds speed on a 3 km climb (measured)",

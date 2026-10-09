@@ -616,7 +616,10 @@ def test_perf_card_builtins():
 
 
 def test_compat_widening():
-    """A checkpoint from before the wingman inputs loads and acts exactly as before."""
+    """A checkpoint from before the wingman inputs and the SIM_REV 14 actions
+    (10 headings, 4 speeds) loads and acts as before: the same values, the same
+    logits for every old choice, and the new choices a quarter as likely as
+    their neighbours (so never the most likely)."""
     import tempfile
     import gymnasium as gym
     import torch as th
@@ -631,13 +634,13 @@ def test_compat_widening():
 
     class OldLayout(gym.Env):
         observation_space = spaces.Dict({"obs": box(OBS_DIM_1V1), "priv": box(PRIV_DIM_1V1)})
-        action_space = spaces.MultiDiscrete(ACTION_NVEC)
+        action_space = spaces.MultiDiscrete([10, 5, 4, 2])
         def reset(self, seed=None, options=None):
             return self.observation_space.sample(), {}
         def step(self, a):
             return self.observation_space.sample(), 0.0, False, False, {}
         def action_masks(self):
-            return np.ones(sum(ACTION_NVEC), dtype=bool)
+            return np.ones(21, dtype=bool)
 
     vec = VecFrameStack(DummyVecEnv([OldLayout]), N_STACK)
     old = MaskablePPO(AsymmetricMaskablePolicy, vec, n_steps=32, batch_size=32,
@@ -648,6 +651,14 @@ def test_compat_widening():
         new = load_model(path, log=None)
     assert new.observation_space["obs"].shape == (OBS_DIM * N_STACK,)
     assert new.observation_space["priv"].shape == (PRIV_DIM * N_STACK,)
+    assert list(new.action_space.nvec) == list(ACTION_NVEC)
+    with th.no_grad():         # a non-trivial head, so that the averages are tested
+        old.policy.action_net.bias.copy_(th.linspace(-1, 1, 21))
+        old.policy.action_net.weight.mul_(20.0)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "old.zip")
+        old.save(path)
+        new = load_model(path, log=None)
 
     rng = np.random.default_rng(0)
     o = rng.uniform(-1, 1, (5, N_STACK, OBS_DIM_1V1)).astype(np.float32)
@@ -659,16 +670,38 @@ def test_compat_widening():
     def run(model, oo, pp):
         x = {"obs": th.as_tensor(oo.reshape(5, -1), dtype=th.float32),
              "priv": th.as_tensor(pp.reshape(5, -1), dtype=th.float32)}
-        with th.no_grad():
-            dist = model.policy.get_distribution(x)
-            logits = th.cat([c.logits for c in dist.distributions], 1)
-            return logits.numpy(), model.policy.predict_values(x).numpy()
+        with th.no_grad():     # the head's raw outputs (each choice's own logit)
+            pol = model.policy
+            latent = pol.mlp_extractor.forward_actor(pol.extract_features(x, pol.pi_features_extractor))
+            return pol.action_net(latent).numpy(), pol.predict_values(x).numpy()
 
+    from bvr_compat import HDG_LAYOUTS, NEW_CHOICE_LOGIT
+    from bvr_env import HDG_OFFSETS_DEG
     la, va = run(old, o, p)
     lb, vb = run(new, o_new, p_new)
-    assert np.allclose(la, lb, atol=1e-5) and np.allclose(va, vb, atol=1e-5), \
-        (np.abs(la - lb).max(), np.abs(va - vb).max())
-    print("  checkpoint widening ......... OK")
+    assert np.allclose(va, vb, atol=1e-5), np.abs(va - vb).max()
+    old_h = HDG_LAYOUTS[10]
+    # new column of each old choice: headings by value, then alt 5, speed 4 (+1), fire 2
+    col = [HDG_OFFSETS_DEG.index(v) for v in old_h] + [14 + i for i in range(5)] \
+        + [19 + i for i in range(4)] + [24, 25]
+    assert np.allclose(la, lb[:, col], atol=1e-5), np.abs(la - lb[:, col]).max()
+    # the new choices: between their neighbours, a quarter as likely, never the top
+    for v, nb in ((15.0, (0.0, 30.0)), (-40.0, (-50.0, -30.0))):
+        k = HDG_OFFSETS_DEG.index(v)
+        mid = (la[:, old_h.index(nb[0])] + la[:, old_h.index(nb[1])]) / 2
+        assert np.allclose(lb[:, k], mid + NEW_CHOICE_LOGIT, atol=1e-4)
+    assert np.allclose(lb[:, 23], la[:, 18] + NEW_CHOICE_LOGIT, atol=1e-5)    # fifth speed
+    heads = np.argmax(la[:, :10], 1)
+    assert [HDG_OFFSETS_DEG[i] for i in np.argmax(lb[:, :14], 1)] == [old_h[i] for i in heads]
+    assert np.array_equal(np.argmax(lb[:, 19:24], 1), np.argmax(la[:, 15:19], 1))
+    # Speeds by value, from the checkpoint's own platform: a speed added below
+    # (GENERIC-UCAV's 150) takes the nearest old one's output, a quarter as likely.
+    from bvr_compat import _speed_rows
+    assert _speed_rows([220, 280, 340, 400], [220, 280, 340, 400, 460]) == \
+        [(0, 0.0), (1, 0.0), (2, 0.0), (3, 0.0), (3, NEW_CHOICE_LOGIT)]
+    assert _speed_rows([170, 200, 225, 250], [150, 170, 200, 225, 250]) == \
+        [(0, NEW_CHOICE_LOGIT), (0, 0.0), (1, 0.0), (2, 0.0), (3, 0.0)]
+    print("  checkpoint widening ......... OK  (inputs, and actions 10/4 -> 14/5)")
 
 
 def test_team_datalink():

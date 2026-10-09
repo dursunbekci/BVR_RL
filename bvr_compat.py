@@ -1,6 +1,6 @@
 """
-bvr_compat.py  —  Load checkpoints saved before an observation input was added
-==============================================================================
+bvr_compat.py  —  Load checkpoints saved before the observation or the actions changed
+=====================================================================================
 
 Adding an input to the observation (e.g. doctrine_shot_cost) makes every
 earlier checkpoint unloadable: its first layers expect a narrower input. This
@@ -15,8 +15,19 @@ policy's action probabilities are identical to the old policy's.
 
 Adam's moment estimates for those layers are widened the same way, so
 resuming training continues the old optimizer state rather than resetting it.
+
+The action space grew in SIM_REV 14 (headings ±15 and ±40, a fifth speed).
+The action head of an older checkpoint is converted the same way: each old
+choice keeps its own output, and a new choice gets the average of the
+outputs of its neighbours (±15 between 0 and ±30, ±40 between ±30 and ±50,
+a new speed from the nearest old one, by the speeds in the checkpoint's
+scenario record), a quarter as likely as they are. The
+converted policy picks what it picked before (its most likely choice is
+unchanged) and tries the new choices now and then until training finds a use
+for them.
 """
 
+import math
 import os
 import tempfile
 
@@ -24,7 +35,7 @@ import numpy as np
 import torch as th
 from gymnasium import spaces
 
-from bvr_env import OBS_DIM, PRIV_DIM
+from bvr_env import OBS_DIM, PRIV_DIM, ACTION_NVEC, HDG_OFFSETS_DEG
 from bvr_selfplay import N_STACK
 
 
@@ -89,35 +100,133 @@ def migrate(path: str, out_path: str) -> bool:
     data, params, pt_vars = load_from_zip_file(path, device="cpu")
     old_space = data["observation_space"]
     new_space = expected_space(isinstance(old_space, spaces.Dict))
-    if _widths(old_space) == _widths(new_space):
+    old_nvec = [int(n) for n in data["action_space"].nvec]
+    obs_change = _widths(old_space) != _widths(new_space)
+    act_change = old_nvec != list(ACTION_NVEC)
+    if not (obs_change or act_change):
         return False
-    maps = _column_maps(old_space, new_space)
-
     pol = params["policy"]
-    widened = {}
-    for name, t in pol.items():
-        if _is_input_layer(name, t, maps):
-            widened[tuple(t.shape)] = True
-            pol[name] = _widen(t, maps)
-    if not widened:
-        raise ValueError("found no input layer to widen")
-
-    # Adam state is keyed by parameter index, not name; the input layers are
-    # the only 2-D parameters whose width is an input width.
     opt = params.get("policy.optimizer")
-    if opt:
-        for st in opt["state"].values():
-            for k in ("exp_avg", "exp_avg_sq"):
-                t = st.get(k)
-                if t is not None and tuple(t.shape) in widened:
-                    st[k] = _widen(t, maps)
 
-    data["observation_space"] = new_space
+    if obs_change:
+        maps = _column_maps(old_space, new_space)
+        widened = {}
+        for name, t in pol.items():
+            if _is_input_layer(name, t, maps):
+                widened[tuple(t.shape)] = True
+                pol[name] = _widen(t, maps)
+        if not widened:
+            raise ValueError("found no input layer to widen")
+
+        # Adam state is keyed by parameter index, not name; the input layers are
+        # the only 2-D parameters whose width is an input width.
+        if opt:
+            for st in opt["state"].values():
+                for k in ("exp_avg", "exp_avg_sq"):
+                    t = st.get(k)
+                    if t is not None and tuple(t.shape) in widened:
+                        st[k] = _widen(t, maps)
+        data["observation_space"] = new_space
+
+    if act_change:
+        rows = _action_rows(old_nvec, _speeds_of(data, old_nvec[2]))
+        n_old = sum(old_nvec)
+        w, b = pol["action_net.weight"], pol["action_net.bias"]
+        if w.shape[0] != n_old or b.shape[0] != n_old:
+            raise ValueError(f"action head has {w.shape[0]} outputs, the action space {n_old}")
+        shapes = {tuple(w.shape), tuple(b.shape)}
+        pol["action_net.weight"] = _convert_head(w, rows)
+        pol["action_net.bias"] = _convert_head(b, rows)
+        # Adam: the action head's are the only moments with its output count.
+        if opt:
+            for st in opt["state"].values():
+                for k in ("exp_avg", "exp_avg_sq"):
+                    t = st.get(k)
+                    if t is not None and tuple(t.shape) in shapes:
+                        st[k] = _convert_head(t, rows, offset=False)
+        data["action_space"] = spaces.MultiDiscrete(np.array(ACTION_NVEC))
     for k in ("_last_obs", "_last_original_obs"):
         if k in data:
             data[k] = None
     save_to_zip_file(out_path, data=data, params=params, pytorch_variables=pt_vars)
     return True
+
+
+# Heading choices of each action space so far, by their number.
+HDG_LAYOUTS = {
+    10: [0.0, 30.0, -30.0, 50.0, -50.0, 90.0, -90.0, 135.0, -135.0, 180.0],   # to SIM_REV 13
+    len(HDG_OFFSETS_DEG): list(HDG_OFFSETS_DEG),
+}
+# A new choice starts this much less likely than its neighbours (a logit offset).
+NEW_CHOICE_LOGIT = -math.log(4.0)
+
+
+def _speed_rows(old_speeds, new_speeds):
+    """For each current speed choice: (old speed choice, logit offset). By value:
+    each new speed takes the nearest old one's output, unchanged if it is the
+    same speed, a quarter as likely if not (the speed added in SIM_REV 14)."""
+    out = []
+    for v in new_speeds:
+        i = int(np.argmin([abs(v - o) for o in old_speeds]))
+        out.append((i, 0.0 if abs(v - old_speeds[i]) < 1.0 else NEW_CHOICE_LOGIT))
+    return out
+
+
+def _speeds_of(data, n_old):
+    """(old speeds, current speeds) of the checkpoint's own platform, from its
+    scenario record; None if unknown (then a new speed is taken to be the
+    fastest, after the old ones)."""
+    try:
+        from bvr_library import load_platform
+        rec = data.get("bvr_scenario") or {}
+        old = [float(x) for x in rec["items"]["platform"]["platform"]["params"]["SPEED_CMDS"]]
+        new = [float(x) for x in load_platform(rec["platform"]).speed_cmds]
+        if len(old) == n_old and len(new) == ACTION_NVEC[2]:
+            return old, new
+    except Exception:
+        pass
+    return None
+
+
+def _action_rows(old_nvec, speeds=None):
+    """For each output of the current action head: (rows of the old head it is
+    the average of, logit offset). speeds: (old, current) speed values, to map
+    the speed choices by value."""
+    old_nvec = [int(n) for n in old_nvec]
+    if len(old_nvec) != len(ACTION_NVEC) or old_nvec[1] != ACTION_NVEC[1] \
+            or old_nvec[3] != ACTION_NVEC[3] or old_nvec[2] > ACTION_NVEC[2] \
+            or old_nvec[0] not in HDG_LAYOUTS:
+        raise ValueError(f"cannot convert actions {old_nvec} to {ACTION_NVEC}")
+    rows, base = [], 0
+    old_h = HDG_LAYOUTS[old_nvec[0]]
+    for v in HDG_OFFSETS_DEG:
+        if v in old_h:
+            rows.append(([old_h.index(v)], 0.0))
+        else:
+            lo = max((o for o in old_h if o < v), default=None)
+            hi = min((o for o in old_h if o > v), default=None)
+            nb = [old_h.index(o) for o in (lo, hi) if o is not None]
+            rows.append((nb, NEW_CHOICE_LOGIT))
+    base += old_nvec[0]
+    rows += [([base + i], 0.0) for i in range(old_nvec[1])]           # altitude: unchanged
+    base += old_nvec[1]
+    n_sp = old_nvec[2]
+    if speeds is not None:
+        rows += [([base + i], o) for i, o in _speed_rows(*speeds)]
+    else:                                                            # new speeds: the top one's
+        rows += [([base + min(i, n_sp - 1)], 0.0 if i < n_sp else NEW_CHOICE_LOGIT)
+                 for i in range(ACTION_NVEC[2])]
+    base += n_sp
+    rows += [([base + i], 0.0) for i in range(old_nvec[3])]          # fire: unchanged
+    return rows
+
+
+def _convert_head(t, rows, offset=True):
+    """The new action head (weight or bias, or an Adam moment of one) from the old."""
+    out = th.stack([t[r].mean(dim=0) for r, _ in rows])
+    if offset and t.dim() == 1:
+        out = out + th.as_tensor([o for _, o in rows], dtype=t.dtype)
+    return out
 
 
 def load_model(path: str, env=None, log=print, **kwargs):
@@ -131,9 +240,10 @@ def load_model(path: str, env=None, log=print, **kwargs):
     try:
         if migrate(path, tmp):
             if log:
-                log(f"[bvr] {os.path.basename(path)}: older observation layout, widened "
-                    f"to {OBS_DIM} inputs per frame, {PRIV_DIM} for the critic (new inputs "
-                    f"start at zero weight)")
+                log(f"[bvr] {os.path.basename(path)}: from an older version of the code, "
+                    f"converted: {OBS_DIM} inputs per frame, {PRIV_DIM} for the critic (new "
+                    f"inputs start at zero weight); actions {ACTION_NVEC} (new choices start "
+                    f"a quarter as likely as their neighbours)")
             return MaskablePPO.load(tmp, env=env, **kwargs)
         return MaskablePPO.load(path, env=env, **kwargs)
     finally:

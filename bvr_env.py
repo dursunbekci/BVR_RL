@@ -42,11 +42,17 @@ ALT_MAX_OP = 14_000.0
 # A held reference makes "the same choice" mean "the same heading": it used to
 # be the aircraft's own nose, so +30 re-picked each second kept turning, and
 # the reference jumped each time the track came and went.
-HDG_OFFSETS_DEG = [0.0,30.0,-30.0,50.0,-50.0,90.0,-90.0,135.0,-135.0,180.0]
+# SIM_REV 14 added ±15 and ±40: the policy alternated 0 <-> 30 and 30 <-> 50
+# (the two most frequent heading changes) to fly something in between.
+# Checkpoints trained with the ten older choices are converted on loading
+# (bvr_compat.py).
+HDG_OFFSETS_DEG = [0.0,15.0,-15.0,30.0,-30.0,40.0,-40.0,50.0,-50.0,90.0,-90.0,135.0,-135.0,180.0]
 ALT_DELTAS_M    = [-3000.0,-1200.0,0.0,+1200.0,+3000.0]
-# The four commanded speeds are per platform (SPEED_CMDS in the library);
-# these are the F-16C's, kept for reference and for the action-space size.
-SPEED_CMDS      = [220.0,280.0,340.0,400.0]
+# The five commanded speeds are per platform (SPEED_CMDS in the library);
+# these are the F-16C's, kept for reference and for the action-space size
+# (four before SIM_REV 14, without 460).
+SPEED_CMDS      = [220.0,280.0,340.0,400.0,460.0]
+F16_TOP_SPEED   = SPEED_CMDS[-1]
 FIRE_OPTIONS    = [0,1]
 ACTION_NVEC     = [len(HDG_OFFSETS_DEG),len(ALT_DELTAS_M),len(SPEED_CMDS),len(FIRE_OPTIONS)]
 
@@ -1073,8 +1079,8 @@ class BvrEnv(gym.Env):
         wide_alt=float(self._rng.uniform(2000,12500))
         if self._rng.random()<self.WIDE_ALT_FRAC: a2a=wide_alt
         # Start speeds are drawn for an F-16 (250-320 m/s) and scaled by each
-        # platform's fastest speed choice relative to the F-16's 400 m/s, so a
-        # slower aircraft starts at a speed it can actually fly.
+        # platform's fastest speed choice relative to the F-16's, so a slower
+        # aircraft starts at a speed it can actually fly.
         a1s=float(self._rng.uniform(250,320))
         a2s=float(self._rng.uniform(250,320))
         a1p=br
@@ -1088,8 +1094,10 @@ class BvrEnv(gym.Env):
         p2=(REF_LAT+math.degrees(dl),REF_LON+math.degrees(dlo),a2a,a2p,a2s)
         mirrored=bool(self._rng.random()<self.MIRROR_START_FRAC)
         if mirrored: p1,p2=p2,p1
-        # Speeds are drawn for an F-16 and scaled to the platform in each seat.
-        k1=self._plat.speed_cmds[-1]/400.0; k2=self._opp_plat.speed_cmds[-1]/400.0
+        # Speeds are drawn for an F-16 and scaled to the platform in each seat,
+        # by its fastest choice over the F-16's (460 m/s since SIM_REV 14, 400
+        # before: the F-16's own starts are unchanged).
+        k1=self._plat.speed_cmds[-1]/F16_TOP_SPEED; k2=self._opp_plat.speed_cmds[-1]/F16_TOP_SPEED
         return dict(scenario=sc,mirrored=mirrored,
                     ac1_lat=p1[0],ac1_lon=p1[1],ac1_alt=p1[2],ac1_psi=_wrap_2pi(p1[3]),ac1_spd=p1[4]*k1,
                     ac2_lat=p2[0],ac2_lon=p2[1],ac2_alt=p2[2],ac2_psi=_wrap_2pi(p2[3]),ac2_spd=p2[4]*k2,

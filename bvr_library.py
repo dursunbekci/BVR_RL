@@ -178,7 +178,8 @@ SCHEMA = {
         P("RCS_M2", "Radar cross-section", "m²", "Signature", 0.0001, 100,
           help="How visible this aircraft is to enemy radar and missile seekers."),
         P("SPEED_CMDS", "Speed choices", "m/s", "Agent commands", kind="list",
-          help="The four speeds the agent can command, slowest first."),
+          help="The five speeds the agent can command, slowest first (four before SIM_REV 14: "
+               "a platform saved then needs a fifth, e.g. 460 m/s for an F-16)."),
         P("ALT_MIN_OP", "Lowest commanded altitude", "m", "Agent commands", 100, 20_000),
         P("ALT_MAX_OP", "Highest commanded altitude", "m", "Agent commands", 500, 25_000),
         P("CLIMB_FPA_LO", "Climb angle, low altitude", "deg", "Agent commands", 1, 60),
@@ -313,14 +314,16 @@ def validate(item: dict) -> list:
         elif p.kind == "list":
             try:
                 lst = [float(x) for x in v]
-                if len(lst) != 4:
-                    errs.append(f"{p.label}: exactly four values")
+                if len(lst) != N_SPEED_CMDS:
+                    errs.append(f"{p.label}: exactly {N_SPEED_CMDS} values" + (
+                        " (four before SIM_REV 14: add a fifth, faster one, e.g. 460 m/s "
+                        "for an F-16)" if len(lst) == 4 else ""))
                 elif any(b <= a for a, b in zip(lst, lst[1:])):
                     errs.append(f"{p.label}: must increase")
                 elif lst[0] <= 0:
                     errs.append(f"{p.label}: must be positive")
             except (ValueError, TypeError):
-                errs.append(f"{p.label}: must be four numbers")
+                errs.append(f"{p.label}: must be {N_SPEED_CMDS} numbers")
         else:
             try:
                 x = float(v)
@@ -407,10 +410,13 @@ def delete_item(kind: str, item_id: str) -> None:
 # half sine that fell back to zero there before jumping to the peak).
 _MODEL_REV = {"airframe": 2}
 
+# How many speed choices a platform gives the agent (bvr_env's action space).
+N_SPEED_CMDS = 5
+
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 13
+SIM_REV = 14
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -463,6 +469,13 @@ _SIM_REV_NOTES = {
         "ADAPTIVE also flies at DCS speeds: hot and cranking at 380-450 m/s (was 330-340), "
         "running and defending deep at 420-500 (was 400): the DCS AI holds Mach 1.3 while "
         "climbing and goes on to Mach 1.5",
+    14: "a wider action space: headings 0, ±15, ±30, ±40, ±50, ±90, ±135, 180 (were "
+        "0, ±30, ±50, ±90, ±135, 180) and five speeds (the F-16s' 220, 280, 340, 400 "
+        "plus 460 m/s, Mach 1.5 at 9 km; GENERIC-UCAV adds a slow 150). The new choices "
+        "start just below their neighbours in the converted checkpoint, so it flies as "
+        "before until training finds a use for them. Start speeds are scaled by the "
+        "platform's fastest choice over the F-16's 460 (was 400): F-16 starts are "
+        "unchanged, a UCAV's 13% slower",
 }
 
 
