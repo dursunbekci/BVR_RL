@@ -36,6 +36,13 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
     action (so it adds no policy gradient), no shaping, and the team's
     rewards (so its value keeps learning what the team goes on to do).
 
+Red flown by a policy (red_policies). In a share of the episodes at the last
+scripted stage (ADAPTIVE_SHOOTER), red is a frozen 1v1 checkpoint instead
+(TeamPolicyRed): it sees the fight as a 1v1 against its current target,
+through red's own radar observer of that aircraft, with both blue aircraft's
+missiles counted as inbound, and fires on its own fire mask. 2v1 has no
+self-play stage; this is its stronger, less predictable opponent.
+
 Episode ends: red destroyed or crashed, both blue aircraft lost, every live
 blue aircraft beyond escape range, or the step limit. A kill, or the loss of
 both blue aircraft, ends it only once no missile is left in flight at a live
@@ -115,7 +122,7 @@ class TeamBvrEnv:
                  seed=42, instance_id=0, privileged_critic=True, envelope_table="library",
                  radar_model="sim", doctrine=DOCTRINE_MIXED,
                  blue_platforms=(DEFAULT_PLATFORM, DEFAULT_PLATFORM),
-                 red_platform=DEFAULT_PLATFORM):
+                 red_platform=DEFAULT_PLATFORM, red_policies=(), red_policy_frac=0.5):
         if opponent_type == BvrOpponentType.SELF_PLAY:
             raise ValueError("2v1 has no self-play stage yet: red is a scripted opponent")
         if len(blue_platforms) != self.n_agents:
@@ -131,6 +138,10 @@ class TeamBvrEnv:
         self._doctrine_cfg = doctrine
         self._blue_ids = tuple(blue_platforms)
         self._red_id = red_platform
+        # 1v1 checkpoints that may fly red (see the module notes), and the share
+        # of ADAPTIVE_SHOOTER episodes they fly.
+        self._red_policies = tuple(red_policies or ())
+        self._red_policy_frac = float(red_policy_frac)
 
         self._obs = [BvrEnv(opponent_type=BvrOpponentType.STRAIGHT, gamma_discount=gamma_discount,
                             seed=seed + 97 * k, instance_id=instance_id,
@@ -190,11 +201,18 @@ class TeamBvrEnv:
             o._episode_id = self._episode_id
         if self._opponent_factory is not None:
             self._opponent = self._opponent_factory(self)
+        elif (self._red_policies and self._opponent_type == BvrOpponentType.ADAPTIVE_SHOOTER
+              and self._rng.random() < self._red_policy_frac):
+            path = self._red_policies[int(self._rng.integers(len(self._red_policies)))]
+            self._opponent = make_policy_red(self, path)
         else:
             self._opponent = BvrOpponent.create(self._opponent_type, rng=self._rng)
-        self._red_radar = (self.RED_RADAR and isinstance(self._opponent, ShooterOpponent)
-                           and radar_ok(self._obs[0]))
-        if self._red_radar:
+        policy_red = isinstance(self._opponent, TeamPolicyRed)
+        self._red_radar = policy_red or (self.RED_RADAR and isinstance(self._opponent, ShooterOpponent)
+                                         and radar_ok(self._obs[0]))
+        if policy_red:
+            pass                                   # it fires on its own mask; reset() below
+        elif self._red_radar:
             for r in self._red_obs:
                 _red_observer_reset(r)
             # Bound methods, not lambdas: the env must pickle (SubprocVecEnv).
@@ -639,3 +657,110 @@ def _observer_reset(o: BvrEnv) -> None:
     o._track.reset()
     if o._radar is not None:
         o._radar.reset()
+
+
+# ── red flown by a 1v1 policy ─────────────────────────────────────────
+class TeamPolicyRed:
+    """Red flown by a frozen 1v1 checkpoint (red_policies).
+
+    The policy fights its current target as a 1v1: its observation, mask
+    and commands are the agent's code run on red's radar observer of that
+    aircraft (env._red_obs), which also guides its missiles, so it sees
+    nothing a 1v1 opponent would not. Both blue aircraft's missiles aimed at
+    red appear as inbound. When red changes target, the commanded heading,
+    altitude, speed and doctrine carry over to the new target's observer.
+    The frame history is kept across a change of target.
+    """
+
+    def __init__(self, env, model, privileged: bool, label: str,
+                 deterministic: bool = False, doctrine: str = None):
+        from bvr_selfplay import FrameStacker, N_STACK
+        self._env = env
+        self._model = model
+        self._privileged = bool(privileged)
+        self._deterministic = bool(deterministic)
+        self._doctrine = doctrine
+        self._stack = FrameStacker(N_STACK)
+        self.label = label
+        self.rmax_t = None          # set by the env; unused here
+
+    def reset(self, ic):
+        rs = self._env._red_obs
+        for r in rs:
+            _red_observer_reset(r)
+            r._privileged = self._privileged
+            r._step_num = 0
+            r._prev_hdg_off = 0.0
+            r._hdg_ref = None
+            r._cmd_hdg = float(ic.get("ac2_psi", r._cmd_hdg))
+            r._cmd_alt = float(ic.get("ac2_alt", r._cmd_alt))
+            r._cmd_spd = float(ic.get("ac2_spd", r._cmd_spd))
+        a = rs[0]
+        if self._doctrine is not None:
+            a._doctrine_cfg = str(self._doctrine).upper()
+        a._pick_doctrine()          # red fights under its own doctrine
+        for r in rs[1:]:
+            r._doctrine, r._shot_cost = a._doctrine, a._shot_cost
+        self._tgt = None
+        self._next_decision = -1.0
+        self._started = False
+        self._cmd = None
+
+    def _handover(self, old, new):
+        for k in ("_cmd_hdg", "_cmd_alt", "_cmd_spd", "_prev_hdg_off", "_hdg_ref",
+                  "_doctrine", "_shot_cost", "_last_shot_t"):
+            setattr(new, k, getattr(old, k))
+
+    def act(self, state, t_sim):
+        env = self._env
+        w, tgt = env._world, env._red_tgt
+        o = env._red_obs[tgt - 1]
+        fire = 0
+        if t_sim >= self._next_decision:
+            if self._tgt is not None and self._tgt != tgt:
+                self._handover(env._red_obs[self._tgt - 1], o)
+            self._tgt = tgt
+            o._state = w.telemetry(env.RED, tgt)
+            o._t_sim = t_sim
+            o._step_num = env._step_num
+            raw = o._build_obs()
+            obs = self._stack.update(raw) if self._started else self._stack.reset(raw)
+            self._started = True
+            mask = o.action_masks()
+            a, _ = self._model.predict(obs, action_masks=mask, deterministic=self._deterministic)
+            a = [int(x) for x in np.asarray(a).reshape(-1)]
+            self._cmd = o._encode_cmd(a[0], a[1], a[2], 0)
+            o._heading_choice(HDG_OFFSETS_DEG[a[0]])
+            if a[3] == 1 and mask[-1]:
+                fire = 1
+            self._next_decision = t_sim + 1.0 / env.DECISION_HZ
+        cmd = dict(self._cmd)
+        cmd["fire"] = fire
+        return cmd
+
+
+def check_red_policy(path: str, red_platform: str) -> list:
+    """Load a red_policies checkpoint and return notes on it: an error is
+    raised for a 2v1 checkpoint, a note given for a platform mismatch."""
+    from bvr_selfplay import load_policy
+    from bvr_library import scenario_of
+    model, _ = load_policy(path)
+    sc = scenario_of(model)
+    if sc.get("format", "1v1") != "1v1":
+        raise ValueError(f"{path}: a {sc.get('format')} checkpoint cannot fly red; "
+                         f"use a 1v1 checkpoint")
+    notes = []
+    if sc.get("platform") != red_platform:
+        notes.append(f"red policy {path} was trained as {sc.get('platform')}, here it flies "
+                     f"{red_platform}")
+    return notes
+
+
+def make_policy_red(env, path: str, deterministic: bool = False, doctrine: str = None):
+    """This episode's policy-flown red, from a checkpoint path."""
+    import os
+    from bvr_selfplay import load_policy
+    model, privileged = load_policy(path)
+    name = os.path.basename(path)
+    return TeamPolicyRed(env, model, privileged, label="policy:" + (name[:-4] if name.endswith(".zip") else name),
+                         deterministic=deterministic, doctrine=doctrine)

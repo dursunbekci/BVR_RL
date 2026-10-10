@@ -880,6 +880,68 @@ def test_team_open_rules():
     print(f"  2v1 red opening rules ....... OK  ({seen}; farther held to the first launch)")
 
 
+def test_team_policy_red():
+    """2v1 red flown by a 1v1 policy: it decides on its own observer of its
+    target, fires only on its own mask (a firm track), and flies a share of
+    the ADAPTIVE_SHOOTER episodes when red_policies are given."""
+    import bvr_team
+    from bvr_team import TeamBvrEnv, TeamPolicyRed
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+    from bvr_env import OBS_DIM
+
+    class Model:                                     # flies at its target, fires when allowed
+        def __init__(self): self.calls = 0
+        def predict(self, obs, action_masks=None, deterministic=False):
+            assert np.asarray(obs).shape == (OBS_DIM * 8,), np.asarray(obs).shape
+            self.calls += 1
+            return np.array([0, 2, 3, int(action_masks[-1])]), None
+    model = Model()
+    e = TeamBvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=7, doctrine="AGGRESSIVE")
+    e._opponent_factory = lambda env: TeamPolicyRed(env, model, False, "policy:test")
+    shots, untracked, steps = 0, 0, 0
+    for ep in range(3):
+        e.reset()
+        assert e._red_radar and isinstance(e._opponent, TeamPolicyRed)
+        w, launch = e._world, e._world._launch
+        def spy(owner, cmd, launch=launch, w=w):
+            nonlocal shots, untracked
+            if owner == e.RED and w.wpn[e.RED - 1] > 0:
+                shots += 1
+                untracked += e._red_obs[cmd["target"] - 1]._trk_state() != TrackState.TRACK
+            return launch(owner, cmd)
+        w._launch = spy
+        done = False
+        while not done:
+            _, _, t, tr, info = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+            steps += 1
+        assert info[0]["opponent_detail"] == "policy:test"
+    assert shots >= 1 and untracked == 0, (shots, untracked)
+    assert abs(model.calls - steps) <= 3 * 3, (model.calls, steps)   # about one decision a second
+
+    # Share of ADAPTIVE_SHOOTER episodes flown by a red policy; none at other stages.
+    made = []
+    real = bvr_team.make_policy_red
+    bvr_team.make_policy_red = lambda env, path: made.append(path) or TeamPolicyRed(
+        env, model, False, "policy:" + path)
+    try:
+        e = TeamBvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=8, red_policies=("a", "b"),
+                       red_policy_frac=0.5)
+        e.MAX_STEPS = 1
+        for ep in range(40):
+            e.reset()
+        e2 = TeamBvrEnv(opponent_type=T.SHOOTER, seed=8, red_policies=("a",), red_policy_frac=1.0)
+        n_before = len(made)
+        e2.reset()
+        assert len(made) == n_before, "a red policy flew outside ADAPTIVE_SHOOTER"
+    finally:
+        bvr_team.make_policy_red = real
+    assert 10 <= len(made) <= 30 and set(made) == {"a", "b"}, made
+    print(f"  2v1 policy red .............. OK  ({shots} shots on a firm track; "
+          f"{len(made)}/40 ADAPTIVE episodes policy-flown)")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -1699,6 +1761,7 @@ if __name__ == "__main__":
         ("2v1 red opens on rear",   test_team_roles_far_target),
         ("2v1 red radar",           test_team_red_radar),
         ("2v1 red opening rules",   test_team_open_rules),
+        ("2v1 policy red",          test_team_policy_red),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS support rule",        test_dcs_support_rule),

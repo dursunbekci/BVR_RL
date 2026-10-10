@@ -19,7 +19,13 @@ train_bvr.py  —  MaskablePPO training for 1v1 and 2v1 BVR
 own observation, with their radar tracks shared over a datalink; red is the
 scripted curriculum opponent (self-play is 1v1 only for now). --platform is
 the lead's aircraft, --wingman-platform the wingman's (default: the same).
-With --n-envs N there are N fights and 2N agent slots.
+With --n-envs N there are N fights and 2N agent slots. --red-policies A.zip
+B.zip lets 1v1 checkpoints fly red in a share (--red-policy-frac, default 0.5)
+of the ADAPTIVE_SHOOTER episodes, the last 2v1 stage:
+
+    python train_bvr.py --format 2v1 --platform F-16C-DCS --opponent-platform F-16C-DCS \
+        --opponent adaptive_shooter --resume models_bvr/<1v1 model>.zip \
+        --red-policies models_bvr/<1v1 model>.zip models_bvr/archive/<other>.zip
 
 TensorBoard:
     bvr/win_rate            KILL fraction over last 50 TERMINAL episodes
@@ -518,12 +524,14 @@ def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfpl
 
 
 def make_team_env(idx, opponent, seed, privileged, envelope_table, gamma, doctrine,
-                  blue_platforms, red_platform, max_steps=None):
+                  blue_platforms, red_platform, max_steps=None, red_policies=(),
+                  red_policy_frac=0.5):
     def _init():
         env = TeamBvrEnv(opponent_type=opponent, gamma_discount=gamma, seed=seed + idx,
                          instance_id=idx, privileged_critic=privileged,
                          envelope_table=envelope_table, doctrine=doctrine,
-                         blue_platforms=blue_platforms, red_platform=red_platform)
+                         blue_platforms=blue_platforms, red_platform=red_platform,
+                         red_policies=red_policies, red_policy_frac=red_policy_frac)
         if max_steps:
             env.MAX_STEPS = int(max_steps)
         return env
@@ -582,6 +590,12 @@ def main():
                     help="1v1, or 2v1: two agents on one shared policy against one opponent")
     ap.add_argument("--wingman-platform", default=None,
                     help="2v1: the wingman's platform (default: the same as --platform)")
+    ap.add_argument("--red-policies", nargs="+", default=[], metavar="ZIP",
+                    help="2v1: 1v1 checkpoints that fly red in a share of the ADAPTIVE_SHOOTER "
+                         "episodes (the last 2v1 stage), one drawn per episode")
+    ap.add_argument("--red-policy-frac", type=float, default=0.5,
+                    help="2v1: share of ADAPTIVE_SHOOTER episodes flown by a --red-policies "
+                         "checkpoint, 0-1 (default %(default)s)")
     ap.add_argument("--envelope-table", type=str, default="library",
                     help="'library' (default): each missile's calibrated table from "
                          "library/envelopes; or a path to one table used for every missile")
@@ -618,6 +632,22 @@ def main():
         run_notes.append(msg)
     if args.wingman_platform and not team:
         ap.error("--wingman-platform needs --format 2v1")
+    if args.red_policies and not team:
+        ap.error("--red-policies needs --format 2v1 (1v1 has self-play)")
+    if not 0.0 <= args.red_policy_frac <= 1.0:
+        ap.error("--red-policy-frac must be within 0-1")
+    if team and args.red_policies:
+        from bvr_team import check_red_policy
+        for path in args.red_policies:
+            if not os.path.exists(path) and not os.path.exists(path + ".zip"):
+                ap.error(f"--red-policies: {path} not found")
+            try:
+                for n in check_red_policy(path, args.opponent_platform):
+                    note(f"NOTE: {n}")
+            except ValueError as e:
+                ap.error(str(e))
+        note(f"2v1 red policies ({args.red_policy_frac:.0%} of ADAPTIVE_SHOOTER episodes): "
+             + ", ".join(os.path.basename(p) for p in args.red_policies))
 
     # Resolve every platform now, so a missing item, an invalid value or an
     # uncalibrated missile stops the run here with a clear message.
@@ -676,7 +706,7 @@ def main():
     if team:
         fns = [make_team_env(i, opponent, args.seed, privileged, envelope_table, args.gamma,
                              args.doctrine.upper(), (args.platform, wingman), args.opponent_platform,
-                             args.max_steps)
+                             args.max_steps, tuple(args.red_policies), args.red_policy_frac)
                for i in range(args.n_envs)]
         vec = TeamVecEnv(fns, in_process=(args.n_envs == 1))
     else:
