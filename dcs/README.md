@@ -361,7 +361,7 @@ route; the waypoint distance makes no difference. So the platform
 F-16C-DCSAI turns at no more than 45° of bank (`TURN_BANK_MAX`): 1.6°/s in
 the simulator, against 7-9°/s for F-16C-DCS. The fly-over variant was not
 measured: after about 11 minutes BLUE-1 reached bingo fuel (16%) and the
-DCS AI took it home on its own, ignoring the route. Since bridge version 4
+DCS AI took it home on its own, ignoring the route. Since bridge version 7
 neither aircraft goes home at bingo fuel (`RTB_ON_BINGO` off).
 
 ---

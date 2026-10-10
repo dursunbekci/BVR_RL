@@ -202,7 +202,7 @@ def test_bridge_eta():
     assert absolute[1].ETA_locked and abs(absolute[1].ETA - (43200.0 + 20.0 + near / 340.0)) < 0.2
     assert off[1].speed_locked and not off[1].ETA_locked
     lines = [json.loads(d) for p, d in sent if p == 15301]
-    assert lines[0].get("bridge") == 3, lines[0]           # dcs_live.py checks the version
+    assert lines[0].get("bridge") == 7, lines[0]           # dcs_live.py checks the version
     acks = [d["clock"] for d in lines if d.get("ev") == "bridge" and d.get("status") == "eta"]
     assert acks == ["mission", "abs", "off"], acks
     print(f"  bridge ETA lock ............. OK  (point 1 due {mission[1].ETA:.1f} s at 340 m/s)")

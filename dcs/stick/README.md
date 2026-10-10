@@ -20,9 +20,19 @@ the simulator's own F-16 (`F-16C-DCS`, no handicap) is then the right model.
   altitude-aware envelopes, the DCS-fitted AIM-120, the 14 headings and 5
   speeds (SIM_REV 14), the reward balance (SIM_REV 15), the `dcs_live.py`
   recording and results machinery.
-- **Does not use:** the handicap platforms (`F-16C-DCSAI`, `-AD`: `CLIMB_MACH`,
-  `TURN_BANK_MAX`, `AUTO_DEFEND`, `HOT_TURN_BANK`) and the bridge's route
-  steering, `OPT autodefend`, `OPT hotturn`. They stay in the code, off.
+- **Removed:** the DCS-AI auto-defence and hot-turn work (bridge versions 4
+  to 6: `OPT autodefend`, `OPT hot`, `OPT hotturn`; the simulator's
+  `AUTO_DEFEND`, `HOT_TURN_BANK`, the break-turn mode; the `F-16C-DCSAI-AD`
+  platform; the fire/heading/altitude/speed masks while defending; the
+  tests and docs). They stay on `feature/envelope-target-alt`. With a
+  player-flown F-16C the policy flies its own defence, so the **defence
+  reward term stays** (`-0.8 * (1 - tanh(time-to-go / 25 s))`: it was never
+  changed for auto-defence) and the policy is trained to defend itself.
+- **Kept from that work:** `RTB_ON_BINGO` off for both aircraft (the bridge
+  is version 7 here), and the turn test's end-of-test behaviour.
+- **Still there, off:** the route-mode platforms (`F-16C-DCSAI`:
+  `CLIMB_MACH`, `CLIMB_THROTTLE`, `TURN_BANK_MAX`). They model the DCS AI on a
+  route, which this branch does not use; say if they should go too.
 - **Model to train:** `F-16C-DCS` against `F-16C-DCS` (not dcs_v10/v11, which
   were trained on the handicapped platform and expect its auto-defence).
 

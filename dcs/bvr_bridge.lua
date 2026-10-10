@@ -184,7 +184,9 @@ pcall(function() theatre = env.mission.theatre end)
 local T0 = timer.getTime()
 -- Sent in the header; dcs_live.py warns when a mission's bridge is older
 -- than the options it was asked to use. 2: OPT eta. 3: OPT near, wpt, redhold.
-local BRIDGE_VERSION = 3
+-- 7: RTB_ON_BINGO off for both aircraft. (4-6, the DCS AI's own defence and
+-- hot turns, exist on feature/envelope-target-alt only.)
+local BRIDGE_VERSION = 7
 
 local function header()
   send({format = "bvr_rl.dcs.v1", rate = CFG.rate, t0 = T0, theatre = theatre,
@@ -203,6 +205,8 @@ end
 if CFG.red_attack and not is_player(red) then
   local rc = ctrl_of(red)
   set_opt(rc, O.id.ROE, O.val.ROE.OPEN_FIRE_WEAPON_FREE)
+  -- At bingo fuel (16%) the DCS AI flies home, ignoring its tasks: not in a test.
+  set_opt(rc, O.id.RTB_ON_BINGO, false)
   pcall(function()
     rc:pushTask({id = "AttackUnit", params = {unitId = agent:getID(), groupAttack = false}})
   end)
@@ -232,6 +236,7 @@ local function take_control()
   -- speed with full thrust, but a DCS AI following a route stayed at ~280 m/s
   -- (Mach 0.9 at 10 km) when told 340.
   set_opt(c, O.id.PROHIBIT_AB, false)
+  set_opt(c, O.id.RTB_ON_BINGO, false)
   S.controlled = true
   send({ev = "bridge", t = timer.getTime(), status = "control", agent = AGENT})
 end
