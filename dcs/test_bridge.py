@@ -202,7 +202,7 @@ def test_bridge_eta():
     assert absolute[1].ETA_locked and abs(absolute[1].ETA - (43200.0 + 20.0 + near / 340.0)) < 0.2
     assert off[1].speed_locked and not off[1].ETA_locked
     lines = [json.loads(d) for p, d in sent if p == 15301]
-    assert lines[0].get("bridge") == 5, lines[0]           # dcs_live.py checks the version
+    assert lines[0].get("bridge") == 4, lines[0]           # dcs_live.py checks the version
     acks = [d["clock"] for d in lines if d.get("ev") == "bridge" and d.get("status") == "eta"]
     assert acks == ["mission", "abs", "off"], acks
     print(f"  bridge ETA lock ............. OK  (point 1 due {mission[1].ETA:.1f} s at 340 m/s)")
@@ -312,62 +312,6 @@ def test_bridge_autodefend():
           f"hot attack task; no bingo return)")
 
 
-def test_bridge_hotturn():
-    """OPT hotturn: a command toward red with the agent far off it is flown as a
-    guns-only attack (no route on top of it) until the agent is within 10 deg,
-    then the route again; a command away from red stays a route; a fire request
-    ends the turn, the shot goes out, and then the turn goes on."""
-    L = lua()
-    sent, inbox = [], []
-
-    class Udp:
-        def settimeout(self, t): pass
-        def setsockname(self, h, p): return 1
-        def sendto(self, data, h, p): sent.append((p, data)); return len(data)
-        def receive(self, *a): return inbox.pop(0) if inbox else None
-
-    class Sock:
-        def udp(self): return Udp()
-
-    # Red is ahead (north); 90 is a beam to it, 0 straight at it.
-    plan = {2.0: ["OPT hotturn 1", "CMD 1 90 9000 250 0"], 15.0: ["CMD 2 0 9000 250 0"],
-            18.0: ["CMD 3 0 9000 250 0"], 32.0: ["CMD 4 90 9000 250 0"],
-            45.0: ["CMD 5 0 9000 250 0"], 47.0: ["CMD 6 0 9000 250 1"]}
-
-    def on_tick(T):
-        for t in list(plan):
-            if T >= t - 1e-9:
-                inbox.extend(plan.pop(t))
-
-    with open(os.path.join(HERE, "mock", "dcs_api_mock.lua")) as fh:
-        L.execute(fh.read())
-    L.globals().bvr_rl_socket = Sock()
-    L.globals().RUN(os.path.join(HERE, "bvr_bridge.lua"), 65.0, on_tick)
-    log = L.globals().LOG
-    LOG = [tuple(log[i].values()) for i in range(1, len(log) + 1)]
-    lines = [json.loads(d) for p, d in sent if p == 15301]
-    turns = [(round(d["t"], 1), d["on"]) for d in lines
-             if d.get("ev") == "bridge" and d.get("status") == "hotturn"]
-    # the third: the shot ends it, and once launched (still 70+ deg off) it goes on
-    assert [on for _, on in turns] == [True, False, True, False, True, False], turns
-    assert 15.0 <= turns[0][0] <= 15.3, turns                # the command toward red, 90 deg off
-    assert 25.0 <= turns[1][0] <= 30.0, turns                # 80 deg at 7 deg/s: about 11 s
-    assert 45.0 <= turns[2][0] <= 45.3 and 47.0 <= turns[3][0] <= 47.3, turns   # the shot ends it
-    acks = [d for d in lines if d.get("status") == "opt"]
-    assert acks and acks[0]["hotturn"] is True, acks
-    blue = [x for x in LOG if x[0] == "Viper-1" and x[1] in ("setTask", "pushTask", "popTask")]
-    i_push = next(i for i, x in enumerate(blue) if x[1] == "pushTask"
-                  and x[2].params.weaponType == 805306368)
-    i_pop = next(i for i, x in enumerate(blue) if i > i_push and x[1] == "popTask")
-    assert not any(x[1] == "setTask" for x in blue[i_push:i_pop]), blue[i_push:i_pop]   # no route on top
-    assert blue[i_pop + 1][1] == "setTask" and blue[i_pop + 1][2].id == "Mission"        # the route again
-    shots = [d for d in lines if d.get("ev") == "fire" and d.get("status") == "launched"]
-    assert len(shots) == 1 and shots[0]["seq"] == 6, shots
-    assert shots[0]["t"] <= turns[4][0] <= shots[0]["t"] + 0.3, (shots, turns)
-    print(f"  bridge hot turn ............. OK  (attack {turns[0][0]}-{turns[1][0]} s, "
-          f"then the route; a shot ends one)")
-
-
 def test_setup_patch():
     import setup_dcs
     L = lua()
@@ -393,6 +337,5 @@ if __name__ == "__main__":
     test_bridge_eta()
     test_bridge_opts()
     test_bridge_autodefend()
-    test_bridge_hotturn()
     test_setup_patch()
-    print("7/7 passed")
+    print("6/6 passed")

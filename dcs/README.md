@@ -376,50 +376,11 @@ python dcs\make_mission.py              # once: the hot variant needs bridge ver
 python dcs\turn_test.py --variants hot
 ```
 
-**Result (9 October):** it does. Both 90° turns toward RED-1 were flown at
-**7.0-7.1°/s** while more than 30° remained (peak 10.5), with 80-94° of bank
-and 4.1-4.2 g: half done in 6.5-6.7 s, 90% in 12 s, where the route takes
-30 and 52 s. The AI rolled to about 90° within 2 s, lost 35 m/s (340 to 305)
-and about 450 m of height in the turn, and once pointing at RED-1 started
-its own attack (climbing 1.2 km, slowing to 283 m/s) as long as the task
-stayed. No missile was fired during the test.
-
-## Turns toward red flown as an attack (--hot-turn)
-
-So since bridge version 5 a turn *toward* RED-1 can be flown that way
-(`OPT hotturn`): when the policy commands a heading within 15° of RED-1's
-bearing and BLUE-1 is more than 30° off it, the bridge gives BLUE-1 the
-guns-only attack task, and gives the route back once BLUE-1 is within 10°
-of the commanded heading (or after 30 s). A fire request ends the turn
-first, then the shot goes out. An attack can only turn toward RED-1: a
-crank, beam or drag away is still flown on the route (1.6°/s), and a
-missile defence by `--auto-defend`.
-
-| Turn the policy asks for | DCS before | With `--hot-turn` |
-|---|---|---|
-| back hot (0 / ±15°) after a crank, beam or drag | 1.6°/s | about 7°/s |
-| defending against a missile | `--auto-defend` | unchanged |
-| crank or beam away (±40-135°) | 1.6°/s | 1.6°/s |
-
-The simulator does the same for a platform with **`HOT_TURN_BANK`**: such a
-turn is flown at that bank. F-16C-DCSAI-AD has 77°, which gives 6.9°/s at
-340 m/s and 4.4 g (74° gave 5.6, 80° 8.4); every other turn keeps its
-45°. `dcs_live.py` turns `OPT hotturn` on by itself for such a platform
-(or use `--hot-turn`), says how many turns were flown as an attack, and
-`results.csv` gets `hot_turn`, `hot_turns` and `hot_turn_s`.
-
-To check that the bridge does it right in DCS (rebuild the mission first):
-
-```
-python dcs\make_mission.py --range-km 160 --out dcs\bvr_rl_turntest.miz
-python dcs\turn_test.py --variants hotturn
-```
-
-It commands the heading to RED-1 with RED-1 off a wing and reports, for
-each turn, when the bridge started and ended the attack. At the end of any
-turn test RED-1 still holds its fire and BLUE-1 flies on along its last
-route (given back to its own AI it would attack, and so would a freed
-RED-1): end the mission in DCS.
+In the simulator (`--sim`) the attack turn is flown at the airframe's full
+agility (about 9°/s with 80° of bank): what the policy would get. If DCS
+turns anywhere near that, the bridge can attack-steer the policy's big
+heading changes; if not, the stick-and-throttle link (`Export.lua`, for a
+player-flown F-16C) is the way.
 
 ## Letting the DCS AI defend BLUE-1 (--auto-defend)
 
@@ -444,7 +405,7 @@ checkpoint):
 
 ```
 python train_bvr.py --platform F-16C-DCSAI-AD --opponent-platform F-16C-DCS ...
-python dcs\make_mission.py              # once: bridge version 5
+python dcs\make_mission.py              # once: bridge version 4
 python dcs_live.py models_bvr\<model>.zip --platform F-16C-DCSAI-AD --opp-platform F-16C-DCS --speed-boost
 ```
 
@@ -584,14 +545,9 @@ OPT wpt <turn|flyover>    (turn_test.py: the route points' type)
 OPT redhold <0|1>         (turn_test.py: an AI red holds its fire)
 OPT autodefend <0|1>      (--auto-defend: the DCS AI defends BLUE-1 while a missile is inbound)
 OPT hot <0|1>             (turn_test.py: an attack task on red, guns only)
-OPT hotturn <0|1>         (--hot-turn: turns toward red flown as such an attack)
                           (each answered with {"ev":"bridge", "status":"opt", "near_m", "wpt",
-                           "redhold", "autodefend", "hot", "hotturn"})
+                           "redhold", "autodefend", "hot"})
 ```
-
-A turn flown as an attack is announced with
-`{"ev":"bridge", "status":"hotturn", "on":true}` (and `false` when the
-route is back).
 
 While it defends BLUE-1 the bridge sends
 `{"ev":"bridge", "status":"defend", "on":true}` (and `false` when it hands
@@ -600,7 +556,7 @@ attack task flies).
 
 The header's `bridge` is the version: 2 understands OPT eta, 3 OPT near,
 wpt and redhold, 4 OPT autodefend and hot (and no aircraft goes home at
-bingo fuel), 5 OPT hotturn.
+bingo fuel).
 
 Commands are re-sent every second; the bridge re-issues the AI's route only
 when the command changes (2° of heading, 50 m, 1 m/s) or every 10 s.

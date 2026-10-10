@@ -48,7 +48,6 @@ class FakeDcs:
     # time dcs_live.py put on its last command, but never longer than WAIT_MAX_S.
     LOCKSTEP_LEAD = 3.0
     WAIT_MAX_S = 30.0
-    HOT_TURN_BANK_DEG = 77.0  # OPT hot / hotturn for a platform without HOT_TURN_BANK
 
     def __init__(self, opponent="SHOOTER", seed=0, speed=4.0, platform=DEFAULT_PLATFORM,
                  opp_platform=DEFAULT_PLATFORM, names=("BLUE-1", "RED-1"), host="127.0.0.1",
@@ -90,17 +89,14 @@ class FakeDcs:
         hold = (float(s.get("psi", 0.0)), float(s.get("alt", 9000.0)), float(s.get("speed", 280.0)))
         cmd, controlled, last_seq, fire_at, fired_seq = hold, False, -1, None, None
         # The bridge version whose commands this fake answers (OPT eta, near,
-        # wpt, redhold, autodefend, hot, hotturn). It confirms them as the bridge does;
+        # wpt, redhold, autodefend, hot). It confirms them as the bridge does;
         # only autodefend changes anything here (the simulator's automatic
         # defence stands in for the DCS AI's): its blue flies the simulator's
         # autopilot, and its opponent is a scripted one.
         header = {"format": FORMAT, "rate": self.RATE, "t0": self.T(), "theatre": "fake",
-                  "bridge": 5, "agent": self.names[0], "red": self.names[1]}
-        opt = {"near_m": 3000, "wpt": "turn", "redhold": False, "autodefend": False, "hot": False,
-               "hotturn": False}
-        defending = hot_turning = False
-        # OPT hot and hotturn fly at the platform's hot-turn bank, or this (DCS: 7 deg/s, 4 g).
-        hot_bank = w.hot_turn[0] or math.radians(self.HOT_TURN_BANK_DEG)
+                  "bridge": 4, "agent": self.names[0], "red": self.names[1]}
+        opt = {"near_m": 3000, "wpt": "turn", "redhold": False, "autodefend": False, "hot": False}
+        defending = False
         self.send(header)
         for i in (1, 2):
             self.send(sim_ammo(w, self.names, i, self.T()))
@@ -133,7 +129,7 @@ class FakeDcs:
                         if msg[1] == "eta":
                             self.send({"ev": "bridge", "t": self.T(), "status": "eta",
                                        "clock": msg[2] if msg[2] in ("mission", "abs") else "off"})
-                        elif msg[1] in ("near", "wpt", "redhold", "autodefend", "hot", "hotturn"):
+                        elif msg[1] in ("near", "wpt", "redhold", "autodefend", "hot"):
                             if msg[1] == "near":
                                 opt["near_m"] = float(msg[2])
                             elif msg[1] == "wpt":
@@ -141,7 +137,6 @@ class FakeDcs:
                             else:
                                 opt[msg[1]] = msg[2] == "1"
                             w.auto_defend[0] = opt["autodefend"]
-                            w.hot_turn[0] = hot_bank if opt["hotturn"] else 0.0
                             self.send({"ev": "bridge", "t": self.T(), "status": "opt", **opt})
                         continue
                     if msg[0] != "CMD" or len(msg) < 6:
@@ -175,11 +170,10 @@ class FakeDcs:
                 pkt.update({"hdgCmd": hdg % (2 * math.pi), "altTarget": alt, "V": spd})
                 if opt["hot"] and w.alive[1]:
                     # As OPT hot: an attack on red, so straight for it at the
-                    # platform's hot-turn bank (HOT_TURN_BANK; without one, the
-                    # airframe's full agility), not the route's 45 deg.
+                    # airframe's full agility, not the route's 45 deg of bank.
                     d = w.pos(2) - w.pos(1)
                     pkt.update({"hdgCmd": math.atan2(d[0], d[1]) % (2 * math.pi),
-                                "bankMax": hot_bank, "climbMach": 0.0})
+                                "bankMax": 0.0, "climbMach": 0.0})
                 fire = fire_at is not None and w.t_sim >= fire_at
                 n_before = env._shots_fired
                 env._advance(self.RATE, pkt, fire=fire and w.wpn[0] > 0 and w.alive[1])
@@ -192,9 +186,6 @@ class FakeDcs:
                 if w.defending[0] != defending:      # as the bridge: start and end of a defence
                     defending = w.defending[0]
                     self.send({"ev": "bridge", "t": self.T(), "status": "defend", "on": defending})
-                if w.hot_turning[0] != hot_turning:  # ... and of a turn toward red
-                    hot_turning = w.hot_turning[0]
-                    self.send({"ev": "bridge", "t": self.T(), "status": "hotturn", "on": hot_turning})
                 if w.t_sim - t_resend >= 2.0:       # as the bridge: for a late listener
                     t_resend = w.t_sim
                     self.send(header)

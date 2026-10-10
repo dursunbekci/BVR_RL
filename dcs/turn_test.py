@@ -13,8 +13,6 @@ turns, for several ways of building the route:
     far_only     no first point: only the far one, 60 km ahead
     flyover1000  first point 1 km ahead, both points "Fly Over Point"
     hot          no route: an attack task on red, guns only (bridge OPT hot)
-    hotturn      the bridge's own hot turns (OPT hotturn): the heading to red is
-                 commanded and the bridge flies the turn as such an attack
 
 Each route variant flies three turns from the heading it starts on: 90 deg
 right, back 90 left, then 170 right. The hot variant first flies (on the
@@ -23,19 +21,12 @@ measures the turn to red; then the same off the other wing. Is an AI that
 attacks a turn harder than one following a route? Red is far away (the test
 stops if it comes within 25 km) and holds its fire throughout. Every variant
 but hot runs by default, about 15 minutes of mission time (less if the turns
-are fast); use DCS time acceleration if you like. The hotturn variant does
-what hot does, but by commanding the heading to red and leaving the attack to
-the bridge, as dcs_live.py does: a check that the bridge's hot turns work.
-
-At the end RED-1 still holds its fire and BLUE-1 flies on along its last
-route (it is not given back to its own AI, which would attack): end the
-mission when you like.
+are fast); use DCS time acceleration if you like.
 
     python dcs/turn_test.py                          # every variant, in DCS
     python dcs/turn_test.py --variants base far_only
     python dcs/turn_test.py --speed 280 --alt 6000   # another flight condition
     python dcs/turn_test.py --variants hot           # the attack-task turn (bridge 4)
-    python dcs/turn_test.py --variants hotturn       # the bridge's own hot turns (bridge 5)
     python dcs/turn_test.py --sim                    # the same turns in BVR_RL's simulator
 
 Needs a mission built with bridge version 3 or later (python dcs/make_mission.py),
@@ -62,7 +53,6 @@ import numpy as np                                        # noqa: E402
 G = 9.80665
 OPT_BRIDGE = 3            # bridge version with OPT near / wpt / redhold
 HOT_BRIDGE = 4            # ... and OPT hot
-HOTTURN_BRIDGE = 5        # ... and OPT hotturn
 
 VARIANTS = {
     "base":        {"near": 3000, "wpt": "turn"},
@@ -70,9 +60,8 @@ VARIANTS = {
     "far_only":    {"near": 0,    "wpt": "turn"},
     "flyover1000": {"near": 1000, "wpt": "flyover"},
     "hot":         {"near": 3000, "wpt": "turn", "hot": True},
-    "hotturn":     {"near": 3000, "wpt": "turn", "hot": True, "auto": True},
 }
-DEFAULT_VARIANTS = [v for v, var in VARIANTS.items() if not var.get("hot")]
+DEFAULT_VARIANTS = [v for v in VARIANTS if v != "hot"]
 TURNS = [+90.0, -90.0, +170.0]    # each from the heading the previous one aimed at
 HOT_SIDES = [+90.0, -90.0]        # hot: red this far right (+) / left of the nose, then attack
 HOT_MIN_RANGE = 25_000.0          # hot: stop before the attack gets anywhere near gun range
@@ -168,7 +157,6 @@ class TurnTest:
     def __init__(self, link, agent, t0, variants, speed, alt, boost, log=print, red=None):
         self.link, self.agent, self.red, self.log = link, agent, red, log
         self.red_pos = None                    # red's last position (DCS x north, z east)
-        self.hotturn_ev = []                   # (t, on): the bridge's hot turns
         self.variants, self.speed, self.alt, self.boost = variants, speed, alt, boost
         self.samples, self.acks = [], []
         self.t, self.seq, self.t_sent, self.boosting = t0, 0, -1e9, False
@@ -178,8 +166,6 @@ class TurnTest:
         for d in self.link.poll(timeout):
             if d.get("ev") == "bridge" and d.get("status") == "opt":
                 self.acks.append(d)
-            elif d.get("ev") == "bridge" and d.get("status") == "hotturn":
-                self.hotturn_ev.append((float(d["t"]), bool(d.get("on"))))
             elif d.get("ev") == "mission_end":
                 self.ended = True
             elif d.get("ev") == "dead" and d.get("unit") == self.agent:
@@ -231,15 +217,15 @@ class TurnTest:
                 return True
         return False
 
-    def flag(self, name, on):
-        """OPT hot or OPT hotturn until the bridge confirms it (≤ 10 s)."""
+    def hot(self, on):
+        """OPT hot until the bridge confirms it (≤ 10 s)."""
         n0, t_end = len(self.acks), self.t + 10.0
         while self.t < t_end and not self.ended:
-            self.link.send(f"OPT {name} {int(on)}")
+            self.link.send(f"OPT hot {int(on)}")
             for _ in range(5):
                 self.pump()
             a = self.acks[-1] if len(self.acks) > n0 else None
-            if a and bool(a.get(name)) == on:
+            if a and bool(a.get("hot")) == on:
                 return True
         return False
 
@@ -252,13 +238,8 @@ class TurnTest:
         return math.degrees(math.atan2(de, dn)) % 360.0, math.hypot(dn, de)
 
     def run_hot(self, name, var):
-        """Red off one wing on the route, then the attack task: how fast to red?
-        hot: the test gives the attack task; hotturn: it commands the heading to
-        red and the bridge does (OPT hotturn)."""
-        rows, auto = [], bool(var.get("auto"))
-        if auto and not self.flag("hotturn", True):
-            self.log(f"  {name}: the bridge did not confirm OPT hotturn (version 5?); skipped")
-            return rows
+        """Red off one wing on the route, then the attack task: how fast to red?"""
+        rows = []
         for side in HOT_SIDES:
             brg, rng = self.to_red()
             if brg is None or rng < HOT_MIN_RANGE:
@@ -278,17 +259,13 @@ class TurnTest:
                         break
                 else:
                     held = None
-            if not auto and not self.flag("hot", True):
+            if not self.hot(True):
                 self.log(f"  {name}: the bridge did not confirm OPT hot; skipped")
                 break
             h_from, t_cmd = self.samples[-1]["hdg"], self.t
             delta = wrap(self.to_red()[0] - h_from)
             limit, held = t_cmd + TURN_TIMEOUT(delta), None
-            n_ev = len(self.hotturn_ev)
             while self.t < limit and not self.ended:
-                if auto:
-                    self.t_sent = -1e9                 # the new heading at once
-                    self.command(self.to_red()[0])
                 self.pump()
                 brg, rng = self.to_red()
                 if rng < HOT_MIN_RANGE:
@@ -299,22 +276,14 @@ class TurnTest:
                         break
                 else:
                     held = None
-            if not auto:
-                self.flag("hot", False)
+            self.hot(False)
             m = measure(self.samples, t_cmd, self.t, h_from, delta)
             if m:
-                m.update(variant=name, near_m=var["near"], wpt="hotturn" if auto else "attack")
+                m.update(variant=name, near_m=var["near"], wpt="attack")
                 rows.append(m)
                 self._log_turn(m)
-                if auto:
-                    ev = self.hotturn_ev[n_ev:]
-                    self.log("    the bridge flew it as an attack: " + (
-                        f"from {ev[0][0] - t_cmd:+.1f} s to {ev[1][0] - t_cmd:+.1f} s"
-                        if len(ev) >= 2 else "started, not ended" if ev else "NO (check the bridge)"))
             if self.ended:
                 break
-        if auto:
-            self.flag("hotturn", False)
         return rows
 
     def _log_turn(self, m):
@@ -369,17 +338,12 @@ class TurnTest:
             if self.ended:
                 self.log("  the mission ended (or BLUE-1 was lost): stopping")
                 break
-        end_test(self.link, self.log)
+        for _ in range(3):
+            if "hot" in self.variants:
+                self.link.send("OPT hot 0")
+            self.link.send("OPT redhold 0")
+            self.link.send("STOP")
         return rows
-
-
-def end_test(link, log=print):
-    """RED-1 keeps holding its fire and BLUE-1 flies on along its last route:
-    given back to its own AI (STOP) it would attack, and RED-1 freed would too."""
-    for _ in range(3):
-        link.send("OPT hot 0")
-        link.send("OPT hotturn 0")
-    log("the test is over: RED-1 holds its fire and BLUE-1 flies on; end the mission in DCS")
 
 
 FIELDS = ["run", "mode", "variant", "near_m", "wpt", "turn_deg", "speed_mps", "alt_m", "t50_s",
@@ -409,8 +373,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--variants", nargs="+", default=DEFAULT_VARIANTS, choices=list(VARIANTS),
-                    help=f"default: {' '.join(DEFAULT_VARIANTS)} (hot and hotturn only when "
-                         f"asked for)")
+                    help=f"default: {' '.join(DEFAULT_VARIANTS)} (hot only when asked for)")
     ap.add_argument("--speed", type=float, default=340.0, help="commanded speed, m/s (default 340)")
     ap.add_argument("--alt", type=float, default=None,
                     help="commanded altitude, m (default: BLUE-1's at the start)")
@@ -446,11 +409,10 @@ def main(argv=None):
             raise SystemExit(f"this mission's bridge is version {bridge}; the turn test needs "
                              f"{OPT_BRIDGE}. Rebuild it (python dcs\\make_mission.py) and open the new "
                              f"mission in DCS.")
-        for v, need in (("hot", HOT_BRIDGE), ("hotturn", HOTTURN_BRIDGE)):
-            if v in args.variants and bridge < need:
-                raise SystemExit(f"this mission's bridge is version {bridge}; the {v} variant needs "
-                                 f"{need}. Rebuild it (python dcs\\make_mission.py) and open the new "
-                                 f"mission in DCS.")
+        if "hot" in args.variants and bridge < HOT_BRIDGE:
+            raise SystemExit(f"this mission's bridge is version {bridge}; the hot variant needs "
+                             f"{HOT_BRIDGE}. Rebuild it (python dcs\\make_mission.py) and open the new "
+                             f"mission in DCS.")
         link.sink = lambda line: raw.write(line + "\n")
         u = rec.units[agent]
         alt = args.alt if args.alt is not None else round(float(u.get("y", 9000.0)) / 100.0) * 100.0
@@ -461,7 +423,10 @@ def main(argv=None):
         rows = test.run()
     except KeyboardInterrupt:
         print("\nstopped")
-        end_test(link)
+        for _ in range(3):
+            link.send("OPT hot 0")
+            link.send("OPT redhold 0")
+            link.send("STOP")
     finally:
         link.sink = None
         raw.close()
