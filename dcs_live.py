@@ -94,7 +94,7 @@ class DcsLiveWorld(DcsReplayWorld):
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
                  shadow=False, log=print, support_rule="training", speed_boost=None,
-                 eta_lock=None, auto_defend=False):
+                 eta_lock=None):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
         self.link, self.shadow, self.log = link, bool(shadow), log
@@ -119,14 +119,6 @@ class DcsLiveWorld(DcsReplayWorld):
         # from the commanded speed; a DCS AI uses afterburner to make a time.
         self.eta_lock = eta_lock
         self.eta_ack = None      # the bridge's confirmation of OPT eta
-        # --auto-defend (or a platform with AUTO_DEFEND): while a missile is
-        # inbound at BLUE-1 the bridge hands it to the DCS AI, which defends it
-        # at its full agility; the policy's commands resume when it is gone.
-        self.auto_defend = bool(auto_defend)
-        self.defend_ack = None   # the bridge's confirmation of OPT autodefend
-        self.t_defend_opt = -math.inf
-        self.defending = False
-        self.defences = 0        # times the DCS AI took over
         self._supported = {}                 # missile id -> last time it had support
         self._destroy_sent = {}              # missile id -> last DESTROY sent
         self.support_log = []                # (t_sim, missile id, shooter, status)
@@ -166,18 +158,6 @@ class DcsLiveWorld(DcsReplayWorld):
                              + (f": {d.get('reason')}" if d.get("reason") else ""))
             elif d.get("ev") == "bridge" and d.get("status") == "eta":
                 self.eta_ack = d.get("clock")
-            elif d.get("ev") == "bridge" and d.get("status") == "opt":
-                if "autodefend" in d:
-                    self.defend_ack = bool(d.get("autodefend"))
-            elif d.get("ev") == "bridge" and d.get("status") == "defend":
-                on = bool(d.get("on"))
-                if on and not self.defending:
-                    self.defences += 1
-                if on != self.defending:
-                    self.log(f"  {float(d['t']) - self.t0:.1f} s: " +
-                             ("missile inbound: the DCS AI defends BLUE-1" if on else
-                              "missile gone: the policy flies again"))
-                self.defending = on
             elif d.get("ev") == "support_lost":
                 self.support_log.append((round(float(d["t"]) - self.t0, 1), d.get("id"),
                                          d.get("shooter"), d.get("status")))
@@ -227,10 +207,6 @@ class DcsLiveWorld(DcsReplayWorld):
         self.seq += 1
         if self.eta_lock:            # sent with every command: UDP may lose one
             self.link.send(f"OPT eta {self.eta_lock}")
-        # Until the bridge confirms it, with every command; then now and then.
-        if self.auto_defend and (not self.defend_ack or self.t - self.t_defend_opt >= 10.0):
-            self.link.send("OPT autodefend 1")
-            self.t_defend_opt = self.t
         # The trailing mission time is ignored by the bridge; fake_dcs.py --lockstep
         # uses it to wait for us.
         self.link.send(f"CMD {self.seq} {hdg:.2f} {alt:.1f} {spd:.1f} {1 if fire else 0} {self.t:.1f}")
@@ -255,12 +231,6 @@ class DcsLiveWorld(DcsReplayWorld):
         self._t_prev = self.t
         tlm = self.telemetry()                 # also latches which seekers are active
         self._check_support(cmd1, cmd2)
-        return tlm
-
-    def telemetry(self, me: int = 1) -> dict:
-        tlm = super().telemetry(me)
-        if me == 1:
-            tlm["defending"] = int(self.defending)    # holds the policy's fire (BvrEnv._can_fire)
         return tlm
 
     def _check_support(self, cmd1, cmd2=None):
@@ -397,9 +367,6 @@ def wait_for_fight(link, agent=None, red=None, after_t=None, log=print):
 
 # Bridge version that understands OPT eta (--eta-lock).
 ETA_BRIDGE = 2
-# ... and OPT autodefend (--auto-defend), and keeps both aircraft from flying
-# home at bingo fuel.
-DEFEND_BRIDGE = 4
 
 # A decision counts as "short" when BLUE-1 flies this much below its commanded speed.
 SPEED_SHORT_MPS = 30.0
@@ -446,9 +413,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     env = DcsLiveEnv(lambda bp, rp: DcsLiveWorld(link, rec, agent, red, bp, rp,
                                                  shadow=args.shadow, log=log, support_rule=rule,
                                                  speed_boost=getattr(args, "speed_boost", None),
-                                                 eta_lock=getattr(args, "eta_lock", None),
-                                                 auto_defend=bool(getattr(args, "auto_defend", False))
-                                                 or bp.auto_defend),
+                                                 eta_lock=getattr(args, "eta_lock", None)),
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
@@ -470,13 +435,6 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     if getattr(args, "eta_lock", None) and bridge_v < ETA_BRIDGE and not args.shadow:
         log(f"  WARNING: this mission's bridge (version {bridge_v}) ignores --eta-lock; rebuild "
             f"the mission (python dcs\\make_mission.py) and open the new file in DCS")
-    if world.auto_defend and bridge_v < DEFEND_BRIDGE and not args.shadow:
-        log(f"  WARNING: this mission's bridge (version {bridge_v}) cannot defend BLUE-1 "
-            f"(--auto-defend, or the platform's AUTO_DEFEND); rebuild the mission "
-            f"(python dcs\\make_mission.py) and open the new file in DCS")
-    elif world.auto_defend and not args.shadow:
-        log("  auto-defend: the DCS AI defends BLUE-1 while a missile is inbound")
-    defend_steps = 0
     spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
     try:
         while True:
@@ -486,7 +444,6 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             sobs = stacker.update(obs)
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
             world.boost_steps += int(world._boosting)    # once per decision, not per frame
-            defend_steps += int(world.defending)
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
             wr.writerow([round(env._t_sim, 1), HDG_OFFSETS_DEG[a[0]], ALT_DELTAS_M[a[1]],
@@ -522,9 +479,6 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                speed_boost=world.speed_boost or "", eta_lock=world.eta_lock or "",
                eta_confirmed=(world.eta_ack == world.eta_lock) if world.eta_lock else "",
                bridge_version=bridge_v,
-               auto_defend=int(world.auto_defend),
-               defences=world.defences if world.auto_defend else "",
-               defend_s=round(defend_steps / env.DECISION_HZ, 1) if world.auto_defend else "",
                speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
                if spd and world.speed_boost else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
@@ -538,11 +492,6 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         if world.eta_lock and world.eta_ack != world.eta_lock:
             log(f"  --eta-lock was NOT confirmed by the bridge (bridge version {bridge_v}): "
                 f"DCS flew without locked arrival times; rebuild the mission")
-        if world.auto_defend:
-            log(f"  auto-defend: the DCS AI defended BLUE-1 {world.defences} time(s), "
-                f"{row['defend_s']:.0f} s in all"
-                + ("" if world.defend_ack else
-                   "  <- the bridge never confirmed OPT autodefend: rebuild the mission"))
         if world.speed_boost:
             log(f"  speed boost: asked DCS for {world.speed_boost:.0f} m/s "
                 f"{row['speed_boosted_pct']:.0f}% of the time")
@@ -575,10 +524,6 @@ def main(argv=None):
                     help="give the route's points locked arrival times from the commanded speed, "
                          "so the DCS AI uses afterburner to make them (rebuild the mission first). "
                          "mission (default): times on the mission clock; abs: on the time of day")
-    ap.add_argument("--auto-defend", action="store_true",
-                    help="while a missile is inbound at BLUE-1 the DCS AI defends it at its full "
-                         "agility (beam, dive, chaff), then hands it back to the policy; on by "
-                         "default for a platform with AUTO_DEFEND (F-16C-DCSAI-AD). Bridge 4")
     ap.add_argument("--doctrine", default="BALANCED")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)

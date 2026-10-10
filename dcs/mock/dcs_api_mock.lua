@@ -13,7 +13,7 @@ Weapon = {Category = {SHELL = 0, MISSILE = 1, ROCKET = 2, BOMB = 3}, MissileCate
 Group = {Category = {AIRPLANE = 0, HELICOPTER = 1}}
 AI = {Option = {Air = {
   id = {NO_OPTION = -1, ROE = 0, REACTION_ON_THREAT = 1, RADAR_USING = 3, FLARE_USING = 4,
-        RTB_ON_BINGO = 6, PROHIBIT_JETT = 15, PROHIBIT_AB = 16, MISSILE_ATTACK = 18},
+        PROHIBIT_JETT = 15, PROHIBIT_AB = 16, MISSILE_ATTACK = 18},
   val = {ROE = {WEAPON_FREE = 0, OPEN_FIRE_WEAPON_FREE = 1, OPEN_FIRE = 2, RETURN_FIRE = 3, WEAPON_HOLD = 4},
          REACTION_ON_THREAT = {NO_REACTION = 0, PASSIVE_DEFENCE = 1, EVADE_FIRE = 2, BYPASS_AND_ESCAPE = 3, ALLOW_ABORT_MISSION = 4},
          RADAR_USING = {NEVER = 0, FOR_ATTACK_ONLY = 1, FOR_SEARCH_IF_REQUIRED = 2, FOR_CONTINUOUS_SEARCH = 3},
@@ -76,22 +76,6 @@ coalition = {side = {NEUTRAL = 0, RED = 1, BLUE = 2},
     local u = side == 1 and red or blue
     return {u:getGroup()}
   end}
-
--- A red missile aimed at blue (auto-defend tests): MOCK_RED_SHOT() fires it,
--- MOCK_RED_GONE() ends it.
-function MOCK_RED_SHOT()
-  local m = {x = red.x, y = red.y, z = red.z, alive = true, id_ = 888, v = {x = 0, y = 0, z = 0}}
-  function m:isExist() return self.alive end
-  function m:getDesc() return {category = 1, missileCategory = 1} end
-  function m:getTypeName() return "AIM_120C" end
-  function m:getTarget() return blue end
-  function m:getPoint() return {x = self.x, y = self.y, z = self.z} end
-  function m:getVelocity() return self.v end
-  function m:destroy() self.alive = false end
-  RED_MSL = m
-  HANDLER:onEvent({id = world.event.S_EVENT_SHOT, initiator = red, weapon = m, time = T})
-end
-function MOCK_RED_GONE() if RED_MSL then RED_MSL.alive = false end end
 
 local msl
 local attack_since

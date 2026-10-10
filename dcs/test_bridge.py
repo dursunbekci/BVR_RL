@@ -202,7 +202,7 @@ def test_bridge_eta():
     assert absolute[1].ETA_locked and abs(absolute[1].ETA - (43200.0 + 20.0 + near / 340.0)) < 0.2
     assert off[1].speed_locked and not off[1].ETA_locked
     lines = [json.loads(d) for p, d in sent if p == 15301]
-    assert lines[0].get("bridge") == 4, lines[0]           # dcs_live.py checks the version
+    assert lines[0].get("bridge") == 3, lines[0]           # dcs_live.py checks the version
     acks = [d["clock"] for d in lines if d.get("ev") == "bridge" and d.get("status") == "eta"]
     assert acks == ["mission", "abs", "off"], acks
     print(f"  bridge ETA lock ............. OK  (point 1 due {mission[1].ETA:.1f} s at 340 m/s)")
@@ -259,59 +259,6 @@ def test_bridge_opts():
     print(f"  bridge turn-test options .... OK  ({len(acks)} confirmations)")
 
 
-def test_bridge_autodefend():
-    """OPT autodefend: while a red missile is inbound at the agent the DCS AI
-    defends it (evade), routes wait and a shot is refused; when it is gone, the
-    route is back. OPT hot pushes a guns-only attack task and pops it. Neither
-    aircraft returns home at bingo fuel."""
-    L = lua()
-    sent, inbox = [], []
-
-    class Udp:
-        def settimeout(self, t): pass
-        def setsockname(self, h, p): return 1
-        def sendto(self, data, h, p): sent.append((p, data)); return len(data)
-        def receive(self, *a): return inbox.pop(0) if inbox else None
-
-    class Sock:
-        def udp(self): return Udp()
-
-    plan = {5.0: ["CMD 1 90 10000 300 0"], 6.0: ["OPT autodefend 1", "CMD 2 90 10000 300 0"],
-            12.0: ["CMD 3 120 10000 300 1"], 25.0: ["CMD 4 120 10000 300 0"],
-            30.0: ["OPT hot 1"], 35.0: ["OPT hot 0", "CMD 5 120 10000 300 0"]}
-    calls = {10.0: "MOCK_RED_SHOT", 20.0: "MOCK_RED_GONE"}
-
-    def on_tick(T):
-        for t in list(plan):
-            if T >= t - 1e-9:
-                inbox.extend(plan.pop(t))
-        for t in list(calls):
-            if T >= t - 1e-9:
-                L.globals()[calls.pop(t)]()
-
-    with open(os.path.join(HERE, "mock", "dcs_api_mock.lua")) as fh:
-        L.execute(fh.read())
-    L.globals().bvr_rl_socket = Sock()
-    L.globals().RUN(os.path.join(HERE, "bvr_bridge.lua"), 40.0, on_tick)
-    log = L.globals().LOG
-    LOG = [tuple(log[i].values()) for i in range(1, len(log) + 1)]
-    lines = [json.loads(d) for p, d in sent if p == 15301]
-    defend = [(round(d["t"], 1), d["on"]) for d in lines if d.get("ev") == "bridge" and d.get("status") == "defend"]
-    assert [on for _, on in defend] == [True, False], defend
-    assert 10.0 <= defend[0][0] <= 10.3 and 20.0 <= defend[1][0] <= 20.3, defend
-    react = [x[3] for x in LOG if x[0] == "Viper-1" and x[1] == "opt" and x[2] == 1]
-    assert react[-2:] == [2, 0], react                    # evade fire, then no reaction again
-    refused = [d for d in lines if d.get("ev") == "fire" and d.get("status") == "refused"]
-    assert refused and refused[0]["reason"] == "defending", refused
-    bingo = {x[0] for x in LOG if x[1] == "opt" and x[2] == 6 and x[3] is False}
-    assert bingo == {"Viper-1", "Bandit-1"}, bingo        # no return home at bingo fuel
-    pushes = [x[2] for x in LOG if x[0] == "Viper-1" and x[1] == "pushTask"]
-    assert any(t.id == "AttackUnit" and t.params.weaponType == 805306368 for t in pushes), pushes
-    assert any(x[0] == "Viper-1" and x[1] == "popTask" for x in LOG)
-    print(f"  bridge auto-defend .......... OK  (defending {defend[0][0]}-{defend[1][0]} s; "
-          f"hot attack task; no bingo return)")
-
-
 def test_setup_patch():
     import setup_dcs
     L = lua()
@@ -336,6 +283,5 @@ if __name__ == "__main__":
     test_bridge_destroy()
     test_bridge_eta()
     test_bridge_opts()
-    test_bridge_autodefend()
     test_setup_patch()
-    print("6/6 passed")
+    print("5/5 passed")

@@ -12,25 +12,18 @@ turns, for several ways of building the route:
     near1000     first point 1 km ahead
     far_only     no first point: only the far one, 60 km ahead
     flyover1000  first point 1 km ahead, both points "Fly Over Point"
-    hot          no route: an attack task on red, guns only (bridge OPT hot)
 
-Each route variant flies three turns from the heading it starts on: 90 deg
-right, back 90 left, then 170 right. The hot variant first flies (on the
-route) to put red 90 deg off one wing, then gives BLUE-1 the attack task and
-measures the turn to red; then the same off the other wing. Is an AI that
-attacks a turn harder than one following a route? Red is far away (the test
-stops if it comes within 25 km) and holds its fire throughout. Every variant
-but hot runs by default, about 15 minutes of mission time (less if the turns
-are fast); use DCS time acceleration if you like.
+Each variant flies three turns from the heading it starts on: 90 deg right,
+back 90 left, then 170 right. Red holds its fire throughout. All four
+variants run in one mission, about 15 minutes of mission time (less if the
+turns are fast); use DCS time acceleration if you like.
 
     python dcs/turn_test.py                          # every variant, in DCS
     python dcs/turn_test.py --variants base far_only
     python dcs/turn_test.py --speed 280 --alt 6000   # another flight condition
-    python dcs/turn_test.py --variants hot           # the attack-task turn (bridge 4)
     python dcs/turn_test.py --sim                    # the same turns in BVR_RL's simulator
 
-Needs a mission built with bridge version 3 or later (python dcs/make_mission.py),
-4 for the hot variant.
+Needs a mission built with bridge version 3 or later (python dcs/make_mission.py).
 Writes dcs_runs/turn_<time>.jsonl (everything DCS sent) and appends one row
 per turn to dcs_runs/turn_test.csv; prints a table.
 """
@@ -52,19 +45,14 @@ import numpy as np                                        # noqa: E402
 
 G = 9.80665
 OPT_BRIDGE = 3            # bridge version with OPT near / wpt / redhold
-HOT_BRIDGE = 4            # ... and OPT hot
 
 VARIANTS = {
     "base":        {"near": 3000, "wpt": "turn"},
     "near1000":    {"near": 1000, "wpt": "turn"},
     "far_only":    {"near": 0,    "wpt": "turn"},
     "flyover1000": {"near": 1000, "wpt": "flyover"},
-    "hot":         {"near": 3000, "wpt": "turn", "hot": True},
 }
-DEFAULT_VARIANTS = [v for v in VARIANTS if v != "hot"]
 TURNS = [+90.0, -90.0, +170.0]    # each from the heading the previous one aimed at
-HOT_SIDES = [+90.0, -90.0]        # hot: red this far right (+) / left of the nose, then attack
-HOT_MIN_RANGE = 25_000.0          # hot: stop before the attack gets anywhere near gun range
 SETTLE_S = 10.0                   # straight and level before a variant's first turn
 DONE_DEG = 5.0                    # a turn is done within this of its heading ...
 DONE_HOLD_S = 3.0                 # ... held this long
@@ -87,7 +75,6 @@ def sample(t, u):
     right = np.cross(f, up)                      # x north, y up, z east: f x up points right
     bank = math.degrees(math.atan2(-right[1], up[1]))
     return {"t": float(t), "hdg": math.degrees(math.atan2(v[2], v[0])) % 360.0,
-            "x": float(u["x"]), "z": float(u["z"]),
             "spd": float(np.linalg.norm(v)), "alt": float(u["y"]), "bank": bank,
             "v": v, "up": up}
 
@@ -154,9 +141,8 @@ def measure(samples, t_cmd, t_end, h_from, delta):
 
 # ── the test ──────────────────────────────────────────────────────────
 class TurnTest:
-    def __init__(self, link, agent, t0, variants, speed, alt, boost, log=print, red=None):
-        self.link, self.agent, self.red, self.log = link, agent, red, log
-        self.red_pos = None                    # red's last position (DCS x north, z east)
+    def __init__(self, link, agent, t0, variants, speed, alt, boost, log=print):
+        self.link, self.agent, self.log = link, agent, log
         self.variants, self.speed, self.alt, self.boost = variants, speed, alt, boost
         self.samples, self.acks = [], []
         self.t, self.seq, self.t_sent, self.boosting = t0, 0, -1e9, False
@@ -171,9 +157,6 @@ class TurnTest:
             elif d.get("ev") == "dead" and d.get("unit") == self.agent:
                 self.ended = True
             elif "units" in d:
-                r = next((u for u in d["units"] if u.get("name") == self.red), None)
-                if r is not None:
-                    self.red_pos = (float(r["x"]), float(r["y"]), float(r["z"]))
                 u = next((u for u in d["units"] if u.get("name") == self.agent), None)
                 if u is not None:
                     s = sample(d["t"], u)
@@ -217,82 +200,6 @@ class TurnTest:
                 return True
         return False
 
-    def hot(self, on):
-        """OPT hot until the bridge confirms it (≤ 10 s)."""
-        n0, t_end = len(self.acks), self.t + 10.0
-        while self.t < t_end and not self.ended:
-            self.link.send(f"OPT hot {int(on)}")
-            for _ in range(5):
-                self.pump()
-            a = self.acks[-1] if len(self.acks) > n0 else None
-            if a and bool(a.get("hot")) == on:
-                return True
-        return False
-
-    def to_red(self):
-        """Bearing (deg) and range (m) from BLUE-1 to red."""
-        if self.red_pos is None or not self.samples:
-            return None, None
-        b = self.samples[-1]
-        dn, de = self.red_pos[0] - b["x"], self.red_pos[2] - b["z"]
-        return math.degrees(math.atan2(de, dn)) % 360.0, math.hypot(dn, de)
-
-    def run_hot(self, name, var):
-        """Red off one wing on the route, then the attack task: how fast to red?"""
-        rows = []
-        for side in HOT_SIDES:
-            brg, rng = self.to_red()
-            if brg is None or rng < HOT_MIN_RANGE:
-                self.log(f"  {name}: red is {'not seen' if brg is None else f'{rng / 1000:.0f} km away'}: "
-                         f"stopping before the attack")
-                break
-            # On the route: red `side` deg off the nose, held a while.
-            hdg = (brg - side) % 360.0
-            t_lim, held = self.t + TURN_TIMEOUT(180.0) + SETTLE_S, None
-            while self.t < t_lim and not self.ended:
-                hdg = (self.to_red()[0] - side) % 360.0
-                self.command(hdg)
-                self.pump()
-                if abs(wrap(self.samples[-1]["hdg"] - hdg)) <= DONE_DEG:
-                    held = held if held is not None else self.t
-                    if self.t - held >= SETTLE_S:
-                        break
-                else:
-                    held = None
-            if not self.hot(True):
-                self.log(f"  {name}: the bridge did not confirm OPT hot; skipped")
-                break
-            h_from, t_cmd = self.samples[-1]["hdg"], self.t
-            delta = wrap(self.to_red()[0] - h_from)
-            limit, held = t_cmd + TURN_TIMEOUT(delta), None
-            while self.t < limit and not self.ended:
-                self.pump()
-                brg, rng = self.to_red()
-                if rng < HOT_MIN_RANGE:
-                    break
-                if abs(wrap(self.samples[-1]["hdg"] - brg)) <= DONE_DEG:
-                    held = held if held is not None else self.t
-                    if self.t - held >= DONE_HOLD_S:
-                        break
-                else:
-                    held = None
-            self.hot(False)
-            m = measure(self.samples, t_cmd, self.t, h_from, delta)
-            if m:
-                m.update(variant=name, near_m=var["near"], wpt="attack")
-                rows.append(m)
-                self._log_turn(m)
-            if self.ended:
-                break
-        return rows
-
-    def _log_turn(self, m):
-        self.log(f"  turn {m['turn_deg']:+5.0f} deg at {m['speed_mps']:.0f} m/s: "
-                 f"{m['rate_bulk_dps']} deg/s (peak {m['rate_peak_dps']}), half in "
-                 f"{m['t50_s'] or 'never'} s, 90% in {m['t90_s'] or 'never'} s, "
-                 f"bank {m['bank_max_deg']:.0f} deg, {m['nz_median']:.1f} g "
-                 f"(peak {m['nz_max']:.1f})")
-
     def run(self):
         rows = []
         while not self.samples and not self.ended:
@@ -302,14 +209,6 @@ class TurnTest:
             var = VARIANTS[name]
             if not self.options(var["near"], var["wpt"], True):
                 self.log(f"  {name}: the bridge did not confirm its options; skipped")
-                continue
-            if var.get("hot"):
-                self.log(f"variant {name}: an attack task on red, guns only")
-                rows += self.run_hot(name, var)
-                hdg = self.samples[-1]["hdg"]
-                if self.ended:
-                    self.log("  the mission ended (or BLUE-1 was lost): stopping")
-                    break
                 continue
             self.log(f"variant {name}: first point {var['near']} m, {var['wpt']} points")
             self.wait(self.t + SETTLE_S, hdg)
@@ -332,15 +231,17 @@ class TurnTest:
                 if m:
                     m.update(variant=name, near_m=var["near"], wpt=var["wpt"])
                     rows.append(m)
-                    self._log_turn(m)
+                    self.log(f"  turn {m['turn_deg']:+5.0f} deg at {m['speed_mps']:.0f} m/s: "
+                             f"{m['rate_bulk_dps']} deg/s (peak {m['rate_peak_dps']}), half in "
+                             f"{m['t50_s'] or 'never'} s, 90% in {m['t90_s'] or 'never'} s, "
+                             f"bank {m['bank_max_deg']:.0f} deg, {m['nz_median']:.1f} g "
+                             f"(peak {m['nz_max']:.1f})")
                 if self.ended:
                     break
             if self.ended:
                 self.log("  the mission ended (or BLUE-1 was lost): stopping")
                 break
         for _ in range(3):
-            if "hot" in self.variants:
-                self.link.send("OPT hot 0")
             self.link.send("OPT redhold 0")
             self.link.send("STOP")
         return rows
@@ -372,8 +273,7 @@ def summary(rows, log=print):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--variants", nargs="+", default=DEFAULT_VARIANTS, choices=list(VARIANTS),
-                    help=f"default: {' '.join(DEFAULT_VARIANTS)} (hot only when asked for)")
+    ap.add_argument("--variants", nargs="+", default=list(VARIANTS), choices=list(VARIANTS))
     ap.add_argument("--speed", type=float, default=340.0, help="commanded speed, m/s (default 340)")
     ap.add_argument("--alt", type=float, default=None,
                     help="commanded altitude, m (default: BLUE-1's at the start)")
@@ -409,22 +309,16 @@ def main(argv=None):
             raise SystemExit(f"this mission's bridge is version {bridge}; the turn test needs "
                              f"{OPT_BRIDGE}. Rebuild it (python dcs\\make_mission.py) and open the new "
                              f"mission in DCS.")
-        if "hot" in args.variants and bridge < HOT_BRIDGE:
-            raise SystemExit(f"this mission's bridge is version {bridge}; the hot variant needs "
-                             f"{HOT_BRIDGE}. Rebuild it (python dcs\\make_mission.py) and open the new "
-                             f"mission in DCS.")
         link.sink = lambda line: raw.write(line + "\n")
         u = rec.units[agent]
         alt = args.alt if args.alt is not None else round(float(u.get("y", 9000.0)) / 100.0) * 100.0
         print(f"{agent}: turns at {args.speed:.0f} m/s and {alt:.0f} m"
               + (f", boost {args.boost:.0f} m/s" if args.boost else "") + f"; {red} holds its fire")
-        test = TurnTest(link, agent, rec.t_end, args.variants, args.speed, alt, args.boost or None,
-                        red=red)
+        test = TurnTest(link, agent, rec.t_end, args.variants, args.speed, alt, args.boost or None)
         rows = test.run()
     except KeyboardInterrupt:
         print("\nstopped")
         for _ in range(3):
-            link.send("OPT hot 0")
             link.send("OPT redhold 0")
             link.send("STOP")
     finally:
