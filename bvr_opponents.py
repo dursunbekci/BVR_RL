@@ -228,10 +228,14 @@ class ShooterOpponent(BvrOpponent):
 
     # Set by the env (SIM_REV 9): a callable saying whether red may fire now,
     # the same rule as the agent's fire mask applied to red's own radar track.
-    # None: no gate (2v1, and the old behaviour).
+    # None: no gate (the old behaviour). In 2v1 (SIM_REV 16) the gate is red's
+    # track on its current target, and fire_gate_other the same for the other
+    # blue aircraft, which red may only shoot at on a firm track of its own.
     fire_gate = None
-    # Set by the 2v1 env: red keeps truth guidance there, so it keeps the old,
-    # wider cranks (50 deg; ADAPTIVE 35-70 deg).
+    fire_gate_other = None
+    # Set by a 2v1 env without red radar (TeamBvrEnv.RED_RADAR False): red
+    # keeps truth guidance there, so it keeps the old, wider cranks (50 deg;
+    # ADAPTIVE 35-70 deg) and the old defence and speeds.
     legacy_crank = False
     # Defence against an inbound missile (SIM_REV 10):
     #   "shallow"   beam and descend 1.5 km, 4 km in the last 12 s (SHOOTER)
@@ -349,7 +353,8 @@ class ShooterOpponent(BvrOpponent):
                     and not other.get("targeted", False)
                     and other.get("off_nose_deg", 180.0) <= self.OTHER_SHOT_OFF_NOSE_DEG
                     and other.get("range", 1e9) <= self.SHOT_RMAX_FRAC * other.get("rmax", 0.0)
-                    and (t_sim - self._last_shot) > self.MIN_SHOT_INTERVAL)
+                    and (t_sim - self._last_shot) > self.MIN_SHOT_INTERVAL
+                    and (self.fire_gate_other is None or self.fire_gate_other()))
         if at_other:
             fire = 1
             self._last_shot = t_sim
@@ -396,7 +401,7 @@ class AdaptiveShooterOpponent(ShooterOpponent):
         self.CRANK_ANGLE = float(self.rng.uniform(lo, hi)) * DEG2RAD
         self.REATTACK_RANGE = float(self.rng.uniform(30_000.0, 55_000.0))
         self.MIN_SHOT_INTERVAL = float(self.rng.uniform(8.0, 20.0))
-        if not self.legacy_crank:          # 2v1 keeps the shallow defence
+        if not self.legacy_crank:          # a truth-guided 2v1 red keeps the shallow defence
             u = float(self.rng.random())
             self.DEFENCE = "shallow" if u < 0.5 else ("deep_beam" if u < 0.75 else "deep_cold")
             self.DIVE_FLOOR = float(self.rng.uniform(1000.0, 2500.0))

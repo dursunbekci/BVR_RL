@@ -787,6 +787,71 @@ def test_team_red_targeting():
     print(f"  2v1 red targeting ........... OK  (opened on {sorted(opened)}, both shot at in {both}/8)")
 
 
+def test_team_red_radar():
+    """2v1 red fights on its own radar tracks (SIM_REV 16): it fires only on a
+    firm track of the aircraft it shoots at, its missiles are guided on its
+    estimate, and without that estimate they lose support."""
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+    import missile_sim
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=11, doctrine="AGGRESSIVE")
+    assert e.RED_RADAR
+    shots, untracked, truth_pkts, est_pkts = 0, 0, 0, 0
+    upd = missile_sim.AIM120.update_guidance
+    def spy_guidance(m, g):
+        nonlocal truth_pkts, est_pkts
+        if m.owner == e.RED and g and g.get("valid"):
+            truth_pkts += g.get("pos_sigma", 0.0) == 0.0
+            est_pkts += 1
+        return upd(m, g)
+    missile_sim.AIM120.update_guidance = spy_guidance
+    try:
+        for ep in range(4):
+            e.reset()
+            assert e._red_radar and not e._opponent.legacy_crank
+            w, launch = e._world, e._world._launch
+            def spy(owner, cmd, launch=launch):
+                nonlocal shots, untracked
+                if owner == e.RED and w.wpn[e.RED - 1] > 0:
+                    shots += 1
+                    untracked += e._red_obs[cmd["target"] - 1]._trk_state() != TrackState.TRACK
+                return launch(owner, cmd)
+            w._launch = spy
+            done = False
+            while not done:                               # blue flies at red, never fires
+                _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+                done = t or tr
+    finally:
+        missile_sim.AIM120.update_guidance = upd
+    assert shots >= 2 and untracked == 0, (shots, untracked)
+    assert est_pkts > 0 and truth_pkts == 0, (est_pkts, truth_pkts)
+
+    # Without red's estimate its missiles go dead once the support time runs out.
+    lost = 0
+    for ep in range(4):
+        e.reset()
+        for r in e._red_obs:
+            r._guidance_packet = lambda: {"valid": 0}
+        w, step_all = e._world, e._world.step_all
+        def spy_step(cmds, w=w, step_all=step_all):
+            nonlocal lost
+            step_all(cmds)
+            lost += sum(1 for ev in w.events
+                        if ev.get("type") == "MISSILE_MISS" and ev.get("cause") == "SUPPORT_LOST"
+                        and ev.get("owner") == e.RED)
+        w.step_all = spy_step
+        done = False
+        while not done:
+            _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+        if lost:
+            break
+    assert lost >= 1, "red's unsupported missile did not go dead"
+    print(f"  2v1 red radar ............... OK  ({shots} shots, all on a firm track; "
+          f"{est_pkts} guidance updates from red's estimate)")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -800,14 +865,21 @@ def test_team_roles_far_target():
         d = [float(np.linalg.norm(w.pos(i) - red)) for i in (1, 2)]
         far = 1 + int(d[1] > d[0])
         assert e._red_tgt == far, (e._red_tgt, d)
+        # Red's launches as they happen: a missile that hits is gone from
+        # w.missiles by the end of the episode.
+        first, launch = [], w._launch
+        def spy(owner, cmd, launch=launch, first=first):
+            if owner == e.RED and not first and w.wpn[e.RED - 1] > 0:
+                first.append(cmd.get("target"))
+            return launch(owner, cmd)
+        w._launch = spy
         done = False
         while not done:                                   # both fly at red, never fire
-            if not any(m.owner == e.RED for m in w.missiles):
+            if not first:
                 assert e._red_tgt == far or not e._obs[far - 1]._alive
             _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
             done = t or tr
-        reds = sorted((m for m in w.missiles if m.owner == e.RED), key=lambda m: m.t_launch)
-        fired_at_far += bool(reds) and reds[0].target == far
+        fired_at_far += first == [far]
     assert fired_at_far >= 1, "red never fired its first missile at the farther aircraft"
     print(f"  2v1 red opens on rear ........ OK  (first missile at it in {fired_at_far}/4)")
 
@@ -1597,6 +1669,7 @@ if __name__ == "__main__":
         ("2v1 losses",              test_team_losses),
         ("2v1 red targeting",       test_team_red_targeting),
         ("2v1 red opens on rear",   test_team_roles_far_target),
+        ("2v1 red radar",           test_team_red_radar),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS support rule",        test_dcs_support_rule),

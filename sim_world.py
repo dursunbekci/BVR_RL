@@ -21,9 +21,11 @@ world did before (same random draws, same packets).
 so the env needs no awareness of whether it is talking to a C++ process or
 to this class.
 
-A missile is guided by its shooter's command: cmd["msl_guidance"] (a radar
-or datalink estimate) when the command carries that key, otherwise truth on
-the missile's target, which is what scripted opponents get. A command may
+A missile is guided by its shooter's command: cmd["msl_guidance_by_target"]
+[its target] when that is given (a shooter with missiles on several targets,
+each on its own track: 2v1 red), else cmd["msl_guidance"] (a radar or
+datalink estimate) when the command carries that key, otherwise truth on
+the missile's target. A command may
 name its target with cmd["target"] (an aircraft number); without it the
 shooter fires at the first live enemy.
 
@@ -178,8 +180,8 @@ class SimWorld:
         self._despawn_next  = []
 
         # ── guidance updates ─────────────────────────────────────────
-        # From the shooter's own estimate when its command carries one;
-        # scripted shooters send none and guide on the target's truth.
+        # From the shooter's own estimate when its command carries one (per
+        # target, or one for all); a command with none guides on truth.
         for m in self.missiles:
             cmd = cmds[m.owner - 1]
             if not self.alive[m.owner - 1]:
@@ -187,6 +189,8 @@ class SimWorld:
                 # their own seeker if it has locked, and otherwise go dead
                 # after the missile's support timeout.
                 m.update_guidance({"valid": 0})
+            elif m.target in (cmd.get("msl_guidance_by_target") or {}):
+                m.update_guidance(cmd["msl_guidance_by_target"][m.target])
             elif "msl_guidance" in cmd:
                 m.update_guidance(cmd["msl_guidance"])
             else:

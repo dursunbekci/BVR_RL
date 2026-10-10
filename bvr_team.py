@@ -20,6 +20,14 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
   * Red's target. Red engages the nearest blue aircraft, switching only when
     the other is clearly closer, and sees the fight as a 1v1 against it with
     both blue aircraft's missiles counted as inbound.
+  * Red's radar (RED_RADAR, SIM_REV 16). As in 1v1 since SIM_REV 9, red
+    fights under the agent's rules: one track per blue aircraft, from the
+    agent's own radar and track code run from red's side; it fires at an
+    aircraft only when the agent's fire mask would allow it on that track,
+    and each missile is guided on red's track of its target, so the 3-second
+    support rule binds it. Red still flies on truth, as in 1v1. Before, 2v1
+    red guided on truth and shot without a track, and the old cranks and
+    defence were kept for it (legacy_crank).
   * Losing an aircraft. A blue aircraft shot down or crashed leaves the
     fight; its slot keeps running until the episode ends with one legal
     action (so it adds no policy gradient), no shaping, and the team's
@@ -53,7 +61,7 @@ from gymnasium import spaces
 from bvr_env import (BvrEnv, OBS_DIM, PRIV_DIM, ACTION_NVEC, HDG_OFFSETS_DEG, FIRE_OPTIONS,
                      DOCTRINES, DOCTRINE_MIXED, PHI_TERMS, DEG2RAD, R_EARTH, REF_LAT,
                      _wrap_deg)
-from bvr_opponents import BvrOpponent, BvrOpponentType
+from bvr_opponents import BvrOpponent, BvrOpponentType, ShooterOpponent
 from bvr_track_adapter import TrackState
 from bvr_library import DEFAULT_PLATFORM
 from sim_world import SimWorld
@@ -89,6 +97,10 @@ class TeamBvrEnv:
     # Red switches target only when the other blue aircraft is this much closer.
     RETARGET_FRAC = 0.8
 
+    # Scripted red fights on its own radar tracks (see the module notes).
+    # False: the pre-SIM_REV 16 red, truth-guided with the old cranks.
+    RED_RADAR = True
+
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT, gamma_discount=0.997,
                  seed=42, instance_id=0, privileged_critic=True, envelope_table="library",
                  radar_model="sim", doctrine=DOCTRINE_MIXED,
@@ -118,6 +130,17 @@ class TeamBvrEnv:
                      for k, p in enumerate(blue_platforms)]
         a, b = self._obs
         a._wingman, b._wingman = b, a
+        # Red's radar and track on each blue aircraft: the agent's own code run
+        # from red's side (as BvrEnv._opponent_radar in 1v1), with the blue
+        # observer's envelopes seen the other way round.
+        self._red_obs = []
+        for o, p in zip(self._obs, blue_platforms):
+            r = BvrEnv(seed=seed + 7919 + 31 * len(self._red_obs), instance_id=instance_id,
+                       privileged_critic=False, radar_model=radar_model, envelope_table=None,
+                       platform=red_platform, opponent_platform=p)
+            r._env_own, r._env_thr = o._env_thr, o._env_own
+            self._red_obs.append(r)
+        self._red_radar = False                   # this episode: red fights on its tracks
 
         self._world = SimWorld(seed=seed + instance_id * 1000,
                                platforms=[o._plat for o in self._obs] + [a._opp_plat],
@@ -158,8 +181,17 @@ class TeamBvrEnv:
             self._opponent = self._opponent_factory(self)
         else:
             self._opponent = BvrOpponent.create(self._opponent_type, rng=self._rng)
-        # 2v1 red keeps truth guidance, so it keeps the pre-SIM_REV 9 cranks.
-        self._opponent.legacy_crank = True
+        self._red_radar = (self.RED_RADAR and isinstance(self._opponent, ShooterOpponent)
+                           and radar_ok(self._obs[0]))
+        if self._red_radar:
+            for r in self._red_obs:
+                _red_observer_reset(r)
+            # Bound methods, not lambdas: the env must pickle (SubprocVecEnv).
+            self._opponent.fire_gate = self._red_gate_target
+            self._opponent.fire_gate_other = self._red_gate_other
+        else:
+            # Truth-guided red keeps the pre-SIM_REV 9 cranks and old defence.
+            self._opponent.legacy_crank = True
         # Scripted opponents read their start from the 1v1 key names.
         self._opponent.reset({**ic, "ac2_psi": ic["ac3_psi"], "ac2_alt": ic["ac3_alt"],
                               "ac2_spd": ic["ac3_spd"]})
@@ -330,6 +362,8 @@ class TeamBvrEnv:
             if opp.pop("target_other", 0) and self._red_other is not None:
                 opp["target"] = 3 - self._red_tgt
                 self._red_other = dict(self._red_other, targeted=True)
+            if self._red_radar:
+                opp = self._red_radar_frame(opp)
             pkts.append(opp)
 
             w.step_all(pkts)
@@ -425,6 +459,44 @@ class TeamBvrEnv:
             cur = best
         self._red_tgt = cur
 
+    # ── red's radar (RED_RADAR) ───────────────────────────────────────
+    def _red_can_fire(self, k) -> bool:
+        """Whether red may fire at blue aircraft k now: the agent's fire mask
+        applied to red's own track of it."""
+        return bool(self._obs[k - 1]._alive and self._red_obs[k - 1]._can_fire())
+
+    def _red_gate_target(self) -> bool:
+        return self._red_can_fire(self._red_tgt)
+
+    def _red_gate_other(self) -> bool:
+        return self._red_can_fire(3 - self._red_tgt)
+
+    def _red_radar_frame(self, opp: dict) -> dict:
+        """One frame of red's sensors, as BvrEnv._opponent_radar_frame in 1v1,
+        with one track per blue aircraft; each red missile is guided on red's
+        track of its own target (the key must be present for every target, or
+        the world falls back to truth)."""
+        w = self._world
+        for k, r in enumerate(self._red_obs, start=1):
+            if not self._obs[k - 1]._alive:
+                continue
+            r._track.tick(w.SIM_DT)
+            r._t_sim = self._t_sim
+            if (r._track.t_now - r._last_convert_t) >= 1.0 / BvrEnv.TRACK_CONVERT_HZ:
+                conv_dt = min(r._track.t_now - r._last_convert_t, 1.0)
+                r._last_convert_t = r._track.t_now
+                r._state = w.telemetry(self.RED, k)
+                r._radar_update(dt=conv_dt)
+        opp = dict(opp)
+        if opp.get("fire"):
+            for r in self._red_obs:              # one radar: the 3 s between shots binds both
+                r._last_shot_t = self._t_sim
+        opp["msl_guidance_by_target"] = {
+            k: (r._guidance_packet() if self._obs[k - 1]._alive else {"valid": 0})
+            for k, r in enumerate(self._red_obs, start=1)}
+        opp["msl_guidance"] = {"valid": 0}
+        return opp
+
     def _other_info(self):
         """The blue aircraft red is not engaging, as red sees it: the scripted
         shooter's second shot reads this. None when there is no such aircraft.
@@ -510,6 +582,20 @@ def _merge_counts(dicts) -> dict:
         for k, v in d.items():
             out[k] = out.get(k, 0) + v
     return out
+
+
+def radar_ok(o: BvrEnv) -> bool:
+    """Red radar needs the simulated radar model (as OPPONENT_RADAR in 1v1)."""
+    return getattr(o, "_radar_model", "sim") == "sim"
+
+
+def _red_observer_reset(r: BvrEnv) -> None:
+    """Start-of-episode state for one of red's radar observers."""
+    r._track.reset()
+    if r._radar is not None:
+        r._radar.reset()
+    r._state = {}; r._t_sim = 0.0
+    r._last_shot_t = -999.0; r._last_convert_t = -1e9
 
 
 def _observer_reset(o: BvrEnv) -> None:

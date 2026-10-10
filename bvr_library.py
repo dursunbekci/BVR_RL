@@ -401,7 +401,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 15
+SIM_REV = 16
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -467,6 +467,12 @@ _SIM_REV_NOTES = {
         "(0.997^400 = 0.30 at the end of a long episode); discounted, a kill came to about "
         "-0.2, a mutual kill -1.2, a loss -1.4 and a timeout -1.9, so dying beat surviving. "
         "Heading cost 0.04 -> 0.02 per 180 deg, timeout -0.5 -> -0.8 (2v1 too)",
+    16: "2v1 red fights under the agent's rules, as 1v1 red has since SIM_REV 9: one "
+        "radar track per blue aircraft, fire only on a firm track of the aircraft it "
+        "shoots at (also its second shot, at the other blue aircraft), each missile "
+        "guided on red's track of its target, so the support rule binds it. It also "
+        "gets the 1v1 opponents' cranks, defences, long shots, pressing, running and "
+        "DCS speeds (2v1 had kept the pre-SIM_REV 9 red). 1v1 is unchanged",
 }
 
 
