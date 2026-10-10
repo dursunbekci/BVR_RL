@@ -476,7 +476,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 
 <div class="chap">
 <h1>13 · Self-play</h1>
-<p>In self-play the opponent is a frozen copy ("snapshot") of the agent itself. It only exists in 1v1 with both sides on the same platform, since a copy of the agent can only fly the aircraft it was trained on. The exception is two platforms that differ only in how they are flown and in what their five speed choices are, such as <code>F-16C-DCSAI</code> (the agent, flown like the DCS AI on a route: climbs at Mach 0.85, turns at no more than 45° of bank) and <code>F-16C-DCS</code> (red): the same aircraft, inputs and choices.</p>
+<p>In self-play the opponent is a frozen copy ("snapshot") of the agent itself. It only exists in 1v1 with both sides on the same platform, since a copy of the agent can only fly the aircraft it was trained on.</p>
 
 <h2>Step by step</h2>
 <ol class="steps">
@@ -832,7 +832,7 @@ Then open <b>http://localhost:5006</b> in your browser. The GUI uses two ports: 
 <tr><td class="k">Dashboard stays empty</td><td>It fills after 10 episodes. The first may take 30–60 s.</td></tr>
 <tr><td class="k">A model isn't in the list</td><td>The list is read from <code>models_bvr/</code> when a run or eval stops; reload the page.</td></tr>
 <tr><td class="k">Changes after <code>git pull</code> don't appear</td><td>Restart the GUI. A running training keeps its old code until the next run.</td></tr>
-<tr><td class="k">"SELF_PLAY needs both sides on one platform"</td><td>Self-play only works with the same platform on both sides (or two that differ only in how they climb and turn), in 1v1.</td></tr>
+<tr><td class="k">"SELF_PLAY needs both sides on one platform"</td><td>Self-play only works with the same platform on both sides, in 1v1.</td></tr>
 <tr><td class="k">Training refuses: missile not calibrated</td><td>Calibrate the missile (chapter 15).</td></tr>
 <tr><td class="k">Warm-start notes when resuming</td><td>Normal: the model was trained under an older revision (chapter 22).</td></tr>
 <tr><td class="k">Warning on the TRAINING page about code or files</td><td>The GUI reports local edits or library problems. Read the message; it names the file.</td></tr>

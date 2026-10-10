@@ -8,7 +8,7 @@ Branch `feature/dcs-f16c-stick`, from `f3a8fb0` (SIM_REV 15, the head of
 BLUE-1 is an AI unit, flown by the bridge through a route. The DCS AI follows
 a route at 45° of bank (1.6°/s), climbs at about Mach 0.85 and does not light
 its afterburner for a speed. Most of the work on `feature/envelope-target-alt`
-(the F-16C-DCSAI platforms, auto-defence, hot turns) is a way round that.
+(the F-16C-DCSAI platforms, auto-defence, hot turns; all removed here) is a way round that.
 A player-flown F-16C module gets axis commands instead, so the policy's
 heading, altitude and speed can be flown at the airframe's full agility, and
 the simulator's own F-16 (`F-16C-DCS`, no handicap) is then the right model.
@@ -30,9 +30,10 @@ the simulator's own F-16 (`F-16C-DCS`, no handicap) is then the right model.
   changed for auto-defence) and the policy is trained to defend itself.
 - **Kept from that work:** `RTB_ON_BINGO` off for both aircraft (the bridge
   is version 7 here), and the turn test's end-of-test behaviour.
-- **Still there, off:** the route-mode platforms (`F-16C-DCSAI`:
-  `CLIMB_MACH`, `CLIMB_THROTTLE`, `TURN_BANK_MAX`). They model the DCS AI on a
-  route, which this branch does not use; say if they should go too.
+- **Also removed:** the route-mode platform `F-16C-DCSAI` and its parameters
+  (`CLIMB_MACH`, `CLIMB_THROTTLE`, `TURN_BANK_MAX`, the autopilot's
+  `climbMach`/`bankMax` modes), and the self-play grouping of platforms that
+  differed only in how they climb. Self-play needs the same platform again.
 - **Model to train:** `F-16C-DCS` against `F-16C-DCS` (not dcs_v10/v11, which
   were trained on the handicapped platform and expect its auto-defence).
 

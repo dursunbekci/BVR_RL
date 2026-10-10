@@ -1522,73 +1522,6 @@ def test_dcs_turn_test():
           f"{max(r['rate_bulk_dps'] for r in rows):.1f} deg/s)")
 
 
-def test_dcs_ai_climb():
-    """F-16C-DCSAI flies like the DCS AI on a route: climbs at about Mach 0.85
-    whatever speed is commanded, 0.02 m/s per metre still to climb, no faster
-    than its climb throttle allows, and turns at 45 deg of bank; F-16C-DCS keeps
-    the old climb; red flying F-16C-DCS in the same world is unaffected; the two
-    can meet in self-play."""
-    import math
-    import bvr_env as E
-    import bvr_library as L
-    from bvr_opponents import BvrOpponentType as T
-    from sim_world import _enu_to_latlon
-
-    def climb(plat, opp, ahead):
-        env = E.BvrEnv(opponent_type=T.STRAIGHT, seed=1, platform=plat, opponent_platform=opp)
-        def ic_fn(blue_top_speed=None):
-            ic = E.BvrEnv._random_ic(env)
-            la, lo, _ = _enu_to_latlon(0, 0, 9000); lb, lob, _ = _enu_to_latlon(0, 90000, 9000)
-            ic.update(ac1_lat=la, ac1_lon=lo, ac1_alt=9000, ac1_psi=math.pi / 2, ac1_spd=275,
-                      ac2_lat=lb, ac2_lon=lob, ac2_alt=9000, ac2_psi=math.pi / 2, ac2_spd=275,
-                      mirrored=False)
-            return ic
-        env._random_ic = ic_fn
-        env.reset()
-        beam = list(E.HDG_OFFSETS_DEG).index(90.0)
-        ia = list(E.ALT_DELTAS_M).index(ahead)
-        rows = []
-        for t in range(40):
-            z0 = env._state["alt"]
-            env.step([beam, ia, 3, 0])                         # 400 m/s commanded
-            rows.append((env._state["alt"] - z0, env._state["mach"], env._world.acs[1].mach))
-        return rows
-
-    dcsai = climb("F-16C-DCSAI", "F-16C-DCS", 3000.0)
-    vs = [r[0] for r in dcsai[15:30]]
-    machs = [r[1] for r in dcsai[15:]]
-    assert 0.80 <= min(machs) and max(machs) <= 0.90, machs           # held, not accelerating
-    assert 40.0 <= sum(vs) / len(vs) <= 65.0, vs                       # DCS: 50-60 m/s at 10-11 km
-    slow = climb("F-16C-DCSAI", "F-16C-DCS", 1200.0)
-    vs12 = sum(r[0] for r in slow[15:30]) / 15
-    assert 18.0 <= vs12 <= 30.0, vs12                                  # DCS: 22-33 m/s
-    old = climb("F-16C-DCS", "F-16C-DCS", 3000.0)
-    assert max(r[1] for r in old) > 0.95                               # the old climb accelerates
-    # Red flies F-16C-DCS in the same world: no DCS-AI climb for it (it holds its level).
-    assert L.load_platform("F-16C-DCS").climb_mach == 0.0
-    # Turns: the DCS AI on a route banks 45 deg, 1.41 g, 1.5-1.6 deg/s at 340 m/s.
-    import os, sys, tempfile
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs"))
-    import turn_test
-    with tempfile.TemporaryDirectory() as d:
-        turns = turn_test.main(["--sim", "--platform", "F-16C-DCSAI", "--variants", "base", "--out", d])
-    late = turns[1:]                                    # the first starts below 340 m/s
-    assert all(r["bank_max_deg"] <= 46 and 1.3 <= r["nz_median"] <= 1.5 for r in turns), turns
-    assert all(1.4 <= r["rate_bulk_dps"] <= 1.9 for r in late), late
-    assert L.selfplay_compatible("F-16C-DCSAI", "F-16C-DCS")
-    assert not L.selfplay_compatible("F-16C-DCS", "F-16C-DCS-MIL")
-    # A platform file saved with whole numbers (1000, not 1000.0) is the same aircraft.
-    import copy
-    whole = copy.deepcopy(L.get_item("platform", "F-16C-DCS"))
-    whole["params"] = {k: (int(v) if isinstance(v, float) and v == int(v) else v)
-                       for k, v in whole["params"].items()}
-    assert L._selfplay_group_of(whole) == L.selfplay_group("F-16C-DCSAI")
-    assert not L.selfplay_compatible("F-16C", "F-16C-DCS")
-    print(f"  DCS-AI climb and turn ....... OK  (Mach {min(machs):.2f}-{max(machs):.2f}, "
-          f"{sum(vs) / len(vs):.0f} m/s with 3 km to go, {vs12:.0f} with 1.2 km; turns "
-          f"{min(r['rate_bulk_dps'] for r in late):.1f}-{max(r['rate_bulk_dps'] for r in late):.1f} deg/s)")
-
-
 def test_crossplay_reseed():
     """A cross-play env cached across a scripted and a policy column holds both
     radar observers (keys "opponent_radar" and False); reseeding must handle
@@ -1684,7 +1617,6 @@ if __name__ == "__main__":
         ("ADAPTIVE runner",         test_adaptive_runner),
         ("cross-play reseed",       test_crossplay_reseed),
         ("DCS turn test",           test_dcs_turn_test),
-        ("DCS-AI climb",            test_dcs_ai_climb),
         ("reward balance",          test_reward_balance),
     ]
 
