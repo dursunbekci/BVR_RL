@@ -942,6 +942,22 @@ def test_team_policy_red():
           f"{len(made)}/40 ADAPTIVE episodes policy-flown)")
 
 
+def test_eval_2v1_stats():
+    """eval_2v1.py: scores and cell statistics."""
+    from eval_2v1 import score_of, cell_stats
+    assert (score_of("KILL"), score_of("MUTUAL_KILL"), score_of("SHOT_DOWN"),
+            score_of("TIMEOUT"), score_of("BANDIT_CRASH")) == (1.0, 0.5, 0.0, 0.5, 1.0)
+    rows = [{"outcome": "KILL", "blue_losses": 0, "blue_shots": 2, "red_shots": 1},
+            {"outcome": "MUTUAL_KILL", "blue_losses": 1, "blue_shots": 1, "red_shots": 2},
+            {"outcome": "SHOT_DOWN", "blue_losses": 2, "blue_shots": 1, "red_shots": 3},
+            {"outcome": "TIMEOUT", "blue_losses": 0, "blue_shots": 0, "red_shots": 0}]
+    s = cell_stats(rows)
+    assert abs(s["score"] - 0.5) < 1e-9 and s["clean"] == 0.25
+    assert s["lost_per_ep"] == 0.75 and abs(s["exchange"] - 2 / 3) < 1e-9
+    assert s["pk"] == 0.5 and s["red_shots"] == 1.5
+    print("  eval_2v1 statistics ......... OK")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -1762,6 +1778,7 @@ if __name__ == "__main__":
         ("2v1 red radar",           test_team_red_radar),
         ("2v1 red opening rules",   test_team_open_rules),
         ("2v1 policy red",          test_team_policy_red),
+        ("eval_2v1 statistics",     test_eval_2v1_stats),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS support rule",        test_dcs_support_rule),
