@@ -472,7 +472,10 @@ _SIM_REV_NOTES = {
         "shoots at (also its second shot, at the other blue aircraft), each missile "
         "guided on red's track of its target, so the support rule binds it. It also "
         "gets the 1v1 opponents' cranks, defences, long shots, pressing, running and "
-        "DCS speeds (2v1 had kept the pre-SIM_REV 9 red). 1v1 is unchanged",
+        "DCS speeds (2v1 had kept the pre-SIM_REV 9 red). Red's opening target is drawn "
+        "per episode: the nearer blue aircraft in half the episodes, the farther or a "
+        "random one in a quarter each, held until red's first launch (it always opened "
+        "on the nearer one, nearly always the lead). 1v1 is unchanged",
 }
 
 

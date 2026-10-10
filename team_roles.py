@@ -7,7 +7,8 @@ in front almost every time, so in training red's first missile nearly always
 goes at the front aircraft while the rear one is free to close and shoot.
 This flies a 2v1 checkpoint twice over the same starts:
 
-  natural   red as in training: it opens on the nearer aircraft
+  natural   red opens on the nearer aircraft (training mixes this with
+            other openings: TeamBvrEnv.OPEN_RULES)
   farther   red opens on the farther (rear) aircraft and holds that target
             until its first launch; after that it picks targets as usual
 
@@ -41,9 +42,15 @@ from bvr_team import TeamBvrEnv
 OUTCOMES = ["KILL", "MUTUAL_KILL", "SHOT_DOWN", "CRASH", "BANDIT_CRASH", "ESCAPE", "TIMEOUT"]
 
 
+class NearTargetTeamEnv(TeamBvrEnv):
+    """Red always opens on the nearer blue aircraft (the pre-SIM_REV 16 rule)."""
+    OPEN_RULES = (("nearer", 1.0),)
+
+
 class FarTargetTeamEnv(TeamBvrEnv):
     """Red opens on the blue aircraft farther from it at the start, and keeps
     that target until it has launched once (or the target is lost)."""
+    OPEN_RULES = (("nearer", 1.0),)
 
     def reset(self, seed=None, options=None):
         self._forced_tgt = None
@@ -139,7 +146,7 @@ _W = {}
 
 
 def _make_env(mode, args, privileged, blue, red):
-    cls = TeamBvrEnv if mode == "natural" else FarTargetTeamEnv
+    cls = NearTargetTeamEnv if mode == "natural" else FarTargetTeamEnv
     env = cls(opponent_type=BvrOpponentType[args.opponent], seed=args.seed,
               privileged_critic=privileged, doctrine=args.doctrine,
               blue_platforms=blue, red_platform=red)

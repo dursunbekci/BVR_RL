@@ -759,7 +759,7 @@ def test_team_losses():
 
 
 def test_team_red_targeting():
-    """2v1: red opens on the nearer blue aircraft, and SHOOTER also fires at the other one."""
+    """2v1: red opens on the aircraft its opening rule names, and SHOOTER also fires at the other one."""
     from bvr_team import TeamBvrEnv
     from bvr_opponents import BvrOpponentType as T
     e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=3, doctrine="AGGRESSIVE")
@@ -770,7 +770,10 @@ def test_team_red_targeting():
         w = e._world
         red = w.pos(e.RED)
         d = [float(np.linalg.norm(w.pos(i) - red)) for i in (1, 2)]
-        assert e._red_tgt == 1 + int(d[1] < d[0]), (e._red_tgt, d)
+        if e._open_rule == "nearer":
+            assert e._red_tgt == 1 + int(d[1] < d[0]), (e._red_tgt, d)
+        elif e._open_rule == "farther":
+            assert e._red_tgt == 1 + int(d[1] > d[0]), (e._red_tgt, d)
         opened.add(e._red_tgt)
         targets, launch = set(), w._launch
         def spy(owner, cmd, launch=launch, targets=targets):
@@ -850,6 +853,31 @@ def test_team_red_radar():
     assert lost >= 1, "red's unsupported missile did not go dead"
     print(f"  2v1 red radar ............... OK  ({shots} shots, all on a firm track; "
           f"{est_pkts} guidance updates from red's estimate)")
+
+
+def test_team_open_rules():
+    """2v1: red's opening rule is drawn per episode (OPEN_RULES), and a farther
+    or random opening is held until red's first launch."""
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=5, doctrine="AGGRESSIVE")
+    seen = {}
+    for ep in range(60):
+        e.reset()
+        seen[e._open_rule] = seen.get(e._open_rule, 0) + 1
+    assert set(seen) == {"nearer", "farther", "random"}, seen
+    assert 18 <= seen["nearer"] <= 42, seen
+    # Held: red keeps a farther opening while the other aircraft is much nearer.
+    e.OPEN_RULES = (("farther", 1.0),)
+    for ep in range(3):
+        e.reset()
+        tgt, w = e._red_tgt, e._world
+        done = False
+        while not done and w.wpn[e.RED - 1] == e._red_wpn0:
+            assert e._red_tgt == tgt or not e._obs[tgt - 1]._alive, "farther opening not held"
+            _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+    print(f"  2v1 red opening rules ....... OK  ({seen}; farther held to the first launch)")
 
 
 def test_team_roles_far_target():
@@ -1670,6 +1698,7 @@ if __name__ == "__main__":
         ("2v1 red targeting",       test_team_red_targeting),
         ("2v1 red opens on rear",   test_team_roles_far_target),
         ("2v1 red radar",           test_team_red_radar),
+        ("2v1 red opening rules",   test_team_open_rules),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS support rule",        test_dcs_support_rule),

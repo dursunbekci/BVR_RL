@@ -17,9 +17,12 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
   * Team outcomes and rewards. A kill, a loss, a timeout or an escape is
     paid to both agents; each agent's shaping and its shot and heading costs
     stay its own.
-  * Red's target. Red engages the nearest blue aircraft, switching only when
-    the other is clearly closer, and sees the fight as a 1v1 against it with
-    both blue aircraft's missiles counted as inbound.
+  * Red's target. Red opens on a blue aircraft chosen by this episode's
+    opening rule (OPEN_RULES: the nearer one, the farther one, or either at
+    random) and holds a farther or random choice until its first launch.
+    After that it engages the nearest blue aircraft, switching only when the
+    other is clearly closer. It sees the fight as a 1v1 against its target
+    with both blue aircraft's missiles counted as inbound.
   * Red's radar (RED_RADAR, SIM_REV 16). As in 1v1 since SIM_REV 9, red
     fights under the agent's rules: one track per blue aircraft, from the
     agent's own radar and track code run from red's side; it fires at an
@@ -97,6 +100,13 @@ class TeamBvrEnv:
     # Red switches target only when the other blue aircraft is this much closer.
     RETARGET_FRAC = 0.8
 
+    # Red's opening target, drawn per episode: (rule, probability). Red used
+    # to open on the nearer aircraft only; with the usual formations that is
+    # nearly always the lead, so the roles were fixed (team_roles.py showed
+    # the rear aircraft free to close and shoot). "farther" and "random" hold
+    # the choice until red's first launch, then red picks targets as usual.
+    OPEN_RULES = (("nearer", 0.5), ("farther", 0.25), ("random", 0.25))
+
     # Scripted red fights on its own radar tracks (see the module notes).
     # False: the pre-SIM_REV 16 red, truth-guided with the old cranks.
     RED_RADAR = True
@@ -141,6 +151,7 @@ class TeamBvrEnv:
             r._env_own, r._env_thr = o._env_thr, o._env_own
             self._red_obs.append(r)
         self._red_radar = False                   # this episode: red fights on its tracks
+        self._open_rule, self._open_hold, self._red_wpn0 = "nearer", False, 0
 
         self._world = SimWorld(seed=seed + instance_id * 1000,
                                platforms=[o._plat for o in self._obs] + [a._opp_plat],
@@ -196,10 +207,20 @@ class TeamBvrEnv:
         self._opponent.reset({**ic, "ac2_psi": ic["ac3_psi"], "ac2_alt": ic["ac3_alt"],
                               "ac2_spd": ic["ac3_spd"]})
         w.reset(ic, episode_id=self._episode_id)
-        # Red opens on the nearer blue aircraft. It always opened on the lead,
-        # which fixed the roles: the lead drew the shot, the wingman killed.
+        # Red's opening target, by this episode's rule (OPEN_RULES).
         red = w.pos(self.RED)
-        self._red_tgt = min((1, 2), key=lambda i: float(np.linalg.norm(w.pos(i) - red)))
+        dist = {i: float(np.linalg.norm(w.pos(i) - red)) for i in (1, 2)}
+        rules, probs = zip(*self.OPEN_RULES)
+        p = np.asarray(probs, dtype=float)
+        self._open_rule = str(rules[int(self._rng.choice(len(rules), p=p / p.sum()))])
+        if self._open_rule == "farther":
+            self._red_tgt = max((1, 2), key=dist.get)
+        elif self._open_rule == "random":
+            self._red_tgt = int(self._rng.integers(1, 3))
+        else:
+            self._red_tgt = min((1, 2), key=dist.get)
+        self._open_hold = self._open_rule != "nearer"
+        self._red_wpn0 = w.wpn[self.RED - 1]
         self._red_other = None
         for k, o in enumerate(self._obs, start=1):
             o._cmd_hdg = float(ic[f"ac{k}_psi"]); o._cmd_alt = float(ic[f"ac{k}_alt"])
@@ -295,7 +316,8 @@ class TeamBvrEnv:
                 "hdg_pairs": _merge_counts(o._hdg_pairs for o in self._obs),
                 "flight_time": sum(o._t_sim for o in self._obs),
                 "wpn_remaining": sum(self._world.wpn[:self.n_agents]),
-                "killer": self._killer})
+                "killer": self._killer,
+                "red_open_rule": self._open_rule})
             self._ready = False
         return obs, np.array(rewards, dtype=np.float32), terminated, truncated, infos
 
@@ -446,11 +468,17 @@ class TeamBvrEnv:
         self._lost.append((i - 1, cause))
 
     def _retarget(self):
-        """Red engages the nearest live blue aircraft, with some stickiness."""
+        """Red engages the nearest live blue aircraft, with some stickiness,
+        once any held opening target has been shot at."""
         w = self._world
         live = [i for i in (1, 2) if self._obs[i - 1]._alive]
         if not live:
             return
+        if self._open_hold:
+            # A farther or random opening is held until red's first launch.
+            if self._red_tgt in live and w.wpn[self.RED - 1] >= self._red_wpn0:
+                return
+            self._open_hold = False
         red = w.pos(self.RED)
         dist = {i: float(np.linalg.norm(w.pos(i) - red)) for i in live}
         cur = self._red_tgt if self._red_tgt in live else min(live, key=dist.get)
