@@ -170,10 +170,6 @@ class F16Aircraft:
     CLIMB_BAND_M = 150.0
     K_CLIMB_V = 2.0
     CLIMB_VS_PER_M = 0.02        # 1/s: climb rate per metre still to climb
-    # Break turn (cmd pullNz): pulled until this close to the heading, at no
-    # more bank than this (a split-S rolls well past the vertical).
-    PULL_DONE = math.radians(10.0)
-    PULL_PHI_MAX = math.radians(160.0)
 
     def __init__(self, rng: np.random.Generator = None, cfg=None):
         self._rng = rng or np.random.default_rng()
@@ -223,11 +219,6 @@ class F16Aircraft:
             climbMach (-)    > 0: climb like the DCS AI (optional; see below)
             climbThrottle    the throttle it climbs at (with climbMach)
             bankMax   (rad)  > 0: bank limit for heading changes (optional)
-            pullNz    (g)    > 0: break turn (optional, the automatic missile
-                             defence): while more than PULL_DONE off the heading,
-                             pull this g and roll as far as the dive needs,
-                             past 90 deg (inverted) if need be, as the DCS AI
-                             breaks; then the normal autopilot again
         """
         self._refresh_atmos()
 
@@ -309,16 +300,12 @@ class F16Aircraft:
         if bank_max > 0.0:
             phi_lim = min(phi_lim, bank_max)
         hdg_err  = _wrap_pi(hdg_cmd - self.chi)
-        pull_nz  = float(cmd.get("pullNz", 0.0) or 0.0)
-        pulling  = pull_nz > 0.0 and abs(hdg_err) > self.PULL_DONE
-        if not pulling:
-            phi_cmd  = float(np.clip(self.cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
-            phi_err  = phi_cmd - self.phi
-            phi_dot  = float(np.clip(self.cfg.K_PHI_ROLL * phi_err,
-                                      -self.cfg.ROLL_MAX, self.cfg.ROLL_MAX))
-            # (rolling back from a break: from where it is, not a jump to PHI_MAX)
-            lim = max(self.cfg.PHI_MAX, abs(self.phi))
-            self.phi = float(np.clip(self.phi + phi_dot * dt, -lim, lim))
+        phi_cmd  = float(np.clip(self.cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
+        phi_err  = phi_cmd - self.phi
+        phi_dot  = float(np.clip(self.cfg.K_PHI_ROLL * phi_err,
+                                  -self.cfg.ROLL_MAX, self.cfg.ROLL_MAX))
+        self.phi = float(np.clip(self.phi + phi_dot * dt,
+                                  -self.cfg.PHI_MAX, self.cfg.PHI_MAX))
 
         # ── 5. altitude autopilot → nz command ──────────────────────
         alt_err   = alt_cmd - self.z
@@ -337,23 +324,11 @@ class F16Aircraft:
             gamma_cmd = min(g_vs, fpa_lim,
                             max(0.0, g_ss + self.K_CLIMB_V * (self.V - v_climb) / self.V))
         gamma_err = gamma_cmd - self.gamma
-        if pulling:
-            # Break turn: a fixed pull; the bank sets how much of it lifts the
-            # nose (cos φ) and how much turns (sin φ), so a dive is flown
-            # rolled past the vertical, still pulling, as in a split-S.
-            nz_cmd  = min(pull_nz, nz_avail)
-            want    = (math.cos(self.gamma) + self.cfg.K_GAM_NZ * gamma_err) / max(nz_cmd, 0.1)
-            phi_cmd = math.copysign(min(math.acos(float(np.clip(want, -1.0, 1.0))), self.PULL_PHI_MAX),
-                                    hdg_err)
-            phi_dot = float(np.clip(self.cfg.K_PHI_ROLL * (phi_cmd - self.phi),
-                                    -self.cfg.ROLL_MAX, self.cfg.ROLL_MAX))
-            self.phi = float(np.clip(self.phi + phi_dot * dt, -self.PULL_PHI_MAX, self.PULL_PHI_MAX))
-        else:
-            # Only nz·cos φ acts vertically. Without the division a steep turn
-            # spirals into the ground while altitude hold is commanded.
-            nz_cmd    = ((math.cos(self.gamma) + self.cfg.K_GAM_NZ * gamma_err)
-                         / max(math.cos(self.phi), 0.1))
-            nz_cmd    = float(np.clip(nz_cmd, self.cfg.NZ_NEG_MAX, nz_avail))
+        # Only nz·cos φ acts vertically. Without the division a steep turn
+        # spirals into the ground while altitude hold is commanded.
+        nz_cmd    = ((math.cos(self.gamma) + self.cfg.K_GAM_NZ * gamma_err)
+                     / max(math.cos(self.phi), 0.1))
+        nz_cmd    = float(np.clip(nz_cmd, self.cfg.NZ_NEG_MAX, nz_avail))
 
         # ── 6. aerodynamics ──────────────────────────────────────────
         CL   = float(np.clip(nz_cmd * W / max(q_dyn * self.cfg.S_REF, 1.0),

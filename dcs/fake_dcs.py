@@ -95,7 +95,7 @@ class FakeDcs:
         # defence stands in for the DCS AI's): its blue flies the simulator's
         # autopilot, and its opponent is a scripted one.
         header = {"format": FORMAT, "rate": self.RATE, "t0": self.T(), "theatre": "fake",
-                  "bridge": 6, "agent": self.names[0], "red": self.names[1]}
+                  "bridge": 5, "agent": self.names[0], "red": self.names[1]}
         opt = {"near_m": 3000, "wpt": "turn", "redhold": False, "autodefend": False, "hot": False,
                "hotturn": False}
         defending = hot_turning = False

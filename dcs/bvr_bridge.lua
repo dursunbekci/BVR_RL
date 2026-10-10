@@ -31,9 +31,8 @@ Commands (UDP datagrams to CFG.port_in, plain text):
   OPT near <m>                the route's first point this far ahead (0: no first point)
   OPT wpt <turn|flyover>      the route points' type (Turning Point or Fly Over Point)
   OPT redhold <0|1>           1: an AI red holds its fire (dcs/turn_test.py)
-  OPT autodefend <0|1>        1: while a missile aimed at the agent is within defend_range_m
-                              (15 km), the DCS AI defends it (reaction to threats: evade) and
-                              routes and shots wait
+  OPT autodefend <0|1>        1: while a missile is inbound at the agent, the DCS AI defends it
+                              (reaction to threats: evade) and routes and shots wait
   OPT hot <0|1>               1: an attack task on the red aircraft with guns only, to make the
                               AI turn hard towards it (dcs/turn_test.py); 0 ends it
   OPT hotturn <0|1>           1: a commanded heading within 15 deg of red's bearing, with the
@@ -74,11 +73,6 @@ local CFG = {
   hotturn_start_deg  = 30.0,
   hotturn_done_deg   = 10.0,
   hotturn_max_s      = 30.0,
-  -- OPT autodefend: the DCS AI takes over once a missile aimed at the agent is
-  -- this close. In the recorded fights the DCS AI defended only then (its
-  -- seeker about to go active): it flew on, nose to the missile, until 13.4-
-  -- 13.5 km, then broke. Before that the policy flies (and may shoot).
-  defend_range_m     = 15000.0,
 }
 
 -- ── LuaSocket ────────────────────────────────────────────────────────
@@ -206,8 +200,7 @@ local T0 = timer.getTime()
 -- Sent in the header; dcs_live.py warns when a mission's bridge is older
 -- than the options it was asked to use. 2: OPT eta. 3: OPT near, wpt, redhold.
 -- 4: OPT autodefend, hot; no return to base at bingo fuel. 5: OPT hotturn.
--- 6: OPT autodefend takes over only within defend_range_m (was: at launch).
-local BRIDGE_VERSION = 6
+local BRIDGE_VERSION = 5
 -- Weapon.flag for guns (gun pods and built-in cannons): OPT hot attacks with
 -- these only, so the AI manoeuvres to attack but cannot shoot from BVR range.
 local GUNS_FLAG = 805306368
@@ -626,12 +619,7 @@ local function tick(_, now)
         local v = w.obj:getVelocity()
         local tgt = nil
         pcall(function() tgt = name_of(w.obj:getTarget()) end)
-        if tgt == AGENT and w.shooter ~= AGENT and agent:isExist() then
-          local a = agent:getPoint()
-          if math.sqrt((p.x - a.x)^2 + (p.y - a.y)^2 + (p.z - a.z)^2) <= CFG.defend_range_m then
-            inbound = true
-          end
-        end
+        if tgt == AGENT and w.shooter ~= AGENT then inbound = true end
         wlist[#wlist + 1] = {id = w.id, type = w.type, shooter = w.shooter, target = tgt,
                              x = p.x, y = p.y, z = p.z, vx = v.x, vy = v.y, vz = v.z}
       else

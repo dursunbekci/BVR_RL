@@ -202,7 +202,7 @@ def test_bridge_eta():
     assert absolute[1].ETA_locked and abs(absolute[1].ETA - (43200.0 + 20.0 + near / 340.0)) < 0.2
     assert off[1].speed_locked and not off[1].ETA_locked
     lines = [json.loads(d) for p, d in sent if p == 15301]
-    assert lines[0].get("bridge") == 6, lines[0]           # dcs_live.py checks the version
+    assert lines[0].get("bridge") == 5, lines[0]           # dcs_live.py checks the version
     acks = [d["clock"] for d in lines if d.get("ev") == "bridge" and d.get("status") == "eta"]
     assert acks == ["mission", "abs", "off"], acks
     print(f"  bridge ETA lock ............. OK  (point 1 due {mission[1].ETA:.1f} s at 340 m/s)")
@@ -260,9 +260,9 @@ def test_bridge_opts():
 
 
 def test_bridge_autodefend():
-    """OPT autodefend: once a red missile aimed at the agent is within 15 km the
-    DCS AI defends it (evade), routes wait and a shot is refused; when it is
-    gone, the route is back. Farther away, the policy flies. OPT hot pushes a guns-only attack task and pops it. Neither
+    """OPT autodefend: while a red missile is inbound at the agent the DCS AI
+    defends it (evade), routes wait and a shot is refused; when it is gone, the
+    route is back. OPT hot pushes a guns-only attack task and pops it. Neither
     aircraft returns home at bingo fuel."""
     L = lua()
     sent, inbox = [], []
@@ -279,7 +279,7 @@ def test_bridge_autodefend():
     plan = {5.0: ["CMD 1 90 10000 300 0"], 6.0: ["OPT autodefend 1", "CMD 2 90 10000 300 0"],
             12.0: ["CMD 3 120 10000 300 1"], 25.0: ["CMD 4 120 10000 300 0"],
             30.0: ["OPT hot 1"], 35.0: ["OPT hot 0", "CMD 5 120 10000 300 0"]}
-    calls = {8.0: "MOCK_RED_SHOT", 10.0: "MOCK_RED_CLOSE", 20.0: "MOCK_RED_GONE"}
+    calls = {10.0: "MOCK_RED_SHOT", 20.0: "MOCK_RED_GONE"}
 
     def on_tick(T):
         for t in list(plan):

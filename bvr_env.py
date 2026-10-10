@@ -447,23 +447,10 @@ class BvrEnv(gym.Env):
 
     # ── action masking ────────────────────────────────────────────────
     def action_masks(self) -> np.ndarray:
-        m_fire=np.array([True,self._can_fire()],dtype=bool)
-        if self._state.get("defending",0):
-            # The automatic defence (platform AUTO_DEFEND) flies instead of the
-            # heading, altitude and speed chosen: one choice each, so those
-            # steps are certain and PPO gives them no credit or blame. The
-            # held heading is the previous one (no heading-change cost, no
-            # switch counted), the altitude unchanged, the speed the last one.
-            m_hdg=np.zeros(len(HDG_OFFSETS_DEG),dtype=bool)
-            m_hdg[HDG_OFFSETS_DEG.index(self._prev_hdg_off)]=True
-            m_alt=np.zeros(len(ALT_DELTAS_M),dtype=bool)
-            m_alt[ALT_DELTAS_M.index(0.0)]=True
-            m_spd=np.zeros(len(self._plat.speed_cmds),dtype=bool)
-            m_spd[int(np.argmin([abs(v-self._cmd_spd) for v in self._plat.speed_cmds]))]=True
-            return np.concatenate([m_hdg,m_alt,m_spd,m_fire])
         m_hdg=np.ones(len(HDG_OFFSETS_DEG),dtype=bool)
         m_alt=np.ones(len(ALT_DELTAS_M),dtype=bool)
         m_spd=np.ones(len(self._plat.speed_cmds),dtype=bool)
+        m_fire=np.array([True,self._can_fire()],dtype=bool)
         return np.concatenate([m_hdg,m_alt,m_spd,m_fire])
 
     def _heading_choice(self, off) -> float:

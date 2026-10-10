@@ -104,11 +104,6 @@ class SimWorld:
                             for p in self.platforms]
         self.defending = [False] * self.n
         self._defend_alt = [0.0] * self.n
-        self._defend_fpa = [0.0] * self.n
-        self._defend_beam = [math.pi / 2] * self.n
-        self._defend_side = [1.0] * self.n
-        self._defend_nz = [5.0] * self.n
-        self._react_range: dict = {}
         # Turns toward the enemy at this bank (rad; 0: off), as the DCS bridge
         # flies them with OPT hotturn (platform HOT_TURN_BANK; the fake DCS
         # bridge switches it on as OPT hotturn does).
@@ -154,7 +149,6 @@ class SimWorld:
         self._rwr_t_warn = {}
         self.defending   = [False] * self.n
         self._defend_alt = [0.0] * self.n
-        self._react_range = {}
         self.hot_turning = [False] * self.n
         self._hot_turn_since = [0.0] * self.n
         legacy = {1: "wpn", 2: "wpn_t"} if self.n == 2 else {}
@@ -184,21 +178,12 @@ class SimWorld:
                    for m in self.missiles)
 
     # ── automatic missile defence (platform AUTO_DEFEND) ─────────────
-    # What the DCS AI does when the bridge hands it the aircraft (dcs/
-    # bvr_bridge.lua, OPT autodefend), fitted to the DCS AI's own defences in
-    # the recorded fights (RED-1 against BLUE-1's AIM-120, 2-3 October): it
-    # flew on, nose to the missile, until the missile was 13.4-13.5 km away
-    # (its seeker about to take over), then broke hard (90-170 deg of bank)
-    # toward the beam at about 5 deg/s, diving: 1.1 and 3.4 km lost by the
-    # hit, at 100 and 230 m/s (14 and 33 deg), 57 and 100 deg off the missile
-    # by then. Missiles that never went active (8 October) got no reaction.
-    # Each defence draws its own numbers within these ranges; no shots.
-    DEFEND_RANGE_M   = (12_000.0, 15_000.0)   # starts with the missile this close
-    DEFEND_DIVE_M    = (1_500.0, 4_000.0)     # dives this far below where it started
-    DEFEND_FPA_DEG   = (15.0, 35.0)           # dive angle limit
-    DEFEND_BEAM_DEG  = (70.0, 110.0)          # heading off the missile's bearing
-    DEFEND_NZ        = (3.0, 4.5)             # g of the break (rolled up to 160 deg): 5-8 deg/s
-    DEFEND_ALT_FLOOR = 1500.0                 # ...but no lower than this
+    # What the DCS AI does when the bridge hands it the aircraft while a
+    # missile is inbound (dcs/bvr_bridge.lua, OPT autodefend): beam the
+    # missile, dive, fastest speed, full agility, no shots.
+    DEFEND_DIVE_M    = 3000.0     # dive this far below the altitude it started defending at
+    DEFEND_ALT_FLOOR = 1500.0     # ...but no lower than this
+    DEFEND_FPA       = 0.44       # rad (25 deg): dive angle limit
 
     def _inbound(self, i: int) -> list:
         """Enemy missiles in flight at aircraft i."""
@@ -206,53 +191,27 @@ class SimWorld:
                 if self.teams[m.owner - 1] != self.teams[i - 1] and m.target == i
                 and m.phase not in (MslPhase.HIT, MslPhase.MISS)]
 
-    def _threats(self, i: int) -> list:
-        """Inbound missiles close enough for aircraft i to defend against: each
-        draws, when first seen, the range at which it is reacted to."""
-        pos, out = self.pos(i), []
-        for m in self._inbound(i):
-            r = self._react_range.get(id(m))
-            if r is None:
-                r = self._react_range[id(m)] = float(self._rng.uniform(*self.DEFEND_RANGE_M))
-            if float(np.linalg.norm(m.pos - pos)) <= r:
-                out.append(m)
-        return out
-
     def _update_defence(self) -> None:
         for i, a in enumerate(self.acs, start=1):
-            on = bool(self.auto_defend[i - 1] and self.alive[i - 1] and self._threats(i))
+            on = bool(self.auto_defend[i - 1] and self.alive[i - 1] and self._inbound(i))
             if on and not self.defending[i - 1]:
-                r = self._rng
-                self._defend_alt[i - 1] = max(self.DEFEND_ALT_FLOOR,
-                                              a.z - float(r.uniform(*self.DEFEND_DIVE_M)))
-                self._defend_fpa[i - 1] = math.radians(float(r.uniform(*self.DEFEND_FPA_DEG)))
-                self._defend_beam[i - 1] = math.radians(float(r.uniform(*self.DEFEND_BEAM_DEG)))
-                self._defend_nz[i - 1] = float(r.uniform(*self.DEFEND_NZ))
-                # The side is chosen once, as the DCS AI commits to its break:
-                # the one nearer the heading (either, by chance, nose-on).
-                m = min(self._threats(i), key=lambda m: float(np.linalg.norm(m.pos - self.pos(i))))
-                d = m.pos - self.pos(i)
-                rel = _wrap_pi(a.chi - math.atan2(float(d[0]), float(d[1])))
-                self._defend_side[i - 1] = (1.0 if rel > 0 else -1.0) if abs(rel) > math.radians(5) \
-                    else float(r.choice((-1.0, 1.0)))
+                self._defend_alt[i - 1] = max(self.DEFEND_ALT_FLOOR, a.z - self.DEFEND_DIVE_M)
             self.defending[i - 1] = on
 
     def _defence_cmd(self, i: int, cmd: dict) -> dict:
-        """Aircraft i's command while it defends: toward the beam of the
-        nearest threat on the side chosen when the defence began, diving, at
-        full agility."""
+        """Aircraft i's command while it defends: beam the nearest inbound
+        missile on the side nearer its heading."""
         a, p = self.acs[i - 1], self.platforms[i - 1]
         v_top = float(max(p.speed_cmds)) if p is not None else 400.0
         pos = self.pos(i)
-        m = min(self._threats(i) or self._inbound(i),
-                key=lambda m: float(np.linalg.norm(m.pos - pos)))
+        m = min(self._inbound(i), key=lambda m: float(np.linalg.norm(m.pos - pos)))
         d = m.pos - pos
         bear = math.atan2(float(d[0]), float(d[1]))
-        hdg = bear + self._defend_side[i - 1] * self._defend_beam[i - 1]
-        fpa = self._defend_fpa[i - 1]
+        hdg = min((bear + math.pi / 2, bear - math.pi / 2),
+                  key=lambda h: abs((h - a.chi + math.pi) % (2 * math.pi) - math.pi))
         return {**cmd, "hdgCmd": hdg % (2 * math.pi), "altTarget": self._defend_alt[i - 1],
-                "V": v_top, "altFPA": fpa, "climbFPA": fpa, "climbMach": 0.0, "bankMax": 0.0,
-                "pullNz": self._defend_nz[i - 1], "fire": 0}
+                "V": v_top, "altFPA": self.DEFEND_FPA,
+                "climbFPA": self.DEFEND_FPA, "climbMach": 0.0, "bankMax": 0.0, "fire": 0}
 
     # ── turns toward the enemy (platform HOT_TURN_BANK) ──────────────
     # The DCS bridge (OPT hotturn) flies a turn toward red as a guns-only

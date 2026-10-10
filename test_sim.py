@@ -1637,20 +1637,18 @@ def test_crossplay_reseed():
 
 
 def test_auto_defend():
-    """A platform with AUTO_DEFEND defends itself as the DCS AI defended in the
-    recorded fights: it flies its commands (and may shoot) until the missile
-    is 12-15 km away, then breaks toward the beam at full agility, diving, at
-    its fastest speed, holding fire; each defence draws its own numbers.
-    Then it flies its commands again. Without AUTO_DEFEND, nothing changes."""
+    """A platform with AUTO_DEFEND defends itself while an enemy missile is in
+    flight at it, as the DCS AI does when the bridge hands it BLUE-1: it beams
+    the missile, dives 3 km, flies its fastest speed at full agility and holds
+    fire; then it flies its commands again. Without AUTO_DEFEND, nothing changes."""
     import math
     import bvr_library as L
     from sim_world import SimWorld, _enu_to_latlon
     from bvr_env import BvrEnv
     from bvr_opponents import BvrOpponentType as T
 
-    def fight(blue, seed=0):
-        w = SimWorld(platforms=[L.load_platform(blue), L.load_platform("F-16C-DCS")], teams=[1, 2],
-                     seed=seed)
+    def fight(blue):
+        w = SimWorld(platforms=[L.load_platform(blue), L.load_platform("F-16C-DCS")], teams=[1, 2])
         la, lo, _ = _enu_to_latlon(0, 0, 9000); lb, lob, _ = _enu_to_latlon(0, 30000, 9000)
         w.reset({"ac1_lat": la, "ac1_lon": lo, "ac1_alt": 9000, "ac1_psi": 0.0, "ac1_spd": 300,
                  "ac2_lat": lb, "ac2_lon": lob, "ac2_alt": 9000, "ac2_psi": math.pi, "ac2_spd": 300})
@@ -1663,11 +1661,9 @@ def test_auto_defend():
             w.step_all([{**blue_cmd, "fire": fire1}, {**red_cmd, "fire": fire2}])
             tl = w.telemetry(1)
             inb = w._inbound(1)
-            d = inb[0].pos - w.pos(1) if inb else None
+            brg = (math.atan2(*(inb[0].pos - w.pos(1))[:2]) if inb else 0.0)
             rows.append((w.t_sim, tl["defending"], w.acs[0].chi, w.acs[0].z, w.acs[0].V,
-                         w.wpn[0], len(inb), abs(w.acs[0].phi),
-                         math.atan2(d[0], d[1]) if inb else 0.0,
-                         float(np.linalg.norm(d)) if inb else 1e9))
+                         w.wpn[0], len(inb), abs(w.acs[0].phi), brg))
             if not w.alive[0]:
                 break
         return w, rows
@@ -1677,25 +1673,18 @@ def test_auto_defend():
     assert on and rows[0][1] == 0, "no defence"
     # (decided at the start of each frame: the frame the missile ends in still defends)
     assert all(r[6] > 0 for r in on[:-1]), "defending with nothing inbound"
+    assert all(r[5] == 4 for r in on), "fired while defending"
     t_on = on[0][0]
-    before = [r for r in rows if r[6] and r[0] < t_on]
-    assert before and all(abs(_wrap_pi(r[2])) < 0.05 for r in before), "not flying its commands"
-    assert rows[0][5] == 4 and before[-1][5] < 4, "no shot while the missile was far"
-    assert 12_000 <= on[0][9] <= 15_100, on[0][9]                 # DCS: 13.4-13.5 km
-    assert len({r[5] for r in on}) == 1, "fired while defending"
+    later = [r for r in on if t_on + 20 < r[0] < t_on + 30]       # (not the fly-by)
+    # beamed: heading 90 deg off the missile's bearing
+    off = [abs(abs(_wrap_pi(r[2] - r[8])) - math.pi / 2) for r in later]
+    assert later and max(off) < 0.3, (t_on, max(off), later[off.index(max(off))])
     assert max(r[7] for r in on) > math.radians(60), "turned at the 45-deg route bank"
-    turned = abs(_wrap_pi(on[-1][2] - on[0][2]))
-    assert turned > math.radians(35), math.degrees(turned)        # DCS: 50-90 deg by the hit
-    assert on[0][3] - min(r[3] for r in on) > 700, "did not dive"
-    if w.alive[0]:                   # missile gone: the commands again
+    assert min(r[3] for r in on) < 7500, "did not dive"
+    assert max(r[4] for r in on) > 360, "not at its fastest speed"
+    if w.alive[0]:                   # missile gone: the commands again, and blue may fire
         after = [r for r in rows if r[0] > on[-1][0]]
-        assert after and all(r[1] == 0 for r in after), rows[-1]
-    # Each defence draws its numbers: another seed, another reaction range.
-    starts = set()
-    for seed in (1, 2):
-        rs = fight("F-16C-DCSAI-AD", seed=seed)[1]
-        starts.add(round(next(r[9] for r in rs if r[1])))
-    assert len(starts) == 2 and all(12_000 <= x <= 15_100 for x in starts), starts
+        assert after and all(r[1] == 0 for r in after) and rows[-1][5] < 4, rows[-1]
     # The same fight without AUTO_DEFEND: no defence, the commands are flown.
     w2, rows2 = fight("F-16C-DCSAI")
     assert not any(r[1] for r in rows2) and rows2[0][5] == 4
@@ -1704,26 +1693,8 @@ def test_auto_defend():
     env.reset()
     env._state["defending"] = 1
     assert not env._can_fire()
-    # While defending, the heading, altitude and speed chosen are not flown:
-    # one choice open in each (the previous heading, no altitude change, the
-    # last speed), so those steps carry no gradient; fire is closed.
-    from bvr_env import HDG_OFFSETS_DEG, ALT_DELTAS_M
-    env.step([HDG_OFFSETS_DEG.index(-40.0), 0, 3, 0])
-    env._state["defending"] = 1
-    m = env.action_masks()
-    nh, na, ns = len(HDG_OFFSETS_DEG), len(ALT_DELTAS_M), len(env._plat.speed_cmds)
-    h, a, sp, fi = m[:nh], m[nh:nh + na], m[nh + na:nh + na + ns], m[nh + na + ns:]
-    assert h.sum() == a.sum() == sp.sum() == 1 and list(fi) == [True, False], m
-    assert HDG_OFFSETS_DEG[int(np.argmax(h))] == -40.0 and ALT_DELTAS_M[int(np.argmax(a))] == 0.0
-    assert int(np.argmax(sp)) == 3, m
-    sw = env._hdg_switches
-    env.step(np.array([int(np.argmax(h)), int(np.argmax(a)), int(np.argmax(sp)), 0]))
-    assert env._hdg_switches == sw                       # holding is not a heading change
-    env._state["defending"] = 0
-    assert env.action_masks()[:nh + na + ns].all()
     assert L.selfplay_compatible("F-16C-DCSAI-AD", "F-16C-DCS")
-    print(f"  auto-defend .................. OK  (from {on[0][9] / 1000:.1f} km, "
-          f"defended {on[-1][0] - t_on:.0f} s, dove to "
+    print(f"  auto-defend .................. OK  (defended {on[-1][0] - t_on:.0f} s, dove to "
           f"{min(r[3] for r in on):.0f} m, {max(r[4] for r in on):.0f} m/s, "
           f"bank {math.degrees(max(r[7] for r in on)):.0f} deg; blue "
           f"{'survived' if w.alive[0] else 'was hit'})")
@@ -1774,7 +1745,7 @@ def test_dcs_auto_defend():
                                       log=lines.append)
         th.join(timeout=120)
     link.close(); fake.close()
-    assert row["auto_defend"] == 1 and row["bridge_version"] == 6, row
+    assert row["auto_defend"] == 1 and row["bridge_version"] == 5, row
     assert row["hot_turn"] == 1, row                    # the platform's HOT_TURN_BANK turns it on
     assert row["defences"] >= 1 and row["defend_s"] > 0, (row, lines)
     assert any("the DCS AI defends BLUE-1" in ln for ln in lines), lines
