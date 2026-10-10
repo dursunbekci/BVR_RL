@@ -12,6 +12,7 @@ that runs bvr_bridge.lua (the file is packed into the .miz).
     python dcs/make_mission.py                          # -> dcs/bvr_rl_1v1.miz
     python dcs/make_mission.py --range-km 70 --red-player --out my.miz
     python dcs/make_mission.py --defender               # -> dcs/bvr_rl_defender.miz
+    python dcs/make_mission.py --stick-test             # -> dcs/bvr_rl_sticktest.miz
 
   BLUE-1   the aircraft the policy flies (an AI unit; without dcs_live.py it
            flies a CAP and fights on its own)
@@ -23,6 +24,10 @@ so you can't shoot back beyond visual range: you defend, and the test is
 whether the policy can shoot down a human who evades. It sets --red-type
 Su-25T --red-player, starts red at 6000 m and 200 m/s (the Su-25T is slow),
 and writes a briefing for the DCS mission screen.
+
+--stick-test: only you, in the F-16C Viper module, in the air over the sea at
+7000 m and 280 m/s heading east, with no other aircraft and no bridge, for
+dcs/stick/stick_test.py (Export.lua stick control).
 
 There is no player aircraft by default: DCS opens the mission in the map
 view; F2 / F10 switch between external views of the aircraft.
@@ -128,6 +133,12 @@ def missiles(typ, n=4):
     return [(i, stations[i][1]) for i in sorted(order[:n])]
 
 
+STICK_BRIEFING = (
+    "You fly a Viper, in the air at 7000 m over the sea, heading east at 280 m/s. Nobody else is here.\n\n"
+    "For dcs/stick/stick_test.py: trim for level flight (Mach 0.85-0.9, about 300 m/s), take your hands "
+    "OFF the stick and throttle, then run the test on this computer. Keep the sim un-paused and time "
+    "acceleration off. If anything looks wrong, move the stick: that takes the control back at once.")
+
 DEFENDER_BRIEFING = (
     "You fly RED-1, a Su-25T. Your only air-to-air weapons are two short-range R-73s: you "
     "can't shoot back beyond visual range. BLUE-1, an F-16C with four AIM-120s, is flown by "
@@ -159,7 +170,10 @@ def build(args):
     types = {"F-16C": planes.F_16C_50, "F-15C": planes.F_15C, "Su-27": planes.Su_27,
              "MiG-29S": planes.MiG_29S, "FA-18C": planes.FA_18C_hornet, "Su-25T": planes.Su_25T}
     m = Mission(Caucasus())
-    if args.defender:
+    if args.stick_test:
+        m.set_sortie_text("BVR_RL: stick control test (stick_test.py)")
+        m.set_description_text(STICK_BRIEFING)
+    elif args.defender:
         m.set_sortie_text("BVR_RL: survive the policy")
         m.set_description_text(DEFENDER_BRIEFING)
     else:
@@ -201,6 +215,12 @@ def build(args):
         return fg
 
     hdg_blue = math.degrees(brg) % 360
+    if args.stick_test:
+        me = flight(blue_c, "VIPER", types["F-16C"], mapping.Point(cx - 100_000.0, cy, m.terrain),
+                    mapping.Point(cx + 400_000.0, cy, m.terrain), args.alt_blue, 90.0, args.speed)
+        me.units[0].skill = Skill.Player
+        m.save(args.out)                        # no bridge: the Export.lua script does the work
+        return me, None
     blue = flight(blue_c, "BLUE", types[args.blue_type], p_blue, p_blue_wp, args.alt_blue,
                   hdg_blue, args.speed)
     red = flight(red_c, "RED", types[args.red_type], p_red, p_red_wp, args.alt_red,
@@ -233,6 +253,8 @@ def main():
     ap.add_argument("--red-type", default="F-16C", choices=["F-16C", "F-15C", "Su-27", "MiG-29S", "FA-18C", "Su-25T"],
                     help="DCS aircraft for red (default F-16C, as in F-16C v F-16C training)")
     ap.add_argument("--red-player", action="store_true", help="fly RED-1 yourself")
+    ap.add_argument("--stick-test", action="store_true",
+                    help="only you, in the F-16C Viper, in the air (7000 m, 280 m/s); writes bvr_rl_sticktest.miz")
     ap.add_argument("--defender", action="store_true",
                     help="you fly RED-1 in the free Su-25T and defend (sets --red-type Su-25T "
                          "--red-player; writes bvr_rl_defender.miz)")
@@ -241,12 +263,22 @@ def main():
         args.red_type, args.red_player = "Su-25T", True
         if args.out == ap.get_default("out"):
             args.out = os.path.join(HERE, "bvr_rl_defender.miz")
+    if args.stick_test:
+        if args.out == ap.get_default("out"):
+            args.out = os.path.join(HERE, "bvr_rl_sticktest.miz")
+        if args.alt_blue == ap.get_default("alt_blue"):
+            args.alt_blue = 7000.0
+        args.alt_red = args.speed_red = 0.0
     slow = args.red_type == "Su-25T"
     if args.alt_red is None:
         args.alt_red = 6000.0 if slow else 9500.0
     if args.speed_red is None:
         args.speed_red = 200.0 if slow else args.speed
     build(args)
+    if args.stick_test:
+        print(f"written {args.out}: you in the F-16C at {args.alt_blue:.0f} m, {args.speed:.0f} m/s, alone over the sea")
+        print("copy it to Saved Games\\DCS\\Missions\\ (or open it from anywhere in DCS)")
+        return
     print(f"written {args.out}: BLUE-1 ({args.blue_type}, policy) v RED-1 ({args.red_type}"
           f"{', you' if args.red_player else ', DCS AI'}), {args.range_km:.0f} km apart")
     print("copy it to Saved Games\\DCS\\Missions\\ (or open it from anywhere in DCS)")

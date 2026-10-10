@@ -37,13 +37,79 @@ the simulator's own F-16 (`F-16C-DCS`, no handicap) is then the right model.
 - **Model to train:** `F-16C-DCS` against `F-16C-DCS` (not dcs_v10/v11, which
   were trained on the handicapped platform and expect its auto-defence).
 
+## Step 1 and 2: the telemetry and control test
+
+Written and tested against a mock of the Export API and a synthetic aircraft;
+**not yet run in DCS**. The first run in DCS is the test of the test: the API
+names, the command numbers and the signs below are from memory.
+
+| File | What it is |
+|---|---|
+| `bvr_stick_export.lua` | The Export.lua module: a JSON line per frame to UDP 15401, `AXES` / `RELEASE` / `PING` / `CMD` lines in on 15402, a watchdog that zeroes pitch, roll and rudder 0.5 s after the last command. Every DCS call is inside `pcall`; missing functions are reported. |
+| `install_export.py` | Copies the module to `Saved Games\DCS\Scripts\bvr_rl\` and adds a guarded block to `Export.lua` (backup, `--check`, `--undo`; no administrator rights). |
+| `stick_test.py` | `info`, `rate`, `pulses`, `throttle`, `hold`, `all`, `release`, `raw`. Stops and releases at 85° of bank, 50° of pitch, below 1500 m above ground, below 110 m/s, outside -3..8.5 g, or when telemetry stops. |
+| `fake_export.py` | A synthetic aircraft behind the same interface: `stick_test.py all --fake`. |
+| `test_stick.py` | Offline tests (needs `pip install lupa`): the Lua module in Lua 5.1, the UDP link, `stick_test.py` end to end with the roll and pitch signs both ways, the installer. |
+| `../make_mission.py --stick-test` | A mission with only you, in the F-16C Viper, in the air at 7000 m, 280 m/s over the sea. No other aircraft, no bridge. |
+
+Run it (Windows, from the repository, in the Python environment):
+
+```
+python dcs\stick\install_export.py                 # once; again after editing the .lua
+python dcs\make_mission.py --stick-test             # needs pydcs; copy dcs\bvr_rl_sticktest.miz to Saved Games\DCS\Missions
+```
+
+Start the mission. Level out at about 300 m/s (Mach 0.9), trim, then take
+your hands **off the stick and throttle**; if the physical axes stay assigned
+and noisy they can fight the commands (unassign them for the test if so).
+Do not pause or accelerate time. Then, in a second window:
+
+```
+python dcs\stick\stick_test.py info        # codes found, API functions missing
+python dcs\stick\stick_test.py rate        # 10 s: lines per second, gaps, fields, units
+python dcs\stick\stick_test.py pulses      # 0.1 stick pulses: signs, g and roll rate per unit, lag
+python dcs\stick\stick_test.py throttle    # code against RPM and acceleration
+python dcs\stick\stick_test.py hold        # +60 deg heading, back, +300 m, +40 m/s, closed loop
+```
+
+`all` runs the four in order and takes about four minutes. `hold` is the
+prototype of plan item 2: the simulator's autopilot (heading to bank to roll
+rate, altitude to flight-path angle to g, speed to throttle) on stick axes, 
+with the gains `pulses` and `throttle` measured. Its turn rate at 60° of bank
+is the first number to look at; once it works, try `--bank 75 --nz 6 --turn 90`
+for the 8°/s the simulator's F-16C-DCS turns at. If anything goes wrong,
+`stick_test.py release` (or move the stick) hands control back; the F-16's
+flight control then holds 1 g and the bank, so recover by hand.
+
+**Send back** everything in `dcs_runs\` named `stick_*` (frames as `.jsonl`,
+`stick_gains.json`, `stick_summary_*.json`) and the last lines of
+`Saved Games\DCS\Logs\dcs.log` mentioning `bvr_stick`.
+
+What the first run decides:
+
+- **`rate`:** whether a line per frame is fast enough (needs 20/s or more),
+  and whether `source = "event"` (see the comment `install_export.py` puts in
+  `Export.lua`) does better. At 60 fps an event at frame boundaries gives 30/s.
+- **`info`:** whether the command numbers 2001 to 2004 are DCS's
+  (`command_defs.lua` is read when it can be) and which `LoGet*` functions the
+  Viper lacks. Radar lock and launch are not tested yet: `LoGetTargetInformation`
+  and `LoGetLockedTargetInformation` are only recorded (`radar` in the frames).
+- **`pulses`:** the sign of each axis (the tool does not assume them), the
+  roll rate and g per unit of stick, the lag from command to response.
+- **`throttle`:** whether code 2004 is the throttle and its range (-1 as idle
+  is assumed), RPM and acceleration against the code, and the code that holds speed.
+  The throttle stays at the last code after `release`: set it by hand afterwards.
+- **`hold`:** how hard and how fast the airframe can be flown from 20 to 60 Hz
+  commands, and the command-to-telemetry delay. That is the gap between the
+  simulator's autopilot and DCS, measured before any policy is trained on it.
+
 ## Plan
 
-1. **Telemetry.** Export.lua (`Saved Games\DCS\Scripts\Export.lua`) runs in a
+1. **Telemetry.** (Test written, see above.) Export.lua (`Saved Games\DCS\Scripts\Export.lua`) runs in a
    different Lua environment from the mission-scripting bridge. It can read the
    player's aircraft and send the same `bvr_rl.dcs.v1` lines over UDP, so
    `dcs_world.py` and `dcs_live.py` work unchanged. Check the update rate.
-2. **Control.** `LoSetCommand(command, value)` from Export.lua for pitch, roll,
+2. **Control.** (Test written, see above.) `LoSetCommand(command, value)` from Export.lua for pitch, roll,
    rudder and throttle. Command numbers (2001 to 2004 as far as I know) to be
    verified in `Scripts\command_defs.lua` of the install. The F-16's
    fly-by-wire turns stick position into g and roll rate, so an inner loop at
