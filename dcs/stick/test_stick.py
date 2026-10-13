@@ -711,7 +711,7 @@ def test_cockpit():
     # an axis control is pressed, held, then set back with --release
     buf = io.StringIO()
     sent = []
-    link.click = lambda dev, cmd, value: (sent.append((dev, cmd, value)), link.events.__setitem__("click", {"ev": "click", "ok": True}))
+    link.click = lambda dev, cmd, value, mode=None: (sent.append((dev, cmd, value)), link.events.__setitem__("click", {"ev": "click", "ok": True}))
     with contextlib.redirect_stdout(buf):
         cockpit.click(run, "hotas.THROTTLE_RDR_CURSOR_Y_AXIS", defs, value=0.5, hold=0.2, release=0.0)
     assert [x[2] for x in sent] == [0.5, 0.0], sent
@@ -719,7 +719,7 @@ def test_cockpit():
     link = FakeLink(cockpit_defs=defs)
     run = stick_test.Run(link, None, "cp", lim)
     run.next()
-    link.click = lambda dev, cmd, value: link.events.__setitem__("click", {"ev": "click", "ok": False, "err": "refused"})
+    link.click = lambda dev, cmd, value, mode=None: link.events.__setitem__("click", {"ev": "click", "ok": False, "err": "refused"})
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         cockpit.click(run, "hotas.STICK_TGT_MANAGE_UP", defs)
