@@ -384,3 +384,7 @@ target's bearing first, without reading it back: held toward the target's side f
 (60 deg), and a timed move back of (60 - |bearing|) / 100 deg/s leaves it near the target (100 deg/s from an aim run: 39 deg in
 0.37 s); 10 deg of error is still inside the scan. Once a track is bugged the scan follows the bug. (The fake now slews at 100
 deg/s and its target-under-cursor window is 5 deg either side.)
+
+**TWS off the nose works (13 October)**: with the cursor moved to the target's bearing first (edge, then a timed move back at 100
+deg/s), the target was bugged at +28 deg (2 presses, 13 s from RWS), -38 deg (1 press, 7 s, the radar already in TWS) and -23 deg
+with us 3 km above it (3 presses, 13 s). The 100 deg/s estimate is good enough for a 25 deg scan.
