@@ -225,6 +225,7 @@ class PolicyOpponent:
             o._state = world.telemetry(2)
             o._radar_update(dt=conv_dt)
 
+        from bvr_env import HDG_OFFSETS_DEG
         fire = 0
         if t_sim >= self._next_decision:
             o._state = world.telemetry(2)
@@ -238,6 +239,10 @@ class PolicyOpponent:
                                        deterministic=self._deterministic)
             a = [int(x) for x in np.asarray(a).reshape(-1)]
             self._cmd = o._encode_cmd(a[0], a[1], a[2], 0)
+            # Record the heading choice, as the agent's step() does: the
+            # "previous heading" inputs (HDG_OBS_LABELS) read it, and without
+            # this they always showed 0 to the snapshot.
+            o._heading_choice(HDG_OFFSETS_DEG[a[0]])
             if a[3] == 1 and mask[-1]:
                 fire = 1
                 o._last_shot_t = t_sim

@@ -1391,6 +1391,29 @@ def test_selfplay_mix():
     print(f"  self-play mix ............... OK  (scripted {scripted:.1%}, newest {newest:.1%})")
 
 
+def test_selfplay_heading_history():
+    """A self-play snapshot records its heading choices, so its "previous
+    heading" inputs read its last choice (they always read 0 before)."""
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG, OBS_LABELS, HDG_OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_selfplay import PolicyOpponent
+    k = HDG_OFFSETS_DEG.index(40.0)
+    class Model:
+        def predict(self, obs, action_masks=None, deterministic=False):
+            return np.array([k, 2, 3, 0]), None
+    e = BvrEnv(opponent_type=T.SELF_PLAY, seed=3, privileged_critic=False)
+    e._opponent_factory = lambda env: PolicyOpponent(env, Model(), False, "test")
+    e.reset()
+    for _ in range(3):
+        e.step(np.array([0, 2, 3, 0]))
+    o = e._opponent._obs
+    assert o._prev_hdg_off == 40.0, o._prev_hdg_off
+    obs = o._build_obs()
+    i = OBS_LABELS.index(HDG_OBS_LABELS[1])                   # sin of the previous choice
+    assert obs[i] != 0.0, obs[i]
+    print("  self-play heading history ... OK")
+
+
 def test_fire_off_boresight():
     """The fire action is masked for a target more than 60 deg off the nose."""
     import math
@@ -1666,6 +1689,7 @@ if __name__ == "__main__":
         ("DCS red support",         test_dcs_red_support),
         ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
+        ("self-play heading history", test_selfplay_heading_history),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),
