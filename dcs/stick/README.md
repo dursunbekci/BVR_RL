@@ -241,3 +241,10 @@ flying away at 240 m/s: the target (a CAP flight) turned to intercept the Viper,
 90 s. `make_mission.py --stick-test --target` now gives it task Nothing, ROE weapon hold and no reaction to threats: it
 flies its straight route. A manual lock in the first screenshots showed the HUD target designator box and steering
 circle, `ARM` and `4 MRM`, while the Export radar tables stayed empty: the lock has to be read from the display text (`ind`).
+
+**`ind` on the Viper (13 October)**: `list_indication(id)` returns the drawn elements of a display by name (HUD_glass,
+FCR_Antenna_Azimuth_Tic_0, SMS_AA_Weap1, ...), with a value on the lines that carry text; ids seen: 1 HUD, 4 an MFD showing
+the radar page (FCR_Antenna tics), 5 an MFD showing the SMS A-A page, 6 UHF/VHF, 13 the EHSI, 16 countermeasures, 17 the
+RWR. The first dump was cut at 2500 characters; the module now sends each display whole in its own message (up to 30000
+characters) and `ind` ... `inddiff FILE_A FILE_B` lists the lines present in one save and not the other, to see what a
+designation or a lock adds to the HUD and the radar page.

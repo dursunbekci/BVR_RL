@@ -150,6 +150,7 @@ class FakeLink:
                        "stats": {"ev": "stats", "tel_hz": 50.0, "frame_hz": 60.0, "event_hz": 1.0, "frame_dt_max": 0.02}}
         self.seq = 0
         self.last_tel_wall = self.last_event_wall = 0.0
+        self.ind_items = {}
         self._wall = 1.0e9
         self.commands_sent = 0
 
@@ -188,8 +189,9 @@ class FakeLink:
 
     def ind(self, first=0, last=49):
         locked = bool(self.cockpit and self.cockpit.locked)
-        self.events["ind"] = {"ev": "ind", "items": [
-            {"id": 3, "text": "-----------\nMODE\nCRM\nSUBMODE\n" + ("STT" if locked else "RWS") + "\n-----------"}]}
+        self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if locked else "") + "-----------",
+                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if locked else "RWS\n") + "-----------"}
+        self.events["ind_end"] = {"ev": "ind_end", "count": 2}
 
     def click(self, dev, cmd, value):
         ok = self.cockpit.press(dev, cmd, value) if self.cockpit else False

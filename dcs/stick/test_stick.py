@@ -301,15 +301,18 @@ def test_ind():
     m.g.LuaExportStart()
     m.send("IND 0 20")
     m.run(0.2)
-    r = [d for d in m.lines() if d["ev"] == "ind"][-1]
-    assert [it["id"] for it in r["items"]] == [3, 9], r                # nil, "", and an error are skipped
-    assert "CRM" in r["items"][0]["text"] and "STT" in r["items"][1]["text"]
-    m.send("IND 8 8")
+    ev = [d for d in m.lines() if d["ev"] in ("ind", "ind_end")]
+    assert [d["id"] for d in ev if d["ev"] == "ind"] == [3, 9], ev        # nil, "" and an error are skipped
+    assert ev[-1]["ev"] == "ind_end" and ev[-1]["count"] == 2
+    assert "CRM" in ev[0]["text"] and "STT" in ev[1]["text"]
+    m.L.execute("function list_indication(id) if id == 1 then return string.rep('HUD_Element_Name_x\\n', 3000) end end")
+    m.send("IND 0 3")
     m.run(0.1)
-    assert [it["id"] for it in [d for d in m.lines() if d["ev"] == "ind"][-1]["items"]] == []
-    m.send("IND 0 100000")                                              # the range is capped
+    big = [d for d in m.lines() if d["ev"] == "ind" and d["id"] == 1][-1]
+    assert big["len"] == 3000 * 19 and len(big["text"]) == 30000, (big["len"], len(big["text"]))   # a long display is cut at 30000
+    m.send("IND 0 100000")                                                 # the range is capped
     m.run(0.1)
-    print("  IND ......................... OK  (cockpit display texts read; nil, empty and failing ids skipped)")
+    print("  IND ......................... OK  (a message per display, then ind_end; long displays kept to 30000 characters)")
 
 
 def test_precision_and_command_defs():
@@ -575,16 +578,24 @@ def test_cockpit():
     assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)
     r, lk, fr, out, link = flow(3, True)
     assert lk["locked"] and fr["fired"], (lk, fr)
-    # ind through the fake, saved to a file
+    # ind through the fake: saved, and the difference between "not locked" and "locked" is what inddiff shows
     with tempfile.TemporaryDirectory() as d:
         link = FakeLink(cockpit_defs=defs)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            r1 = cockpit.stage_ind(link, "before", d)
+            cockpit.stage_ind(link, "before", d)
             link.cockpit.aa = True
             link.cockpit.locked = True
-            r2 = cockpit.stage_ind(link, "locked", d)
-        assert "RWS" in out.getvalue() and "STT" in out.getvalue() and len(os.listdir(d)) == 2, (out.getvalue(), os.listdir(d))
+            cockpit.stage_ind(link, "locked", d)
+        files = sorted(os.listdir(d))
+        assert len(files) == 2 and "RWS" in out.getvalue(), (out.getvalue(), files)
+        lines = []
+        n = cockpit.ind_diff(os.path.join(d, [f for f in files if "before" in f][0]),
+                             os.path.join(d, [f for f in files if "locked" in f][0]), out=lines.append)
+        text = "\n".join(lines)
+        assert n == 2 and "+ HUD_TD_Box" in text and "+ HUD_ASEC" in text and "- RWS" in text and "+ STT" in text, text
+        lines = []
+        assert cockpit.ind_diff(os.path.join(d, files[0]), os.path.join(d, files[0]), out=lines.append) == 0
     # match-alt: the script flies to the target's altitude, and fire without a lock says it is a maddog shot
     link = FakeLink(cockpit_defs=defs)
     link.cockpit.tx, link.cockpit.tz = link.cockpit.tx, link.cockpit.tz

@@ -130,6 +130,7 @@ class UdpLink:
         self.events, self.sent, self.latencies = {}, {}, []
         self.seq = self.commands_sent = 0
         self.last_tel_wall = self.last_event_wall = 0.0
+        self.ind_items = {}
 
     def wall(self):
         return time.time()
@@ -155,6 +156,8 @@ class UdpLink:
                 if f.ax_seq in self.sent and f.rt is not None:
                     self.latencies.append(f.rt - self.sent.pop(f.ax_seq))
                 return f
+            if d.get("ev") == "ind":
+                self.ind_items[d.get("id")] = d.get("text", "")
             self.events[d.get("ev")] = d
             self.last_event_wall = time.time()
 
@@ -834,7 +837,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
-                                        "click", "radar", "lock", "fire", "ind"])
+                                        "click", "radar", "lock", "fire", "ind", "inddiff"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
     ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
@@ -843,6 +846,8 @@ def main(argv=None):
     ap.add_argument("--match-alt", action="store_true",
                     help="radar, lock, fire: fly to the nearest aircraft's altitude (a radar sees it best there)")
     ap.add_argument("--alt", type=float, default=None, help="radar, lock, fire: fly at this altitude, m")
+    ap.add_argument("--show", type=int, nargs="*", default=None,
+                    help="ind: print these displays in full (default: a summary of each); inddiff: only these displays")
     ap.add_argument("--tag", default="", help="ind: a name for the saved file (before_lock, locked)")
     ap.add_argument("--no-fly", action="store_true", help="radar, lock, fire: do not hold heading, altitude and speed")
     ap.add_argument("--secs", type=float, default=10.0, help="rate: how long to listen (s)")
@@ -894,7 +899,13 @@ def main(argv=None):
             return summary
         if a.test == "ind":
             import cockpit
-            cockpit.stage_ind(link, a.tag, a.out)
+            cockpit.stage_ind(link, a.tag, a.out, show=a.show)
+            return summary
+        if a.test == "inddiff":
+            import cockpit
+            if len(a.args) != 2:
+                raise SystemExit("inddiff FILE_A FILE_B (two files saved by `ind`)")
+            cockpit.ind_diff(a.args[0], a.args[1], ids=a.show)
             return summary
         if a.test in ("click", "radar", "lock", "fire"):
             import cockpit

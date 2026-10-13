@@ -15,7 +15,7 @@
 --   CMD <code> <value>                              one raw LoSetCommand (experiments)
 --   INFO                                            sends ev = "hello" again
 --   IND [first [last]]                              the text of the cockpit displays (HUD, MFDs, DED), read-only:
---                                                   answered with ev = "ind" (list_indication of each id)
+--                                                   one ev = "ind" per display (list_indication of each id), then ev = "ind_end"
 --   CLICK <device> <command> <value>                a cockpit switch or HOTAS control, as the
 --                                                   module's own key bindings do (answered with
 --                                                   ev = "click"); numbers from f16c_defs.json
@@ -289,14 +289,18 @@ local function handle(line)
       end
     end
   elseif cmd == "IND" then
+    -- one message per display (the HUD and the MFD pages are several KB each), then ev = "ind_end"
     local lo = math.floor(num(w[2], 0, 500) or 0)
     local hi = math.floor(math.min(num(w[3], 0, 500) or 49, lo + 99))
-    local items = {}
+    local count = 0
     for id = lo, hi do
       local ok, txt = pcall(list_indication, id)
-      if ok and type(txt) == "string" and #txt > 0 then items[#items + 1] = {id = id, text = txt:sub(1, 2500)} end
+      if ok and type(txt) == "string" and #txt > 0 then
+        count = count + 1
+        send({ev = "ind", id = id, len = #txt, text = txt:sub(1, 30000)})
+      end
     end
-    send({ev = "ind", rt = now(), t = try("LoGetModelTime"), items = items})
+    send({ev = "ind_end", count = count, rt = now(), t = try("LoGetModelTime")})
   elseif cmd == "INFO" then
     hello()
   end

@@ -353,28 +353,35 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False):
     return {"fired": fired, "payload": [pay0, pay1]}
 
 
-def stage_ind(link, tag="", out_dir=None, first=0, last=49):
-    """Ask the module for the text of the cockpit displays and print it (read-only)."""
+def _lines(text):
+    return [x.rstrip() for x in text.replace("\r", "").split("\n") if x.strip() and not set(x.strip()) <= {"-"}]
+
+
+def stage_ind(link, tag="", out_dir=None, first=0, last=49, show=None):
+    """Ask the module for the drawn elements (and the text) of the cockpit displays and print a summary. The
+    HUD and the MFD pages list the elements they are drawing: what appears when a target is designated or
+    locked shows in the difference between two saves (`inddiff`)."""
     import datetime
-    link.events.pop("ind", None)
+    link.events.pop("ind_end", None)
+    link.ind_items.clear()
     link.ind(first, last)
-    import time as _t
-    end = _t.time() + 4.0
-    while _t.time() < end and "ind" not in link.events:
+    end = time.time() + 5.0
+    while time.time() < end and "ind_end" not in link.events:
         link.next(timeout=0.3)
-    r = link.events.get("ind")
-    if not r:
+    if "ind_end" not in link.events:
         print("  no answer: reinstall the Export module (python dcs\\stick\\install_export.py) and restart the mission")
         return None
-    items = r.get("items") or []
-    print(f"  {len(items)} displays with text (ids {first} to {last})")
+    items = [{"id": i, "text": t} for i, t in sorted(link.ind_items.items())]
+    print(f"  {len(items)} displays (ids {first} to {last}); lines include names of drawn elements and values")
     for it in items:
-        lines = [x for x in it["text"].replace("\r", "").split("\n") if x.strip() and not set(x.strip()) <= {"-"}]
+        lines = _lines(it["text"])
+        full = show is not None and (not show or it["id"] in show)
         print(f"\n  display {it['id']}: {len(it['text'])} characters, {len(lines)} lines")
-        for x in lines[:14]:
-            print("     " + x[:110])
-        if len(lines) > 14:
-            print(f"     ... {len(lines) - 14} more lines (all of it is in the saved file)")
+        for x in (lines if full else lines[:6]):
+            print("     " + x[:120])
+        if not full and len(lines) > 6:
+            print(f"     ... {len(lines) - 6} more (--show {it['id']} prints them, inddiff compares two saves)")
+    r = {"ev": "ind", "items": items}
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, f"stick_ind_{tag + '_' if tag else ''}{datetime.datetime.now():%Y%m%d_%H%M%S}.json")
@@ -382,3 +389,31 @@ def stage_ind(link, tag="", out_dir=None, first=0, last=49):
             json.dump(r, fh, indent=1)
         print(f"\n  saved: {path}")
     return r
+
+
+def ind_diff(path_a, path_b, ids=None, out=None):
+    """Lines present in one saved `ind` and not the other, per display: + only in B, - only in A."""
+    import collections
+    out = out or print
+    docs = []
+    for p in (path_a, path_b):
+        with open(p) as fh:
+            docs.append({it["id"]: _lines(it["text"]) for it in json.load(fh)["items"]})
+    a, b = docs
+    changed = 0
+    for i in sorted(set(a) | set(b)):
+        if ids and i not in ids:
+            continue
+        ca, cb = collections.Counter(a.get(i, [])), collections.Counter(b.get(i, []))
+        plus, minus = list((cb - ca).elements()), list((ca - cb).elements())
+        if not plus and not minus:
+            continue
+        changed += 1
+        out(f"\n  display {i}: {len(minus)} lines only in A, {len(plus)} only in B")
+        for x in minus[:40]:
+            out("   - " + x[:120])
+        for x in plus[:40]:
+            out("   + " + x[:120])
+    if not changed:
+        out("  no difference between the two saves (in the displays compared)")
+    return changed
