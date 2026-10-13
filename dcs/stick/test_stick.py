@@ -749,9 +749,12 @@ def test_cockpit():
     real = ["Range_Scale_Root", "children are {", "Range_Scale_Value_Outlined", "40", "Range_Scale_Value", "40", "}",
             "FCR_Bearing_range", "174 245", "DBG_AA_RadarContactsKeeper", "Cursor_Root", "children are {",
             "Cursor_Line_Left", "Cursor_Line_Right", "Max_Search_Altitude", "34", "Min_Search_Altitude", "11", "}",
-            "FCR_TUC_contactData", "FCR_TUC_contact_Altitude", "23", "SOI"]
+            "FCR_TUC_contactData", "FCR_TUC_contact_Altitude", "23",
+            "  Table. Root. Unic ID: _id:8. Text", "4", "B", "children are {", "  Table. Root. Unic ID: _id:9. Text", "A",
+            "6", "RWS Table. Root. Unic ID: _id:14", "children are {", "RWS Table. Root. Unic ID: _id:14. Text", "RWS",
+            "TWS Table. Root. Unic ID: _id:17", "children are {", "}", "SOI"]
     assert cockpit.fcr_info(real) == {"br": (174, 245), "hi": 34, "lo": 11, "scale": 40, "tuc": True, "tuc_alt": 23,
-                                      "soi": True}, cockpit.fcr_info(real)
+                                      "soi": True, "mode": "RWS", "az": 6, "bars": 4}, cockpit.fcr_info(real)
     # the aimed lock: a target 30 deg right and 2 km above, which only aiming designates (scan_needed 999), is locked;
     # one 70 deg off the nose is refused
     # the aimed lock: the readout is switched from the bullseye (485 km ahead, like DCS's default) to our own aircraft
@@ -779,6 +782,19 @@ def test_cockpit():
         assert not locked0 or ("drops the lock first" in out and "after: radar search" in out), out[:1200]
         n_aim = out.count("    aim ")
         assert ref == "bull" or not ok or n_aim <= 12, (n_aim, out[-1500:])     # straight there, no hunting
+    # the TWS lock: target management right to TWS, right again bugs the track, up gives the single-target track
+    link = FakeLink(cockpit_defs=defs, scan_needed=999)
+    c, ac = link.cockpit, link.ac
+    c.aa = True
+    a = ac.hdg + math.radians(-40.0)
+    c.tx, c.tz = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_twslock(run, gains, defs)
+    out = buf.getvalue()
+    assert res["locked"] and "RWS -> TWS" in out and "mode now TWS" in out and "radar page: RWS, A6" in out, out[-1200:]
     print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
           "end on a fake cockpit, with and without a cursor scan; the aimed lock off the nose and above; master arm ends OFF; refusals are shown)")
 

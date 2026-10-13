@@ -96,6 +96,7 @@ class FakeCockpit:
         self.code = {(d["UFC"], defs["commands"]["ufc"]["AA"]): "aa",
                      (d["HOTAS"], h["STICK_TGT_MANAGE_UP"]): "tms_up",
                      (d["HOTAS"], h["STICK_TGT_MANAGE_DOWN"]): "tms_down",
+                     (d["HOTAS"], h["STICK_TGT_MANAGE_RIGHT"]): "tms_right",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_AFT"]): "cursor_aft",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_LEFT"]): "cursor_left",
@@ -129,6 +130,7 @@ class FakeCockpit:
         self.bx = ac.x + 485000.0 * math.cos(ac.hdg)     # DCS's default bullseye was 262 NM away
         self.bz = ac.z + 485000.0 * math.sin(ac.hdg)
         self.scale = 40
+        self.mode = "RWS"
         self.bull_on = True                # the readout is from the bullseye until the DED's BULL page toggles it
         self.last_key = None
 
@@ -163,6 +165,11 @@ class FakeCockpit:
             self.last_key = name
         elif name == "rng_up" and value == 1.0:
             self.scale = min(160, self.scale * 2)
+        elif name == "tms_right" and value == 1.0 and self.aa and self.soi_left:
+            if self.mode == "RWS":
+                self.mode = "TWS"
+            elif self.stage == 0 and abs(self.target_polar()[1]) < 60.0:
+                self.stage = 1                     # bug the (only) track
         elif name == "tms_down" and value != 0.0:            # the keymap sends -1.0
             self.stage = 0
         elif name == "arm":
@@ -205,7 +212,8 @@ class FakeCockpit:
         rng = math.hypot(cx - ox, cz - oz) / 1852.0
         hi, lo = self.coverage(self.cur_r)
         tuc = self.under_cursor() or (self.aa and self.scan_needed and self.cursor == self.scan_needed)
-        return ("Range_Scale_Root\nchildren are {\nRange_Scale_Value\n%d\n}\nFCR_Bearing_range\n%d %d\n"
+        return ("%s\nA\n6\n4\nB\n" % self.mode
+                + "Range_Scale_Root\nchildren are {\nRange_Scale_Value\n%d\n}\nFCR_Bearing_range\n%d %d\n"
                 "Cursor_Root\nchildren are {\nMax_Search_Altitude\n%d\nMin_Search_Altitude\n%d\n}\n"
                 % (self.scale, round(brg) % 360, round(rng), round(hi), round(lo))
                 + ("FCR_TUC_contactData\nFCR_TUC_contact_Altitude\n%d\n" % round(self.ty / 304.8) if tuc else "")
@@ -292,7 +300,7 @@ class FakeLink:
         n_amraam = sum(v["count"] for v in self.cockpit.stores.values()) if self.cockpit else 0
         self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "")
                              + "%d MRM\n" % n_amraam + ("ARM\n" if self.cockpit and self.cockpit.armed else "") + "-----------",
-                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n")
+                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else (self.cockpit.mode if self.cockpit else "RWS") + "\n")
                              + "Cursor_Range\n%d\n" % (20 + 3 * (self.cockpit.cursor if self.cockpit else 0))
                              + (self.cockpit.fcr_page() if self.cockpit else "") + "-----------"}
         self.events["ind_end"] = {"ev": "ind_end", "count": 2}

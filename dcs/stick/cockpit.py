@@ -452,7 +452,8 @@ def fcr_info(lines):
     height coverage at the cursor's range (thousands of feet), the range scale, a target under the cursor (and its
     altitude), and whether the page is the sensor of interest."""
     import re
-    out = {"br": None, "hi": None, "lo": None, "scale": None, "tuc": False, "tuc_alt": None, "soi": False}
+    out = {"br": None, "hi": None, "lo": None, "scale": None, "tuc": False, "tuc_alt": None, "soi": False,
+           "mode": None, "az": None, "bars": None}
 
     def nxt(i):
         return lines[i + 1].strip() if i + 1 < len(lines) else ""
@@ -473,6 +474,12 @@ def fcr_info(lines):
             out["tuc_alt"] = int(nxt(i))
         elif x == "SOI":
             out["soi"] = True
+        elif x in ("RWS", "TWS", "VSR", "ACM", "STT") and out["mode"] is None:
+            out["mode"] = x                       # the mode label's text (the other modes' tables are empty)
+        elif x == "A" and re.fullmatch(r"\d", nxt(i)):
+            out["az"] = int(nxt(i))               # A1 / A3 / A6: the scan is 10 / 30 / 60 deg either side of the cursor
+        elif re.fullmatch(r"\d", x) and nxt(i) == "B":
+            out["bars"] = int(x)
     return out
 
 
@@ -559,6 +566,8 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
                 click(run, spec, defs, fn=fn, verbose=False)
                 settle(run, 0.35, fn)
             settle(run, 0.5, fn)
+            ded = [x for x in ind_text(run, link, 6) if not x.startswith(("children", "}")) and len(x) < 40]
+            print("    the DED (display 6) now shows: " + " | ".join(ded[:24]))
             info = page()
             if own_like(info, run.frames[-1]):
                 ref = "own"
@@ -668,8 +677,8 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
             elev_tries += 1
         elif abs(dr) < tol["range"] and abs(daz) < tol["azimuth"]:
             if k > 0:                                    # at the start of a row: sweep it
-                step = min(max(2.0 / rate["az"], 0.02), 0.3)
-                n = int(math.ceil(2 * W / 2.0))
+                step = min(max(2.0 / rate["az"], 0.12), 0.3)       # shorter pulses did not move the cursor
+                n = int(math.ceil(2 * W / max(2.0, step * rate["az"])))
                 print(f"    sweeping {2 * W:.0f} deg to the right at {offsets[k][0]:+.0f} NM from the target's range "
                       f"({n} steps of {step:.2f} s)")
                 for _ in range(n):
@@ -720,6 +729,61 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
     state = st.get("state")
     print("  LOCKED: single-target track" if state == "stt" else "  DESIGNATED" if state == "designated" else
           "  not locked")
+    return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state}
+
+
+def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=True, tries=6):
+    """Lock without the cursor: target management right puts the radar in TWS (track while scan), where it builds
+    track files by itself; target management right again bugs a track (designated), and target management up then
+    gives a single-target track (stt=True). In a 1v1 the only track is the target."""
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    settle_setup(run, fn)
+    link = run.link
+    settle(run, 1.0, fn)
+    fid = _fcr_id(run)
+    st = _observe(run, 0.5, fn, "radar")
+    if relock and st.get("state") in ("designated", "stt"):
+        print("  --relock: target management down drops the lock first")
+        click(run, "hotas.STICK_TGT_MANAGE_DOWN", defs, fn=fn, verbose=False)
+        st = _observe(run, 1.5, fn, "after")
+    in_aa = master_mode(last_with(run.frames[-300:], "rd"))
+    if aa or (aa is None and in_aa is False):
+        print("  step: A-A master mode (ICP)")
+        click(run, "ufc.AA", defs, fn=fn)
+        settle(run, 1.5, fn)
+
+    def page():
+        return fcr_info(ind_text(run, link, fid))
+    info = page()
+    print(f"  radar page: {info['mode']}, A{info['az']} (scan {({1: 10, 3: 30, 6: 60}).get(info['az'], '?')} deg either "
+          f"side of the cursor), {info['bars']} bars, range scale {info['scale']} NM")
+    t0 = run.frames[-1].t
+    if info["mode"] != "TWS" and st.get("state") not in ("designated", "stt"):
+        print("  step: target management right: RWS -> TWS")
+        click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, fn=fn, verbose=False)
+        settle(run, 1.5, fn)
+        info = page()
+        print(f"    mode now {info['mode']}")
+        if info["mode"] != "TWS":
+            print("  the radar did not go to TWS: tell me what the radar page shows after target management right "
+                  "(Right Ctrl + Right) by hand")
+            return {"locked": False, "designated": False, "state": st.get("state"), "why": "no TWS"}
+        settle(run, 2.0, fn)                         # a scan or two to build the track file
+    for i in range(tries):
+        if st.get("state") in ("designated", "stt"):
+            break
+        click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, fn=fn, verbose=False)
+        st = _observe(run, 1.5, fn, f"target management right {i + 1}")
+    if st.get("state") == "designated" and stt:
+        print("  step: target management up: single-target track")
+        click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
+        st = _observe(run, 1.5, fn, "after")
+    state = st.get("state")
+    dt = run.frames[-1].t - t0
+    print(f"  LOCKED: single-target track ({dt:.0f} s)" if state == "stt" else
+          f"  DESIGNATED: the TWS track is bugged ({dt:.0f} s); the AIM-120 can be fired at it" if state == "designated"
+          else "  not locked: no track was bugged. Is the target inside the scan (the A setting either side of the "
+               "cursor) and the height coverage?")
     return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state}
 
 

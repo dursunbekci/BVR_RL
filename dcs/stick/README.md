@@ -348,3 +348,13 @@ one); no visit to an edge, 1 deg and 1 NM anywhere. (2) If the target is beyond 
 with OSB 19 first. (3) Missions put the bullseye 450 km away on purpose, so a bullseye readout cannot look like an ownship one.
 (4) `--offset` follows the target's bearing (the heading is recomputed from every world-objects frame) with up to 60 deg of
 bank; `--dalt` climbs at up to 80 m/s; setup is done within 3 deg and 300 m. On the fake: locks in 2-6 steps after the switch.
+
+**Aimed lock, third DCS run, and the TWS lock (13 October)**: the ICP keys (LIST, 0, 8, M-SEL, RTN) did not switch the readout
+("still 174/227"), so the bottom-edge bullseye search ran again; the cursor kept jumping from about 30 NM back to 12 after small
+forward pulses near the target's range (more than 15 times; not yet explained), the sweeps' 0.05 s pulses were too short to move
+it, and after 200 steps the target was only designated. The screenshot showed the cursor on the contact and the page in A 3:
+the scan covers 30 deg either side of the cursor, not of the nose. Changes: `lock --tws` locks without the cursor: target
+management right puts the radar in TWS, where it makes track files itself; target management right again bugs a track
+(designated: an AIM-120 can be fired at it) and target management up gives the single-target track (`--no-stt` stops at the
+bug). The page's mode (RWS/TWS), azimuth (A1/A3/A6) and bars are read and printed. `lock --aim` prints the DED (display 6) after
+the ICP keys, to see where the key presses went, and its sweep pulses are at least 0.12 s.
