@@ -306,6 +306,8 @@ class Hold:
     TAU_GAMMA = 3.0        # s to take out a flight-path error
     TAU_SPEED = 8.0        # s to take out a speed error
 
+    T_LEAD = 0.25          # s: the bank error is taken against the bank the roll rate will reach in this time
+                           # (DCS rolls 140 deg/s at a 0.6 command and needs about 0.4 s to stop)
     KP_V = 0.04            # throttle position per m/s of speed error
     KI_V = 0.002           # and per m/s of error and second
 
@@ -313,6 +315,7 @@ class Hold:
         self.g, self.bank_max, self.nz_max = gains, bank_max, nz_max
         self.prev = None
         self.integral, self.t_speed = 0.0, None
+        self.prev_bank, self.roll_rate = None, 0.0
 
     def axes(self, f, hdg, alt, v=None, thr=None):
         g = self.g
@@ -322,7 +325,12 @@ class Hold:
         self.prev = (f.t, f.alt)
         tas = max(f.tas or 150.0, 80.0)
         bank_cmd = max(-self.bank_max, min(self.bank_max, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
-        rate_cmd = max(-3.0, min(3.0, self.K_BANK_RATE * (bank_cmd - f.bank)))
+        if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
+            inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
+            self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s
+        self.prev_bank = (f.t, f.bank)
+        bank_pred = f.bank + self.T_LEAD * self.roll_rate
+        rate_cmd = max(-3.0, min(3.0, self.K_BANK_RATE * (bank_cmd - bank_pred)))
         if g.get("roll_curve"):
             roll = g["roll_sign"] * inverse(g["roll_curve"], rate_cmd)
         else:
@@ -697,11 +705,15 @@ def _steps(fr, t_cmd, hdg0, delta, span=22.0):
     d = (h - h[0]) * np.sign(delta)
     tgt = abs(delta)
     half = ts[np.argmax(d >= 0.5 * tgt)] if np.any(d >= 0.5 * tgt) else float("nan")
+    near = tgt - math.radians(10.0)
+    t10 = ts[np.argmax(d >= near)] if np.any(d >= near) else float("nan")
     nin = ts[np.argmax(d >= 0.9 * tgt)] if np.any(d >= 0.9 * tgt) else float("nan")
     rate = deriv(ts, h * np.sign(delta))
     bulk = (tgt - d > math.radians(30)) & (ts > 1.5)
     bank = np.array([f.bank for f in seg]) * np.sign(delta)
-    return {"delta_deg": delta * DEG, "half_s": float(half), "p90_s": float(nin),
+    peak_rate = float(np.nanmax(deriv(ts, h * np.sign(delta), smooth=41)) * DEG)
+    return {"delta_deg": delta * DEG, "half_s": float(half), "p90_s": float(nin), "within10_s": float(t10),
+            "peak_rate_dps": peak_rate,
             "rate_bulk_dps": float(np.nanmean(rate[bulk]) * DEG) if np.any(bulk) else float("nan"),
             "peak_bank_deg": float(np.nanmax(bank) * DEG), "peak_nz": float(np.nanmax([f.nz for f in seg]))}
 
@@ -775,10 +787,12 @@ def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0
     lat = link.latencies
     res["loop"] = {"commands": link.commands_sent, "command_to_frame_ms_p50": 1e3 * pct(lat, 50),
                    "p95": 1e3 * pct(lat, 95)}
-    print(f"\n  {'step':<10}{'turn':>7}{'half':>8}{'90%':>8}{'deg/s':>8}{'bank':>7}{'nz':>6}")
+    print(f"\n  {'step':<10}{'turn':>7}{'half':>8}{'to 10d':>8}{'90%':>8}{'mean':>8}{'peak':>7}{'bank':>7}{'nz':>6}")
     for i, s in enumerate(res["heading_steps"]):
-        print(f"  {'turn ' + str(i + 1):<10}{s['delta_deg']:>+6.0f}d{s['half_s']:>7.1f}s{s['p90_s']:>7.1f}s"
-              f"{s['rate_bulk_dps']:>8.1f}{s['peak_bank_deg']:>6.0f}d{s['peak_nz']:>6.1f}")
+        print(f"  {'turn ' + str(i + 1):<10}{s['delta_deg']:>+6.0f}d{s['half_s']:>7.1f}s{s['within10_s']:>7.1f}s"
+              f"{s['p90_s']:>7.1f}s{s['rate_bulk_dps']:>8.1f}{s['peak_rate_dps']:>7.1f}{s['peak_bank_deg']:>6.0f}d{s['peak_nz']:>6.1f}")
+    print(f"  (deg/s: mean while more than 30 deg to go, and peak; bank limit {bank_deg:.0f} deg sustains "
+          f"{math.degrees(G * math.tan(math.radians(bank_deg)) / max(v0, 100.0)):.1f} deg/s at {v0:.0f} m/s)")
     a, s_, e, lp = res["alt_step"], res["speed_step"], res["hold_error"], res["loop"]
     print(f"  altitude +{a['step_m']:.0f} m: 90% in {a['t90_s']:.1f} s, overshoot {a['overshoot_m']:.0f} m")
     print(f"  speed +{s_['step_ms']:.0f} m/s: 90% in {s_['t90_s']:.1f} s, final error {s_['end_error']:+.1f} m/s")
@@ -825,6 +839,7 @@ def main(argv=None):
     ap.add_argument("--fake", action="store_true", help="fly a synthetic aircraft instead of DCS")
     ap.add_argument("--fake-roll-sign", type=int, default=1)
     ap.add_argument("--fake-pitch-sign", type=int, default=1)
+    ap.add_argument("--fake-roll-tau", type=float, default=0.12, help="fake aircraft: roll rate lag, s")
     ap.add_argument("--fake-thr-inverted", action="store_true", help="fake aircraft: throttle code -1 is most thrust")
     ap.add_argument("--fake-curve", type=float, default=1.0, help="fake aircraft: response ~ command ** this")
     ap.add_argument("--port-tel", type=int, default=TEL_PORT)
@@ -834,7 +849,7 @@ def main(argv=None):
     if a.fake:
         from fake_export import FakeLink
         link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign, curve_pow=a.fake_curve,
-                        thr_inverted=a.fake_thr_inverted)
+                        thr_inverted=a.fake_thr_inverted, roll_tau=a.fake_roll_tau)
     else:
         link = UdpLink(a.port_tel, a.port_cmd)
     gains_path = a.gains or os.path.join(a.out, "stick_gains.json")

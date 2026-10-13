@@ -178,3 +178,14 @@ the steps from there.
 altitude held), then telemetry stopped for 3 s as the plan began. The abort message now says whether DCS is
 still running frames with the model time stopped (a pause: the module sends an `idle` line once a second
 while paused) or nothing at all arrives, and gives the last frame.
+
+**First closed-loop `hold --speed 280` (13 October)**: it works. Speed captured 307 to 283 m/s in 16 s (PI on
+the throttle); held 8 m altitude, 0.0 deg heading and 2 m/s speed in the first 8 s; altitude step +300 m: 90% in
+14 s, overshoot 10 m; speed +40 m/s: 35 m/s in 24 s (afterburner is slow); command to the frame that shows it
+9 ms p50, 14 ms p95 (DCS ran 125 fps). The turns, with a 60 deg bank limit, 3.8 and 3.4 deg/s (60 deg of bank
+sustains 3.6 deg/s at 283 m/s, so that is the limit, not the airframe), peak 3.2 and 3.7 g. But the bank went to
+76 and 80 deg against the 60 deg limit: the Viper rolls about 140 deg/s for a command of 0.5 to 0.8, follows
+within 50 to 100 ms, and needs about 0.4 s to stop, so a bank loop without lead overshoots by 15 to 20 deg.
+The roll loop now aims at the bank the roll rate would reach in 0.25 s (`Hold.T_LEAD`). The aircraft also
+unloads to about 0.4 g for 0.3 s in a fast roll (the pitch axis lags 228 ms); altitude moved by metres.
+Next: `hold --speed 280 --bank 70 --nz 5` (5 deg/s) and then `--bank 80 --nz 6` (the simulator's 8 deg/s).

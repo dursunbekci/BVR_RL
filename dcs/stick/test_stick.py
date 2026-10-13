@@ -428,6 +428,24 @@ def test_fake_end_to_end():
           f"hold turn {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank; limits stop it)")
 
 
+def test_roll_lead():
+    """DCS rolls 140 deg/s and takes 0.4 s to stop: without the lead term the bank overshoots by 15 deg or more."""
+    import stick_test
+    peaks = {}
+    for lead in (0.0, stick_test.Hold.T_LEAD):
+        stick_test.Hold.T_LEAD = lead
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                s = stick_test.main(["all", "--fake", "--fake-roll-tau", "0.35", "--bank", "60", "--out", d])
+        finally:
+            stick_test.Hold.T_LEAD = 0.25
+        assert "aborted" not in s, s
+        peaks[lead] = s["hold"]["heading_steps"][0]["peak_bank_deg"]
+    assert peaks[0.0] > 70 and peaks[0.25] < 66, peaks
+    print(f"  bank lead ................... OK  (a 0.35 s roll lag: peak bank {peaks[0.0]:.0f} deg without the lead, "
+          f"{peaks[0.25]:.0f} with, for a 60 deg limit)")
+
+
 def test_stall_message():
     import stick_test
     from fake_export import FakeLink
@@ -499,6 +517,7 @@ if __name__ == "__main__":
     test_udp_link()
     test_fake_end_to_end()
     test_fake_nonlinear()
+    test_roll_lead()
     test_stall_message()
     test_install()
-    print("7/7 passed")
+    print("8/8 passed")
