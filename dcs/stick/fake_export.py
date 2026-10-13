@@ -107,6 +107,7 @@ class FakeCockpit:
         self.missile = None
         self.tx = ac.x + tgt_range * math.cos(ac.hdg)
         self.tz = ac.z + tgt_range * math.sin(ac.hdg)
+        self.ty = ac.alt                   # the target flies level at the start altitude
         self.ac0 = ac
 
     def press(self, dev, cmd, value):
@@ -146,7 +147,7 @@ class FakeCockpit:
     def extras(self, ac):
         rng = math.hypot(self.tx - ac.x, self.tz - ac.z)
         tgt = {"id": 10, "name": "F-16C_50", "unit": "TGT-1", "coal": 1, "l1": 1, "l2": 1,
-               "x": self.tx, "y": ac.alt, "z": self.tz}
+               "x": self.tx, "y": self.ty, "z": self.tz}
         info = {"1": {"ID": 1, "distance": rng}}
         out = {"obj": [tgt] + ([self.missile] if self.missile else []),
                "radar": {"targets": info if self.aa else {}, "locked": info if self.locked else {}},

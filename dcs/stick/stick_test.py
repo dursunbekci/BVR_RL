@@ -20,6 +20,7 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
     python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
     python dcs/stick/stick_test.py ind --tag locked    the text of the cockpit displays (HUD, MFDs): run it with and without a lock
+    python dcs/stick/stick_test.py cursormap           slew the radar cursor to each edge of the page and save the page (azimuth and range map)
     python dcs/stick/stick_test.py cursortry           try nine ways of moving the radar cursor, announced; you say which moved it
     python dcs/stick/stick_test.py cursor              slew the radar cursor and print which lines of the radar page follow it
     python dcs/stick/stick_test.py lock                try to lock the target (needs make_mission --stick-test --target)
@@ -839,7 +840,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
-                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry"])
+                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry", "cursormap"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
     ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
     ap.add_argument("--mode", choices=["c", "s", "l"], default=None,
@@ -848,6 +849,10 @@ def main(argv=None):
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
+    ap.add_argument("--offset", type=float, default=None,
+                    help="lock, fire, cursormap: first turn so the target is this many degrees right of the nose (negative: left)")
+    ap.add_argument("--dalt", type=float, default=None,
+                    help="lock, fire, cursormap: fly this many metres above the target (negative: below) instead of level with it")
     ap.add_argument("--release-hold", type=float, default=1.5,
                     help="fire: seconds the weapon release button is held (default 1.5; the missile leaves only while it is held)")
     ap.add_argument("--watch", type=int, default=15,
@@ -925,9 +930,10 @@ def main(argv=None):
                 raise SystemExit("inddiff FILE_A FILE_B (two files saved by `ind`)")
             cockpit.ind_diff(a.args[0], a.args[1], ids=a.show)
             return summary
-        if a.test in ("click", "radar", "lock", "fire", "cursor", "cursortry"):
+        if a.test in ("click", "radar", "lock", "fire", "cursor", "cursortry", "cursormap"):
             import cockpit
             defs = cockpit.load_defs()
+            cockpit.HOLD_OPTS.update(offset=a.offset, dalt=a.dalt)
             gains = load_gains(gains_path)
             have = all(k in gains for k in ("roll_sign", "pitch_sign", "thr_sign")) and gains.get("roll_curve") \
                 and gains.get("pitch_curve")
@@ -946,6 +952,9 @@ def main(argv=None):
                         cockpit.click(run, spec, defs, value=a.value, hold=a.hold, release=a.release, mode=a.mode)
                     except ValueError as e:
                         raise SystemExit(str(e))
+                elif a.test == "cursormap":
+                    summary["cursormap"] = cockpit.stage_cursormap(run, fgains, defs, out_dir=a.out, alt=a.alt,
+                                                                   match_alt=a.match_alt)
                 elif a.test == "cursortry":
                     summary["cursortry"] = cockpit.stage_cursortry(run, fgains, defs, alt=a.alt, match_alt=a.match_alt)
                 elif a.test == "cursor":

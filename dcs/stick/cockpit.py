@@ -181,22 +181,44 @@ def target_altitude(run):
     return (fo.alt or 0.0) + nr[3]
 
 
+# set from the command line: put the target this many degrees right of the nose (negative: left) and fly this
+# many metres above it (negative: below) before lock and fire, to try the radar off the nose and off the level
+HOLD_OPTS = {"offset": None, "dalt": None}
+
+
 def hold_fn(run, gains, alt=None, match_alt=False):
     """A function (frame, tau) -> axes that keeps the heading and speed as they are now and the altitude as
     they are, or at `alt`, or at the nearest aircraft's altitude (match_alt): a radar sees a target best at
-    its own height."""
+    its own height. HOLD_OPTS turns to put the target `offset` degrees off the nose and adds `dalt` to the
+    target's altitude."""
     from stick_test import Hold
     f0 = run.next()
+    want_obj = match_alt or HOLD_OPTS.get("offset") is not None or HOLD_OPTS.get("dalt") is not None
     for _ in range(12):                     # the world objects come every 5th frame: wait for one
-        if "obj" in f0.raw or not match_alt:
+        if "obj" in f0.raw or not want_obj:
             break
         f0 = run.next()
-    h = Hold(gains, bank_max=math.radians(30))
+    off, dalt = HOLD_OPTS.get("offset"), HOLD_OPTS.get("dalt")
+    h = Hold(gains, bank_max=math.radians(45 if off is not None else 30))
     hdg, v = f0.hdg, f0.tas
-    if match_alt and alt is None:
+    if off is not None:
+        nr = nearest(f0) if "obj" in f0.raw else None
+        if nr is None:
+            print("  --offset: no other aircraft in the world objects; keeping the heading")
+        else:
+            hdg = (f0.hdg + math.radians(nr[2] - off)) % (2 * math.pi)
+            print(f"  turning to put the target {off:+.0f} deg off the nose (it is {nr[2]:+.0f} now): heading "
+                  f"{math.degrees(hdg):.0f}")
+    if (match_alt or dalt is not None) and alt is None:
         alt = target_altitude(run)
-        print(f"  matching the target's altitude: {alt:.0f} m (now {f0.alt:.0f})" if alt else
-              "  --match-alt: no other aircraft in the world objects yet; keeping the altitude")
+        if alt is not None and dalt is not None:
+            alt += dalt
+        if alt is None:
+            print("  no other aircraft in the world objects yet; keeping the altitude")
+        elif dalt is None:
+            print(f"  matching the target's altitude: {alt:.0f} m (now {f0.alt:.0f})")
+        else:
+            print(f"  flying {dalt:+.0f} m from the target's altitude: {alt:.0f} m (now {f0.alt:.0f})")
     alt = alt if alt is not None else f0.alt
     return lambda f, tau: h.axes(f, hdg, alt, v=v)
 
@@ -267,6 +289,28 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
     return {"targets_seen": samples["targets"] is not None, "locked_seen": samples["locked"] is not None}
 
 
+def settle_setup(run, fn, max_secs=90.0):
+    """With --offset or --dalt: fly until the target sits where asked (within 3 deg, 150 m) or max_secs."""
+    off, dalt = HOLD_OPTS.get("offset"), HOLD_OPTS.get("dalt")
+    if fn is None or (off is None and dalt is None):
+        return
+    t0 = None
+    while True:
+        fr = settle(run, 2.0, fn)
+        f = fr[-1] if fr else run.next()
+        t0 = f.t if t0 is None else t0
+        fo = last_with(fr, "obj")
+        nr = nearest(fo) if fo else None
+        if nr is None:
+            return
+        ok_az = off is None or abs(nr[2] - off) < 3.0
+        ok_alt = dalt is None or abs(-nr[3] - dalt) < 150.0
+        print(f"    setting up: target {nr[1] / 1000:.1f} km, {nr[2]:+.0f} deg off the nose, we are {-nr[3]:+.0f} m "
+              f"from its altitude")
+        if (ok_az and ok_alt) or f.t - t0 > max_secs:
+            return
+
+
 def _observe(run, secs, fn, label):
     fr = settle(run, secs, fn)
     fr_r, fr_o, fr_d = last_with(fr, "radar"), last_with(fr, "obj"), last_with(fr, "rd")
@@ -284,6 +328,7 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None,
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    settle_setup(run, fn)
     fr0 = settle(run, 1.5, fn)
     f_o = last_with(fr0, "obj")
     nr = nearest(f_o) if f_o else None
@@ -429,6 +474,7 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
     the payload; master arm back to OFF at the end."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
     link = run.link
+    settle_setup(run, fn)
     fr0 = settle(run, 1.5, fn)
     f_r, f_o, f_p, f_d = last_with(fr0, "radar"), last_with(fr0, "obj"), last_with(fr0, "pay"), last_with(fr0, "rd")
     st = radar_state(f_r) if f_r else {"targets": 0, "locked": 0}
@@ -686,6 +732,72 @@ def stage_cursortry(run, gains, defs, hold=2.5, only=None, alt=None, match_alt=F
         done.append(tag)
     print("\n  Tell me the letters (A-I) where the cursor moved, or 'none'.")
     return {"tried": done}
+
+
+def _pairs(lines):
+    """The radar page's lines that are two integers ('174 248'): the cursor's place is one of them."""
+    import re
+    return [x.strip() for x in lines if re.fullmatch(r"-?\d+ -?\d+", x.strip())]
+
+
+def stage_cursormap(run, gains, defs, hold=1.0, max_steps=15, out_dir=None, alt=None, match_alt=False):
+    """Slew the radar cursor to each edge of the radar page (left, right, back to the middle, near, far) and save the
+    page after every step, to learn how the cursor's readout maps to azimuth and range."""
+    import datetime
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    settle_setup(run, fn)
+    link = run.link
+    fid = _fcr_id(run)
+    settle(run, 1.0, fn)
+    fo = last_with(run.frames[-300:], "obj")
+    nr = nearest(fo) if fo else None
+    page = ind_text(run, link, fid)
+    if not page:
+        print(f"  no text from the radar page (display {fid}): is the radar page up on the left MFD (A-A mode)?")
+        return None
+    caps = [{"step": "start", "pairs": _pairs(page), "lines": page,
+             "target": None if nr is None else {"km": nr[1] / 1000, "az": nr[2], "dalt": nr[3]}}]
+    print(f"  radar page is display {fid}; target {('%.1f km, %+.0f deg' % (nr[1] / 1000, nr[2])) if nr else '?'}")
+    print(f"  start: number pairs on the page {caps[0]['pairs']}")
+
+    def go(spec, label, until=None):
+        prev, still = caps[-1]["pairs"], 0
+        for i in range(max_steps):
+            click(run, spec, defs, hold=hold, fn=fn, verbose=False)
+            settle(run, 0.3, fn)
+            cur = ind_text(run, link, fid)
+            pr = _pairs(cur)
+            fo2 = last_with(run.frames[-100:], "obj")
+            n2 = nearest(fo2) if fo2 else None
+            caps.append({"step": f"{label}{i + 1}", "pairs": pr, "lines": cur,
+                         "target": None if n2 is None else {"km": n2[1] / 1000, "az": n2[2], "dalt": n2[3]}})
+            changed = [(a, b) for a, b in zip(prev, pr) if a != b] if len(prev) == len(pr) else [("count", len(pr))]
+            tuc = any("FCR_TUC_contactData" in x for x in cur)
+            print(f"    {label} {i + 1}: {pr}{'  TARGET UNDER CURSOR' if tuc else ''}"
+                  + ("" if changed else "  (no change)"))
+            still = 0 if changed else still + 1
+            prev = pr
+            if still >= 2 or (until and until(pr)):
+                return pr
+        return prev
+    start = caps[0]["pairs"]
+    print("  left edge:")
+    go("hotas.THROTTLE_RDR_CURSOR_LEFT", "left")
+    print("  right edge:")
+    go("hotas.THROTTLE_RDR_CURSOR_RIGHT", "right", )
+    print("  back to the middle:")
+    go("hotas.THROTTLE_RDR_CURSOR_LEFT", "middle", until=lambda pr: pr == start or (pr and start and pr[0] <= start[0]))
+    print("  near edge (the range scale may step down):")
+    go("hotas.THROTTLE_RDR_CURSOR_AFT", "near")
+    print("  far edge (the range scale may step up):")
+    go("hotas.THROTTLE_RDR_CURSOR_FWD", "far")
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, f"stick_cursormap_{datetime.datetime.now():%Y%m%d_%H%M%S}.json")
+        with open(path, "w") as fh:
+            json.dump(caps, fh, indent=1)
+        print(f"\n  saved: {path}  (send me this file)")
+    return {"steps": len(caps) - 1}
 
 
 def stage_cursorprobe(run, gains, defs, steps=8, hold=0.5, out_dir=None, alt=None, match_alt=False):

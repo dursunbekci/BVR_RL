@@ -731,6 +731,20 @@ def test_cockpit():
         with contextlib.redirect_stdout(out):
             stick_test.main(["click", "ufc.AA", "--fake", "--out", d])
         assert "device 17, command 3018" in out.getvalue(), out.getvalue()
+    # --offset and --dalt: the script turns to put the target 30 deg right and climbs 500 m above it; cursormap runs
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    cockpit.HOLD_OPTS.update(offset=30.0, dalt=500.0)
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = cockpit.stage_cursormap(run, gains, defs, hold=0.2, max_steps=3)
+    finally:
+        cockpit.HOLD_OPTS.update(offset=None, dalt=None)
+    nr = cockpit.nearest(cockpit.last_with(run.frames[-300:], "obj"))
+    assert abs(nr[2] - 30.0) < 5.0 and abs(-nr[3] - 500.0) < 200.0 and res["steps"] > 0, (nr, buf.getvalue()[-800:])
     print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
           "end on a fake cockpit, with and without a cursor scan; master arm ends OFF; refusals are shown)")
 
