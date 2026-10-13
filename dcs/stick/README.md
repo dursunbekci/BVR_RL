@@ -173,3 +173,8 @@ now a PI on speed (position u = trim + 0.04 e + integral, code = sign * u), foun
 -4.1, -1.5, 0.0, +0.9, +4.2 m/s2 at about 300 m/s: monotonic, thrust-neutral at u = +0.02 (Mach 0.94).
 `hold --speed 280` first captures a speed with the PI loop (heading and altitude held on the stick), then runs
 the steps from there.
+
+`hold --speed 280` (13 October): the speed capture worked (316 to 283 m/s in 19 s on the PI loop, heading and
+altitude held), then telemetry stopped for 3 s as the plan began. The abort message now says whether DCS is
+still running frames with the model time stopped (a pause: the module sends an `idle` line once a second
+while paused) or nothing at all arrives, and gives the last frame.

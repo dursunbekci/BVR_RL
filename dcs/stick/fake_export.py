@@ -96,6 +96,7 @@ class FakeLink:
                                                           "throttle": 2004}, "codes_from": "fake"},
                        "stats": {"ev": "stats", "tel_hz": 50.0, "frame_hz": 60.0, "event_hz": 1.0, "frame_dt_max": 0.02}}
         self.seq = 0
+        self.last_tel_wall = self.last_event_wall = 0.0
         self._wall = 1.0e9
         self.commands_sent = 0
 

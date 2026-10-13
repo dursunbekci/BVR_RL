@@ -219,16 +219,20 @@ def test_lua_export():
     calls = g.CALLS
     assert calls.start == 1 and calls.before > 100 and calls.after > 100 and calls.activity >= 6, \
         (calls.start, calls.before, calls.after, calls.activity)
-    g.LuaExportStop()
-    assert g.CALLS.stop == 1
-    assert any(json.loads(d)["ev"] == "bye" for _, d in sent())
-    for _, d in sent():
-        json.loads(d)
     # pause: the model time stands still, so nothing is sent (and the axes are not re-sent either way)
     n = len([1 for _, d in sent() if json.loads(d)["ev"] == "tel"])
     run(0.5, paused=True)
     assert len([1 for _, d in sent() if json.loads(d)["ev"] == "tel"]) == n, "telemetry while paused"
 
+    # while paused the module says so once a second, so a script can tell "paused" from "DCS gone"
+    idle = [d for d in m.lines() if d["ev"] == "idle"]
+    assert 0 < len(idle) <= 2, len(idle)
+
+    g.LuaExportStop()
+    assert g.CALLS.stop == 1
+    assert any(json.loads(d)["ev"] == "bye" for _, d in sent())
+    for _, d in sent():
+        json.loads(d)
     # the other source: the activity event, which runs at frame boundaries here, so 30/s at 60 fps
     e = Mock("event")
     e.g.LuaExportStart()
@@ -424,6 +428,34 @@ def test_fake_end_to_end():
           f"hold turn {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank; limits stop it)")
 
 
+def test_stall_message():
+    import stick_test
+    from fake_export import FakeLink
+
+    class Silent(FakeLink):
+        def next(self, timeout=1.0):
+            return None
+    link = FakeLink()
+    run = stick_test.Run(link, None, "stall", stick_test.Limits(min_agl=0, min_alt=0))
+    for _ in range(5):
+        run.next()
+    run.link = Silent()
+    try:
+        run.next()
+    except stick_test.Abort as e:
+        assert "nothing at all" in str(e) and "model time" in str(e) and "Mach" in str(e), str(e)
+    else:
+        raise AssertionError("a silent link did not stop the run")
+    run.link.last_tel_wall, run.link.last_event_wall = 10.0, 11.0          # an idle line came after the last frame
+    try:
+        run.next()
+    except stick_test.Abort as e:
+        assert "PAUSED" in str(e), str(e)
+    else:
+        raise AssertionError("a paused sim did not stop the run")
+    print("  stall diagnosis ............. OK  (paused sim and silent DCS are told apart, with the last frame)")
+
+
 def test_install():
     import install_export
     sample = "-- my export\r\nlocal x = 1\r\n"
@@ -467,5 +499,6 @@ if __name__ == "__main__":
     test_udp_link()
     test_fake_end_to_end()
     test_fake_nonlinear()
+    test_stall_message()
     test_install()
-    print("6/6 passed")
+    print("7/7 passed")

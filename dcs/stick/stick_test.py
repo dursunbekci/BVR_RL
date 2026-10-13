@@ -124,6 +124,7 @@ class UdpLink:
         self.addr = (host, cmd_port)
         self.events, self.sent, self.latencies = {}, {}, []
         self.seq = self.commands_sent = 0
+        self.last_tel_wall = self.last_event_wall = 0.0
 
     def wall(self):
         return time.time()
@@ -144,11 +145,13 @@ class UdpLink:
             except ValueError:
                 continue
             if d.get("ev") == "tel":
+                self.last_tel_wall = time.time()
                 f = Frame(d)
                 if f.ax_seq in self.sent and f.rt is not None:
                     self.latencies.append(f.rt - self.sent.pop(f.ax_seq))
                 return f
             self.events[d.get("ev")] = d
+            self.last_event_wall = time.time()
 
     def _send(self, text):
         self.tx.sendto(text.encode(), self.addr)
@@ -201,7 +204,15 @@ class Run:
     def next(self):
         f = self.link.next(timeout=3.0)
         if f is None:
-            raise Abort("no telemetry for 3 s (sim paused? DCS closed? Export.lua not loaded?)")
+            last = self.frames[-1] if self.frames else None
+            where = (f"; last frame: model time {last.t:.1f} s, {last.alt:.0f} m, {last.tas:.0f} m/s "
+                     f"(Mach {last.mach:.2f}), bank {last.bank * DEG:+.0f} deg") if last else ""
+            alive = getattr(self.link, "last_event_wall", 0.0) > getattr(self.link, "last_tel_wall", 0.0)
+            if alive:
+                raise Abort("telemetry stopped but DCS is still running its frames: the sim is PAUSED (Esc menu? "
+                            "Pause key? a dialog over DCS?)" + where)
+            raise Abort("nothing at all from DCS for 3 s: DCS frozen, loading, minimised or closed?" + where
+                        + ". If it came back, the mission may have stalled: look at dcs.log")
         self.frames.append(f)
         if self.fh:
             self.fh.write(json.dumps(f.raw, separators=(",", ":")) + "\n")

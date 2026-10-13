@@ -312,7 +312,13 @@ end
 
 local function emit()
   local r, mt = now(), try("LoGetModelTime")
-  if mt and S.last_emit_mt and mt <= S.last_emit_mt + 1e-6 then return end     -- paused
+  if mt and S.last_emit_mt and mt <= S.last_emit_mt + 1e-6 then                -- paused
+    if not S.last_idle or r - S.last_idle >= 1.0 then                         -- say so, once a second
+      S.last_idle = r
+      send({ev = "idle", rt = r, t = mt, why = "model time is not advancing (paused)"})
+    end
+    return
+  end
   if CFG.source == "frame" and S.last_emit_rt and r - S.last_emit_rt < 0.8 / CFG.max_rate then return end
   S.last_emit_mt, S.last_emit_rt = mt, r
   S.n, S.stat_tel = S.n + 1, S.stat_tel + 1
