@@ -285,3 +285,16 @@ worked had the radar page as the sensor of interest; A-A mode puts the weapons p
 the cursor slew and target management act on the sensor of interest. `lock` now first sends display management left (`--soi
 left`, `right` or `none`): the keymap sends -1.0 for left and down, +1.0 for right and up. `click` takes `--release` to set an
 axis back after `--hold`.
+
+**Lock works from a script (13 October, corrects the paragraph above)**: the cursor and target management did nothing because the
+HOTAS controls were delivered the wrong way, not because of the radar's state. `GetDevice(0):performClickableAction` (a mouse
+click on the element) reaches the MFD and the drop-lock switch but does not move the radar cursor; `GetDevice(dev):SetCommand`
+(how the module's key bindings deliver a command) does, and so does the cursor axis through it (`cursortry`: A to F and H, the
+click route and the global command queue, did nothing; G and I, SetCommand, moved it). `CLICK` takes a fifth word `c`, `s` or
+`l` for the route; the HOTAS controls (device 16) now go through `s` by default (`click --mode` overrides). The cursor lines I
+read as unchanged were slewed by the old route, so they proved nothing: with the working route, the radar page's
+`174 xxx` / two numbers lines follow the cursor in range, and while a contact is under the cursor the page lists
+`FCR_TUC_contactData`, `FCR_TUC_contact_Altitude` and the contact's altitude in thousands of feet (it shows for one cursor step as the
+cursor crosses the contact). `lock --scan` slews the cursor in range until that appears and presses target management up
+only then: designated after 7 steps, a second press gave the single-target track (radar `stt`), 59 km ahead at the target's altitude.
+Display management is no longer pressed by default (`--soi none`): in one run it left the left MFD on its menu page.
