@@ -280,7 +280,7 @@ def _observe(run, secs, fn, label):
 
 
 def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None, soi="left",
-               scan_steps=40, scan_hold=0.2):
+               scan_steps=40, scan_hold=0.3):
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -332,18 +332,43 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None,
         st = _observe(run, 2.0, fn, "after")
         log.append((label, st.get("state"), st["locked"]))
     if st.get("state") not in ("designated", "stt") and scan:
-        # The radar page's text does not show where the cursor is, so it is found by trying: to the near end first, then
-        # out in small steps with target management up after each (a press away from the contact does nothing).
-        print(f"  scan: cursor to the near end, then out in {scan_steps} steps of {scan_hold:g} s with target "
-              f"management up after each. Watch the radar page: the cursor should go down, then climb.")
-        click(run, "hotas.THROTTLE_RDR_CURSOR_AFT", defs, hold=5.0, fn=fn, verbose=False)
-        for i in range(scan_steps):
-            click(run, "hotas.THROTTLE_RDR_CURSOR_FWD", defs, hold=scan_hold, fn=fn, verbose=False)
-            click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
-            st = _observe(run, 0.8, fn, f"scan {i + 1}")
-            if st.get("state") in ("designated", "stt"):
-                print(f"  designated after {i + 1} cursor steps ({(i + 1) * scan_hold:.1f} s of slewing from the near end)")
+        # The radar page lists FCR_TUC_contactData while a contact is under the cursor (measured: it appears for one
+        # cursor step as the cursor crosses the contact), so the cursor is slewed in range until that shows and
+        # target management is pressed only then. The first press that designates names the delivery mode that works.
+        fid = _fcr_id(run)
+        link = run.link
+        print(f"  scan: cursor in range (up to {scan_steps} steps out, then {2 * scan_steps} back, {scan_hold:g} s each) until "
+              f"the radar page shows a target under the cursor, then target management up. Watch the cursor on the left MFD.")
+
+        def tuc():
+            return any("FCR_TUC_contactData" in x for x in ind_text(run, link, fid))
+
+        def press():
+            nonlocal st
+            for mode in ("s", "c", "l"):
+                click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False, mode=mode)
+                st = _observe(run, 1.0, fn, f"target management up (mode {mode})")
+                if st.get("state") in ("designated", "stt"):
+                    print(f"  designated: delivery mode {mode} works for target management")
+                    return True
+            return False
+        moves = ["hotas.THROTTLE_RDR_CURSOR_FWD"] * scan_steps + ["hotas.THROTTLE_RDR_CURSOR_AFT"] * (2 * scan_steps)
+        found = tuc()
+        for i in range(len(moves) + 1):
+            if found:
+                print(f"  a target is under the cursor (after {i} cursor steps)")
+                if not press():
+                    print("  the contact is under the cursor but no delivery mode of target management up designated it: "
+                          "is the radar the sensor of interest (left MFD, SOI box)? is it a mode that needs TMS held?")
                 break
+            if i == len(moves):
+                print("  the cursor never showed a target under it: wrong range scale, or the radar does not see the target")
+                break
+            click(run, moves[i], defs, hold=scan_hold, fn=fn, verbose=False)
+            settle(run, 0.15, fn)
+            found = tuc()
+            if i % 5 == 4:
+                print(f"    scan {i + 1}: {'out' if i < scan_steps else 'back'}, still searching")
         if st.get("state") == "designated":
             print("  step: target management up again: single-target track")
             click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn)
