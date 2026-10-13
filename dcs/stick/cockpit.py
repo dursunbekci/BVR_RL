@@ -754,6 +754,13 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
 
     def page():
         return fcr_info(ind_text(run, link, fid))
+
+    def names():
+        """The element names the radar page draws (no numbers or braces)."""
+        import re
+        return {x.strip() for x in ind_text(run, link, fid)
+                if re.search(r"[A-Za-z_]{3}", x) and not x.startswith("children") and len(x) < 70}
+    base = names()
     info = page()
     print(f"  radar page: {info['mode']}, A{info['az']} (scan {({1: 10, 3: 30, 6: 60}).get(info['az'], '?')} deg either "
           f"side of the cursor), {info['bars']} bars, range scale {info['scale']} NM")
@@ -771,12 +778,30 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
             print("  the radar did not go to TWS with a short or a held press: tell me what the radar page shows after "
                   "target management right (Right Ctrl + Right) by hand, short and held")
             return {"locked": False, "designated": False, "state": st.get("state"), "why": "no TWS"}
-        settle(run, 2.0, fn)                         # a scan or two to build the track file
+    # a scan or two to build the track file; what TWS draws that RWS did not, to learn its track and bug symbols
+    prev = names()
+    print(f"    new on the page in TWS: {sorted(prev - base)[:20]}")
+    for k in range(4):
+        settle(run, 2.0, fn)
+        now = names()
+        if now != prev:
+            print(f"    +{2 * (k + 1)} s in TWS: new {sorted(now - prev)[:15]}, gone {sorted(prev - now)[:15]}")
+        prev = now
+
+    def bugged(nm):
+        return any("bug" in x.lower() for x in nm)
     for i in range(tries):
         if st.get("state") in ("designated", "stt"):
             break
         click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, fn=fn, verbose=False)
         st = _observe(run, 1.5, fn, f"target management right {i + 1}")
+        now = names()
+        info = page()
+        print(f"      mode {info['mode']}; new on the page {sorted(now - prev)[:15]}, gone {sorted(prev - now)[:15]}")
+        prev = now
+        if st.get("state") not in ("designated", "stt") and bugged(now - base):
+            print("      a 'bug' symbol appeared: taking the track as bugged")
+            st["state"] = "designated"
     if st.get("state") == "designated" and stt:
         print("  step: target management up: single-target track")
         click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
