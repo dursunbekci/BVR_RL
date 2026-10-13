@@ -477,7 +477,7 @@ def fcr_info(lines):
         elif x in ("RWS", "TWS", "VSR", "ACM", "STT") and out["mode"] is None:
             out["mode"] = x                       # the mode label's text (the other modes' tables are empty)
         elif x == "A" and re.fullmatch(r"\d", nxt(i)):
-            out["az"] = int(nxt(i))               # A1 / A3 / A6: the scan is 10 / 30 / 60 deg either side of the cursor
+            out["az"] = int(nxt(i))               # A1 / A2 / A3 / A6: the scan is 10 / 25 / 30 / 60 deg either side of the cursor
         elif re.fullmatch(r"\d", x) and nxt(i) == "B":
             out["bars"] = int(x)
     return out
@@ -765,7 +765,7 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
                 if re.search(r"[A-Za-z_]{3}", x) and not x.startswith("children") and len(x) < 70}
     base = names()
     info = page()
-    print(f"  radar page: {info['mode']}, A{info['az']} (scan {({1: 10, 3: 30, 6: 60}).get(info['az'], '?')} deg either "
+    print(f"  radar page: {info['mode']}, A{info['az']} (scan {({1: 10, 2: 25, 3: 30, 6: 60}).get(info['az'], '?')} deg either "
           f"side of the cursor), {info['bars']} bars, range scale {info['scale']} NM")
     t0 = run.frames[-1].t
     if info["mode"] != "TWS" and st.get("state") not in ("designated", "stt"):

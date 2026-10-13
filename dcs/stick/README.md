@@ -366,3 +366,9 @@ entering TWS (A6, 4 bars: a scan or two to build the track file); with the bug t
 management up after that stayed designated (no single-target track), which is fine: an AIM-120 is fired at a bugged TWS
 track. `lock --tws` now holds the switch straight away and then presses it about once a second until the launch zone is drawn
 (or the markers say designated), and stops at the bug (`--stt` asks for the single-target track as well).
+
+**TWS timing (13 October)**: from RWS, the bug came on the 7th press, 20 s after entering TWS (presses 2 s apart after 4 s of
+scanning): the track file is what takes the time. Run again with the radar already in TWS (the track file kept), the first
+press bugged it, 5 s after the start (4 of them the initial scan). In TWS the page reads A2 (25 deg either side of the cursor).
+For the policy this means: put the radar in TWS once, early in the fight, and leave it there; FIRE is then a press of target
+management right and the held weapon release, a few seconds.
