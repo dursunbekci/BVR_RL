@@ -475,8 +475,20 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
         print("  WARNING: the HUD does not show ARM: continuing anyway, but the master arm switch may not have moved")
     new, pay1, mrm1, seen, worked = [], pay0, mrm0, False, None
 
-    def look(secs, label):
-        """Watch `secs` seconds for the missile; returns True at the first sign of it."""
+    tgt0 = nearest(f_o) if f_o else None
+    tgt_id = next((o.get("id") for o in (f_o.raw.get("obj") or []) if o.get("unit") == tgt0[0]), None) if tgt0 else None
+
+    def miss_dist(fo2, msls):
+        """Distance in km from each missile to the target, from the world objects' positions."""
+        t = next((o for o in ((fo2.raw.get("obj") or []) if fo2 else []) if o.get("id") == tgt_id), None)
+        if t is None or t.get("x") is None:
+            return []
+        return [round(math.dist((m["x"], m["y"], m["z"]), (t["x"], t["y"], t["z"])) / 1000, 1)
+                for m in msls if m.get("x") is not None]
+
+    def look(secs, label, watching=False):
+        """Watch `secs` seconds. Looking for the launch (watching=False): returns True at the first sign of the
+        missile. Watching it fly: goes on until the time is up or the target leaves the world objects."""
         nonlocal new, pay1, mrm1, seen
         for i in range(int(secs)):
             fr = settle(run, 1.0, fn)
@@ -484,9 +496,16 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
             pay1 = payload_count(fp) if fp else pay1
             new = [o for o in ((fo2.raw.get("obj") or []) if fo2 else []) if o.get("id") not in objs0]
             fly = [o for o in ((fb.raw.get("ball") or []) if fb else []) if o.get("id") not in ball0]
-            if i < 4 or i % 5 == 4:
+            if not watching and (i < 4 or i % 5 == 4):
                 mrm1 = hud_mrm(run, link)
             gone = len(objs0 - _ids(fo2, "obj")) if fo2 else 0
+            if watching:
+                msls = [o for o in new + fly if o.get("l1") == 4]
+                print(f"    {label} +{i + 1} s: {len(msls)} missile(s) in flight, to the target {miss_dist(fo2, msls)} km"
+                      + (f"; {gone} world object(s) gone: the target is destroyed" if gone else ""))
+                if gone:
+                    return True
+                continue
             print(f"    {label} +{i + 1} s: HUD MRM {mrm1}, payload {pay1}, weapons in flight "
                   f"{[(o.get('name'), round(o.get('alt') or 0)) for o in fly]}, new world objects "
                   f"{[(o.get('name'), o.get('l1'), o.get('l2')) for o in new]}"
@@ -497,6 +516,7 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
                 return True
         return False
 
+    killed = False
     for mode in ("s", "c", "l", "g"):
         print(f"  step: weapon release button (route {mode}: " + {"s": "device SetCommand", "c": "clickable element",
               "l": "global command queue", "g": "DCS's generic pickle command, 350 and 351"}[mode] + ")")
@@ -512,14 +532,18 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
             print(f"  the release went through route {mode}")
             break
     if worked:
-        look(max(int(watch) - 4, 0), "watching")
+        # master arm goes OFF now: the missile in flight does not need it, and a second press cannot fire another
+        print("  step: MASTER ARM back to OFF")
+        click(run, "mmc.MasterArmSw", defs, value=0.0, fn=fn)
+        killed = look(max(int(watch) - 1, 0), "watching", watching=True)
     fp_end = last_with(run.frames[-300:], "pay")
     sts1 = stations(fp_end)
     changed = {k: (sts0.get(k), v) for k, v in sts1.items() if sts0.get(k) != v}
     if changed:
         print("  stations that changed: " + "; ".join(f"{k}: {a} -> {b}" for k, (a, b) in changed.items()))
-    print("  step: MASTER ARM back to OFF")
-    click(run, "mmc.MasterArmSw", defs, value=0.0, fn=fn)
+    if not worked:
+        print("  step: MASTER ARM back to OFF")
+        click(run, "mmc.MasterArmSw", defs, value=0.0, fn=fn)
     by_hud = mrm0 is not None and mrm1 is not None and mrm1 < mrm0
     by_pay = pay0 is not None and pay1 is not None and pay1 < pay0
     fired = seen or by_hud or by_pay
@@ -527,7 +551,9 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
           ("payload down", by_pay)) if ok) + ")" if fired else
           "  no missile seen by any of the four checks (HUD count, weapons in flight, new world objects, payload): "
           "tell me what the cockpit showed (right MFD SMS page, HUD, a launch sound, a missile on the external view)")
-    return {"fired": fired, "payload": [pay0, pay1], "hud_mrm": [mrm0, mrm1]}
+    if worked:
+        print("  the target was destroyed" if killed else f"  the target was not seen destroyed in {watch} s (--watch longer?)")
+    return {"fired": fired, "payload": [pay0, pay1], "hud_mrm": [mrm0, mrm1], "route": worked, "killed": killed}
 
 
 def _lines(text):

@@ -298,3 +298,11 @@ read as unchanged were slewed by the old route, so they proved nothing: with the
 cursor crosses the contact). `lock --scan` slews the cursor in range until that appears and presses target management up
 only then: designated after 7 steps, a second press gave the single-target track (radar `stt`), 59 km ahead at the target's altitude.
 Display management is no longer pressed by default (`--soi none`): in one run it left the left MFD on its menu page.
+
+**Launch works from a script (13 October)**: with the radar in single-target track (`lock --scan`) and `ARM` on the HUD,
+`fire` launched an AIM-120C at 58 km: the HUD's count went from `4 MRM` to `3 MRM` and an `AIM_120C` (level 4 4) joined the world
+objects within a second. What made it work was the press length: weapon release has to stay pressed until the missile leaves the
+rail. Held for 0.4 s it launched nothing by any of four routes (device SetCommand, clickable element, global command queue,
+DCS's generic pickle 350/351); held for 1.5 s (`--release-hold`, the default now) the SetCommand route fired. The missile showed in
+the default world objects, not in the `ballistic` list, and the payload table stays `None` for this module, so `fire` goes by
+the HUD's `N MRM` count and new world objects. Master arm: device 19 command 3002, value 1 (clickable route) shows `ARM` on the HUD.
