@@ -732,7 +732,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
     return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state}
 
 
-def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=False, max_secs=25.0):
+def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=False, max_secs=35.0):
     """Lock without the cursor: target management right held 1.5 s puts the radar in TWS (track while scan), where it
     builds track files by itself; a short target management right bugs a track once there is one (measured in DCS:
     the fifth press, about 14 s after entering TWS with A6 and 4 bars; the page then draws the AIM-120 launch zone,
@@ -781,19 +781,30 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
             print("  the radar did not go to TWS with a short or a held press: tell me what the radar page shows after "
                   "target management right (Right Ctrl + Right) by hand, short and held")
             return {"locked": False, "designated": False, "state": st.get("state"), "why": "no TWS"}
-    # the track file takes a scan or two: target management right about once a second until the bug shows (the
-    # page starts drawing the AIM-120 launch zone, or the display markers say designated)
+    # The track file takes a scan or two, and the bug shows on the page a moment after the press: in DCS a press
+    # every 1.2 s, looked at 0.8 s later, bugged nothing in 25 s, while presses 1.5 s apart after 8 s of scanning
+    # bugged it on the fifth. So: 4 s of scanning, then a press every 2 s, watching the page for 2 s after each
+    # (the AIM-120 launch zone is drawn, or the display markers say designated).
     def bugged(nm):
         return any(x.startswith("DLZ_AIM120") or "bug" in x.lower() for x in nm)
     t_tws = run.frames[-1].t
+    settle(run, 4.0, fn)
     i = 0
     while st.get("state") not in ("designated", "stt") and run.frames[-1].t - t_tws < max_secs:
         i += 1
         click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, fn=fn, verbose=False)
-        st = _observe(run, 0.8, fn, f"target management right {i} ({run.frames[-1].t - t_tws:.0f} s in TWS)")
-        if st.get("state") not in ("designated", "stt") and bugged(names() - base):
-            print("      the AIM-120 launch zone is drawn: the track is bugged")
-            st["state"] = "designated"
+        for _ in range(4):
+            settle(run, 0.5, fn)
+            fd = last_with(run.frames[-60:], "rd")
+            if fd is not None and lock_state(fd) in ("designated", "stt"):
+                st["state"] = lock_state(fd)
+                break
+            if bugged(names() - base):
+                st["state"] = "designated"
+                break
+        info = page()
+        print(f"    target management right {i} ({run.frames[-1].t - t_tws:.0f} s in TWS): mode {info['mode']}, "
+              f"radar {st.get('state')}")
     if st.get("state") == "designated" and stt:
         print("  step: target management up: single-target track")
         click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
