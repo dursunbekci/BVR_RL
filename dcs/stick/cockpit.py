@@ -175,6 +175,10 @@ def hold_fn(run, gains, alt=None, match_alt=False):
     its own height."""
     from stick_test import Hold
     f0 = run.next()
+    for _ in range(12):                     # the world objects come every 5th frame: wait for one
+        if "obj" in f0.raw or not match_alt:
+            break
+        f0 = run.next()
     h = Hold(gains, bank_max=math.radians(30))
     hdg, v = f0.hdg, f0.tas
     if match_alt and alt is None:
@@ -467,3 +471,64 @@ def ind_diff(path_a, path_b, ids=None, out=None):
     if not changed:
         out("  no difference between the two saves (in the displays compared)")
     return changed
+
+
+def _fcr_id(run, default=4):
+    fd = last_with(run.frames[-400:], "rd")
+    return (fd.raw["rd"].get("fcr") if fd else None) or default
+
+
+def ind_text(run, link, ident):
+    """The lines of one display, asked for now."""
+    link.events.pop("ind_end", None)
+    link.ind(ident, ident)
+    end = time.time() + 3.0
+    while time.time() < end and "ind_end" not in link.events:
+        link.next(timeout=0.2)
+    return _lines(link.ind_items.get(ident, ""))
+
+
+def stage_cursorprobe(run, gains, defs, steps=8, hold=0.5, out_dir=None, alt=None, match_alt=False):
+    """Slew the radar cursor out in range `steps` times and back, and print, after each move, which lines
+    of the radar page changed: the ones that follow the cursor (its range, its altitude coverage) are
+    what an automatic lock can steer by. The radar must be the page on the MFD (A-A mode)."""
+    import datetime
+    import collections
+    link = run.link
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    fid = _fcr_id(run)
+    fr0 = settle(run, 1.0, fn)
+    f_o = last_with(fr0, "obj")
+    nr = nearest(f_o) if f_o else None
+    print(f"  radar page is display {fid}; target {nr[0] + ' at %.1f km (%.1f NM)' % (nr[1] / 1000, nr[1] / 1852) if nr else 'not in the world objects'}")
+    prev = ind_text(run, link, fid)
+    if not prev:
+        print("  no text from the radar page: is the radar page up on an MFD? (display %d)" % fid)
+        return None
+    caps = [{"step": "start", "lines": prev}]
+    for direction, spec in (("out", "hotas.THROTTLE_RDR_CURSOR_FWD"), ("back", "hotas.THROTTLE_RDR_CURSOR_AFT")):
+        for i in range(steps):
+            click(run, spec, defs, hold=hold, fn=fn, verbose=False)
+            settle(run, 0.5, fn)
+            cur = ind_text(run, link, fid)
+            fr = settle(run, 0.1, fn)
+            fo = last_with(fr, "obj")
+            nr = nearest(fo) if fo else None
+            ca, cb = collections.Counter(prev), collections.Counter(cur)
+            minus, plus = list((ca - cb).elements()), list((cb - ca).elements())
+            ls = lock_state(last_with(fr, "rd")) if last_with(fr, "rd") else None
+            print(f"  cursor {direction} {i + 1}: radar {ls}, target {('%.1f km' % (nr[1] / 1000)) if nr else '?'}; "
+                  f"{len(minus)} lines gone, {len(plus)} new")
+            for x in minus[:8]:
+                print("      - " + x[:100])
+            for x in plus[:8]:
+                print("      + " + x[:100])
+            caps.append({"step": f"{direction}{i + 1}", "lines": cur})
+            prev = cur
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, f"stick_cursor_{datetime.datetime.now():%Y%m%d_%H%M%S}.json")
+        with open(path, "w") as fh:
+            json.dump(caps, fh, indent=1)
+        print(f"\n  saved: {path}")
+    return {"steps": len(caps) - 1}

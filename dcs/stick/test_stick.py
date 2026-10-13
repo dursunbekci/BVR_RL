@@ -653,6 +653,16 @@ def test_cockpit():
     with contextlib.redirect_stdout(buf):
         frr = cockpit.stage_fire(run, gains, defs, force=True, aa=True)
     assert frr["fired"] and "maddog" in buf.getvalue() and "stations that changed" in buf.getvalue(), buf.getvalue()
+    # the cursor probe shows the lines that follow the cursor
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_cursorprobe(run, gains, defs, steps=3, hold=0.2)
+    text = buf.getvalue()
+    assert res["steps"] == 6 and "+ 23" in text and "- 20" in text and "cursor back 3" in text and "+ 20" in text, text
     # a click the module refuses is reported
     link = FakeLink(cockpit_defs=defs)
     run = stick_test.Run(link, None, "cp", lim)

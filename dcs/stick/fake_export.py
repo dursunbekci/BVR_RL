@@ -94,6 +94,7 @@ class FakeCockpit:
         self.code = {(d["UFC"], defs["commands"]["ufc"]["AA"]): "aa",
                      (d["HOTAS"], h["STICK_TGT_MANAGE_UP"]): "tms_up",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
+                     (d["HOTAS"], h["THROTTLE_RDR_CURSOR_AFT"]): "cursor_aft",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
                      (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm"}
         self.aa = self.armed = False
@@ -111,6 +112,8 @@ class FakeCockpit:
             self.aa = True
         elif name == "cursor" and value == 1.0:
             self.cursor += 1
+        elif name == "cursor_aft" and value == 1.0:
+            self.cursor -= 1
         elif name == "tms_up" and value == 1.0 and self.aa and self.cursor >= self.scan_needed:
             self.stage = (self.stage + 1) % 3          # a third press drops the track
         elif name == "arm":
@@ -201,7 +204,8 @@ class FakeLink:
     def ind(self, first=0, last=49):
         stage = self.cockpit.stage if self.cockpit else 0
         self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "") + "-----------",
-                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n") + "-----------"}
+                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n")
+                             + "Cursor_Range\n%d\n" % (20 + 3 * (self.cockpit.cursor if self.cockpit else 0)) + "-----------"}
         self.events["ind_end"] = {"ev": "ind_end", "count": 2}
 
     def click(self, dev, cmd, value):

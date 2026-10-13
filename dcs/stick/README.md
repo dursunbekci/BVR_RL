@@ -263,3 +263,9 @@ Marker names are in `MARK` in the module (override with `BVR_STICK_CFG = {marker
 (11 s, stable for the 50 s after), with the target 55 to 59 km ahead, 0.1 deg off the nose, within 15 m of the Viper's altitude
 (`--match-alt`), closing at 60 m/s on its passive route. The ICP's A-A button toggles (pressed in A-A mode it goes back), so
 `lock` and `fire` press it only with `--aa`; otherwise A-A is assumed selected.
+
+**`lock` after a hand-dropped lock (13 October)**: `click hotas.STICK_TGT_MANAGE_DOWN` took the radar back to `search`;
+`lock` then sent target management up (the module answered ok) and the radar stayed in `search`. Either the radar cursor was
+no longer over the target (dropping a lock probably re-centres it; the target was at 57 km, 31 NM) or the 0.2 s press was too
+short. `cursor` slews the radar cursor out and back in range and prints, after each move, which lines of the radar page
+changed: the lines that follow the cursor are what an automatic lock can steer by.
