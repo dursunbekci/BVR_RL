@@ -149,8 +149,7 @@ class FakeCockpit:
         elif name == "dms_right" and value != 0.0:
             self.soi_left = False
         elif name == "aa" and value == 1.0:
-            self.aa = True
-            self.soi_left = False          # A-A brings the weapons page up on the right MFD and the SOI goes with it
+            self.aa = True                 # (in DCS the radar page stayed the sensor of interest: no DMS needed)
         elif name == "cursor" and value == 1.0 and self.soi_left:
             self.cursor += 1
         elif name == "cursor_aft" and value == 1.0 and self.soi_left:

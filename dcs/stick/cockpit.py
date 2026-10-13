@@ -738,7 +738,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
 CURSOR_AZ_RATE = 100.0     # deg/s the radar cursor moves sideways while held (DCS, an aim run: 39 deg in 0.37 s)
 
 
-def center_cursor(run, defs, fn, az):
+def center_cursor(run, defs, fn, az, verbose=True):
     """Put the radar cursor near azimuth `az` (deg off the nose) without reading it back: held toward that side it
     stops at the display's edge (60 deg), from where a timed move back leaves it at az. TWS scans 25 deg either side
     of the cursor, so 10 deg off is still a hit."""
@@ -749,7 +749,8 @@ def center_cursor(run, defs, fn, az):
     t = (60.0 - abs(az)) / CURSOR_AZ_RATE
     if t > 0.03:
         click(run, f"hotas.THROTTLE_RDR_CURSOR_{back}", defs, hold=t, fn=fn, verbose=False)
-    print(f"  cursor to the {side.lower()} edge, then {t:.2f} s back: about {az:+.0f} deg, where the target is")
+    if verbose:
+        print(f"  cursor to the {side.lower()} edge, then {t:.2f} s back: about {az:+.0f} deg, where the target is")
 
 
 def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=False, max_secs=35.0):

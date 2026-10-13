@@ -187,6 +187,14 @@ def build(args):
     elif args.defender:
         m.set_sortie_text("BVR_RL: survive the policy")
         m.set_description_text(DEFENDER_BRIEFING)
+    elif getattr(args, "blue_player", False):
+        m.set_sortie_text("BVR_RL: a trained policy flies your Viper (dcs_live.py --stick)")
+        m.set_description_text(
+            "You sit in BLUE-1, the F-16C; RED-1 is the DCS AI and will attack. Start dcs_live.py --stick on this "
+            "computer (Export.lua must have bvr_stick_export.lua: dcs/stick/install_export.py), start the mission, "
+            "trim for level flight and take your hands OFF the stick and throttle: the policy flies through "
+            "Export.lua, puts the radar in TWS and fires through the cockpit. Ctrl+C in its window gives you the "
+            "aircraft back.")
     else:
         m.set_sortie_text("BVR_RL: a trained policy flies BLUE-1 (dcs_live.py)")
         m.set_description_text(
@@ -257,6 +265,10 @@ def build(args):
                  (hdg_blue + 180) % 360, args.speed_red)
     if args.red_player:
         red.units[0].skill = Skill.Player
+    if getattr(args, "blue_player", False):
+        # dcs_live.py --stick: you sit in BLUE-1 and the policy flies it through Export.lua; the bridge only
+        # takes control of the agent on a CMD line, which --stick never sends
+        blue.units[0].skill = Skill.Player
     bullseye(mapping.Point(cx + 450_000.0, cy, m.terrain))
 
     ts = TriggerStart(comment="BVR_RL bridge")
@@ -284,6 +296,9 @@ def main():
     ap.add_argument("--red-type", default="F-16C", choices=["F-16C", "F-15C", "Su-27", "MiG-29S", "FA-18C", "Su-25T"],
                     help="DCS aircraft for red (default F-16C, as in F-16C v F-16C training)")
     ap.add_argument("--red-player", action="store_true", help="fly RED-1 yourself")
+    ap.add_argument("--blue-player", action="store_true",
+                    help="BLUE-1 is the player's aircraft, for dcs_live.py --stick (the policy flies it through "
+                         "Export.lua; use --blue-type F-16C)")
     ap.add_argument("--stick-test", action="store_true",
                     help="only you, in the F-16C Viper, in the air (7000 m, 280 m/s); writes bvr_rl_sticktest.miz")
     ap.add_argument("--target", action="store_true",
@@ -296,6 +311,11 @@ def main():
         args.red_type, args.red_player = "Su-25T", True
         if args.out == ap.get_default("out"):
             args.out = os.path.join(HERE, "bvr_rl_defender.miz")
+    if args.blue_player:
+        if args.blue_type != "F-16C":
+            raise SystemExit("--blue-player: the stick link knows the F-16C only (--blue-type F-16C)")
+        if args.out == ap.get_default("out"):
+            args.out = os.path.join(HERE, "bvr_rl_1v1_stick.miz")
     if args.stick_test:
         if args.out == ap.get_default("out"):
             args.out = os.path.join(HERE, "bvr_rl_sticktest_target.miz" if args.target else "bvr_rl_sticktest.miz")

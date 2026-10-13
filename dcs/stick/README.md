@@ -117,11 +117,11 @@ What the first run decides:
    20 Hz or more mirrors `f16_sim.py`'s autopilot: heading to bank to g,
    altitude to flight-path angle, speed to throttle. Its gains are fitted in
    DCS with step and turn tests like `dcs/turn_test.py`.
-3. **Radar lock and launch.** Through the same command interface, to verify.
-   The fire mask and the support rule stay in `dcs_live.py`.
-4. **Red and events.** The mission bridge keeps flying red and reporting shots,
-   hits and kills, and can keep removing unsupported missiles; only BLUE-1's
-   control moves to Export.lua.
+3. **Radar lock and launch.** Done (13 October): TWS through the target management switch, launch with the
+   weapon release held 1.5 s (results log above). The fire mask and the support rule stay in `dcs_live.py`.
+4. **Red and events.** Written (`dcs_live.py --stick`, "The live runner" below; tested on the fakes, not
+   yet in DCS): the mission bridge keeps flying red and reporting shots, hits and kills, and keeps removing
+   unsupported missiles; only BLUE-1's control moves to Export.lua.
 5. **Policy.** Train on `F-16C-DCS` with SIM_REV 15, then fly it.
 
 ## Open questions
@@ -388,3 +388,31 @@ deg/s and its target-under-cursor window is 5 deg either side.)
 **TWS off the nose works (13 October)**: with the cursor moved to the target's bearing first (edge, then a timed move back at 100
 deg/s), the target was bugged at +28 deg (2 presses, 13 s from RWS), -38 deg (1 press, 7 s, the radar already in TWS) and -23 deg
 with us 3 km above it (3 presses, 13 s). The 100 deg/s estimate is good enough for a 25 deg scan.
+
+## The live runner: the policy flies your Viper (`dcs_live.py --stick`)
+
+The mission's bridge (`bvr_bridge.lua`) still reports both aircraft, shots, hits and kills, flies red and removes unsupported
+missiles; it never takes BLUE-1, because it only does on a `CMD` line and `--stick` sends none. The policy's observations are
+built from the bridge's reports exactly as before. Its 1 Hz commands go to a `StickPilot` (`pilot.py`), a thread on the Export
+link that:
+
+* flies heading, altitude and speed at 50 Hz with `stick_test.Hold` (the inner loop measured above) with the simulator's limits:
+  80 deg of bank (the simulator's `PHI_MAX`), up to 8 g, climbs and descents up to 80 m/s;
+* runs cockpit jobs between frames, the aircraft flown all the while: **radar** (A-A, TWS with target management right held,
+  the cursor to the target's bearing; repeated every 15 s while no track is bugged, the cursor only moved when the bearing has
+  changed by 10 deg) and **fire** (bug the TWS track, master arm on, weapon release held 1.5 s, launch confirmed by the HUD's
+  `N MRM` or a new AIM-120 in the world objects); a fire job's result ("launched" or "timeout" and why) goes into the fire
+  bookkeeping (`fire_pending`, `fire_log`, the "fire requests" in `results.csv`);
+* on a pause, a frozen DCS or a guard (below 300 m, under 80 m/s, beyond -3.5..9.5 g) lets go of the stick and tries again;
+  at the end of an episode it turns master arm off and releases the axes.
+
+To fly it:
+
+1. `python dcs/stick/install_export.py` (once) and `python dcs/stick/stick_test.py all` (once: writes `dcs_runs/stick_gains.json`).
+2. `python dcs/make_mission.py --blue-player` -> `dcs/bvr_rl_1v1_stick.miz` (you in BLUE-1, the F-16C; RED-1 the DCS AI).
+3. `python dcs_live.py <checkpoint.zip> --stick --platform F-16C-DCS`
+4. Start the mission, take BLUE-1, trim for level flight and take your hands off the stick and throttle. Ctrl+C in the
+   dcs_live window gives you the aircraft back.
+
+Tested on the fakes (`test_sim.py`, "DCS live stick"): the policy's commands reach the pilot and no `CMD` reaches the bridge; a
+FIRE runs A-A, TWS, the bug, master arm and the held release on the fake cockpit, and its launch comes back as "fire launched".
