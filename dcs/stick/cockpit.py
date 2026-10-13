@@ -89,7 +89,7 @@ def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True, release=
     if mode is None and dev == defs["devices"].get("HOTAS"):
         mode = "s"      # measured: the HOTAS cursor does not move when clicked like a mouse, only through SetCommand
     link.click(dev, cmd, down, mode)
-    settle(run, max(hold, 0.1), fn)
+    settle(run, max(hold, 0.02), fn)
     if up is not None:
         link.click(dev, cmd, up, mode)
         settle(run, 0.1, fn)
@@ -428,6 +428,196 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None,
         print("  not locked. Look at the left MFD: which radar mode and page is it in, where is the cursor? "
               "Designate the target by hand, run `radar`, and tell me what it prints.")
     return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state, "steps": log}
+
+
+# ── the aimed lock ─────────────────────────────────────────────────────
+
+NM = 1852.0
+
+
+def fcr_info(lines):
+    """What the radar page's text says: the cursor's bearing (magnetic deg) and range (NM) from the bullseye, the
+    height coverage at the cursor's range (thousands of feet), the range scale, a target under the cursor (and its
+    altitude), and whether the page is the sensor of interest."""
+    import re
+    out = {"br": None, "hi": None, "lo": None, "scale": None, "tuc": False, "tuc_alt": None, "soi": False}
+
+    def nxt(i):
+        return lines[i + 1].strip() if i + 1 < len(lines) else ""
+    for i, x in enumerate(lines):
+        x = x.strip()
+        if x == "FCR_Bearing_range" and re.fullmatch(r"-?\d+ -?\d+", nxt(i)):
+            a, b = nxt(i).split()
+            out["br"] = (int(a), int(b))
+        elif x == "Max_Search_Altitude" and re.fullmatch(r"-?\d+", nxt(i)):
+            out["hi"] = int(nxt(i))
+        elif x == "Min_Search_Altitude" and re.fullmatch(r"-?\d+", nxt(i)):
+            out["lo"] = int(nxt(i))
+        elif x == "Range_Scale_Value" and re.fullmatch(r"\d+", nxt(i)):
+            out["scale"] = int(nxt(i))
+        elif x == "FCR_TUC_contactData":
+            out["tuc"] = True
+        elif x == "FCR_TUC_contact_Altitude" and re.fullmatch(r"-?\d+", nxt(i)):
+            out["tuc_alt"] = int(nxt(i))
+        elif x == "SOI":
+            out["soi"] = True
+    return out
+
+
+def _target_obj(f):
+    """The nearest other aircraft's world-object entry."""
+    nr = nearest(f) if f else None
+    if nr is None:
+        return None
+    return next((o for o in (f.raw.get("obj") or []) if (o.get("unit") or o.get("name") or "?") == nr[0]), None)
+
+
+def _polar(f, x, z):
+    """A point from the aircraft: range NM, azimuth deg off the nose (+ right)."""
+    dx, dz = x - f.x, z - f.z
+    return math.hypot(dx, dz) / NM, math.degrees((math.atan2(dz, dx) - f.hdg + math.pi) % (2 * math.pi) - math.pi)
+
+
+def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar=None, max_iter=120, aa=None):
+    """Lock the nearest aircraft wherever it is within the radar's limits: put the radar cursor on the point where
+    the radar should show it (its bearing and range from the world objects), steering by the cursor's bullseye
+    bearing and range on the radar page; tilt the antenna until the target's altitude is inside the height
+    coverage at its range; search a little around the point until the page shows a target under the cursor, then
+    target management up (designate) and up again (single-target track)."""
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    settle_setup(run, fn)
+    link = run.link
+    fr0 = settle(run, 1.0, fn)
+    fid = _fcr_id(run)
+    st = _observe(run, 0.5, fn, "radar")
+    if st.get("state") == "stt":
+        print("  already locked")
+        return {"locked": True, "designated": True, "state": "stt"}
+    in_aa = master_mode(last_with(run.frames[-300:], "rd"))
+    if aa or (aa is None and in_aa is False):
+        print("  step: A-A master mode (ICP)")
+        click(run, "ufc.AA", defs, fn=fn)
+        settle(run, 1.5, fn)
+
+    def page():
+        return fcr_info(ind_text(run, link, fid))
+    info = page()
+    if info["br"] is None:
+        print(f"  the radar page (display {fid}) shows no cursor bearing and range: is the radar page up on the left "
+              f"MFD in A-A mode?")
+        return {"locked": False, "designated": False, "state": st.get("state"), "why": "no readout"}
+    if not info["soi"]:
+        print("  WARNING: the radar page is not the sensor of interest (no SOI on it): the cursor will not move")
+    f = run.frames[-1]
+    if magvar is None and f.myaw is not None and f.hdg is not None:
+        magvar = math.degrees((f.hdg - f.myaw + math.pi) % (2 * math.pi) - math.pi)
+    if magvar is None:
+        magvar = 0.0
+        print("  WARNING: no magnetic heading from the module (reinstall it) and no --magvar: taking the variation as 0")
+    print(f"  magnetic variation {magvar:+.1f} deg; range scale {info['scale']} NM; coverage at the cursor "
+          f"{info['lo']}-{info['hi']} kft")
+
+    def true_brg(b):
+        return math.radians(b + magvar)
+    if bull is None:
+        # the B-scope's bottom edge is range 0: with the cursor there, its bullseye bearing and range are the aircraft's
+        print("  finding the bullseye: cursor to the bottom edge (it is then on our own aircraft)")
+        prev = None
+        for _ in range(10):
+            click(run, "hotas.THROTTLE_RDR_CURSOR_AFT", defs, hold=1.0, fn=fn, verbose=False)
+            settle(run, 0.4, fn)
+            info = page()
+            if info["br"] is not None and info["br"] == prev:
+                break
+            prev = info["br"]
+        f = run.frames[-1]
+        b, r = info["br"]
+        bull = (f.x - r * NM * math.cos(true_brg(b)), f.z - r * NM * math.sin(true_brg(b)))
+        rb, azb = _polar(f, *bull)
+        print(f"    the cursor reads {b:03d}/{r} at our position: the bullseye is {rb:.0f} NM away, {azb:+.0f} deg off "
+              f"the nose" + ("   (far: whole degrees and NM make the aim coarse; the missions from make_mission.py put "
+                              "it near the fight)" if rb > 60 else ""))
+    rate = {"r": 6.0, "az": 40.0}                       # NM/s and deg/s while held, learnt as we go
+    offsets = [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 2.5), (0.0, -2.5), (1.5, 2.5), (1.5, -2.5),
+               (-1.5, 2.5), (-1.5, -2.5), (3.0, 0.0), (-3.0, 0.0), (0.0, 5.0), (0.0, -5.0)]
+    k, elev_tries = 0, 0
+    tol, last_dir = {"range": 0.8, "azimuth": 1.5}, {}       # a tolerance widens each time its axis overshoots
+    for it in range(max_iter):
+        f = run.frames[-1]
+        tgt = _target_obj(last_with(run.frames[-100:], "obj"))
+        if tgt is None or info["br"] is None:
+            print("  lost the target in the world objects, or the readout")
+            break
+        r_p, az_p = _polar(f, tgt["x"], tgt["z"])
+        talt = (tgt.get("y") or 0.0) / 304.8
+        if abs(az_p) > 58.0:
+            print(f"  the target is {az_p:+.0f} deg off the nose: outside the radar's azimuth limits (60). Turn first.")
+            break
+        b, r = info["br"]
+        cx, cz = bull[0] + r * NM * math.cos(true_brg(b)), bull[1] + r * NM * math.sin(true_brg(b))
+        r_c, az_c = _polar(f, cx, cz)
+        if info["tuc"]:
+            print(f"  a target is under the cursor (altitude {info['tuc_alt']} kft; ours {talt:.0f} kft): target "
+                  f"management up")
+            click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
+            st = _observe(run, 1.0, fn, "after")
+            if st.get("state") == "designated":
+                print("  step: target management up again: single-target track")
+                click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
+                st = _observe(run, 1.5, fn, "after")
+            if st.get("state") in ("designated", "stt"):
+                break
+        a_r, a_az = r_p + offsets[k][0], az_p + offsets[k][1]
+        dr, daz = a_r - r_c, (a_az - az_c) if r_c > 2.0 else 0.0
+        near = abs(r_p - r_c) < 3.0
+        out_cov = None
+        if near and info["hi"] is not None and info["lo"] is not None:
+            if talt > info["hi"] - 1:
+                out_cov = "up"
+            elif talt < info["lo"] + 1:
+                out_cov = "down"
+        if out_cov and elev_tries < 25:
+            spec, t, what = f"hotas.THROTTLE_ANT_ELEV_{out_cov.upper()}", 0.3, f"antenna {out_cov}"
+            elev_tries += 1
+        elif abs(dr) < tol["range"] and abs(daz) < tol["azimuth"]:
+            if k + 1 >= len(offsets):
+                print("  searched around the target's place without a target under the cursor: the radar does not "
+                      "see it (range, or its altitude outside the coverage)")
+                break
+            k += 1
+            tol, last_dir = {"range": 0.8, "azimuth": 1.5}, {}
+            print(f"    nothing under the cursor here: trying {offsets[k][0]:+.1f} NM, {offsets[k][1]:+.1f} deg from it")
+            info = page()
+            continue
+        else:
+            if abs(dr) / tol["range"] >= abs(daz) / tol["azimuth"]:
+                spec = "hotas.THROTTLE_RDR_CURSOR_FWD" if dr > 0 else "hotas.THROTTLE_RDR_CURSOR_AFT"
+                t, what, sgn = min(max(abs(dr) / rate["r"], 0.03), 0.6), "range", dr > 0
+            else:
+                spec = "hotas.THROTTLE_RDR_CURSOR_RIGHT" if daz > 0 else "hotas.THROTTLE_RDR_CURSOR_LEFT"
+                t, what, sgn = min(max(abs(daz) / rate["az"], 0.03), 0.6), "azimuth", daz > 0
+            if last_dir.get(what) is not None and last_dir[what] != sgn:
+                tol[what] = min(tol[what] * 1.4, 2.0 if what == "range" else 4.0)
+            last_dir[what] = sgn
+        print(f"    aim {it + 1}: cursor {r_c:5.1f} NM {az_c:+5.1f} deg | target {r_p:5.1f} NM {az_p:+5.1f} deg "
+              f"{talt:4.1f} kft | coverage {info['lo']}..{info['hi']} kft | {spec.split('_', 3)[-1].lower()} {t:.2f} s")
+        click(run, spec, defs, hold=t, fn=fn, verbose=False)
+        settle(run, 0.3, fn)
+        info2 = page()
+        if info2["br"] is not None and what in ("range", "azimuth"):
+            b2, r2 = info2["br"]
+            f2 = run.frames[-1]
+            r_c2, az_c2 = _polar(f2, bull[0] + r2 * NM * math.cos(true_brg(b2)), bull[1] + r2 * NM * math.sin(true_brg(b2)))
+            moved = abs(r_c2 - r_c) if what == "range" else abs(az_c2 - az_c)
+            key, lo_hi = ("r", (0.5, 60.0)) if what == "range" else ("az", (5.0, 400.0))
+            if moved > (1.0 if what == "range" else 1.5):      # above the readout's rounding
+                rate[key] = min(max(math.sqrt(rate[key] * moved / t), lo_hi[0]), lo_hi[1])
+        info = info2 if info2["br"] is not None else info
+    st = _observe(run, 0.5, fn, "radar")
+    state = st.get("state")
+    print("  LOCKED: single-target track" if state == "stt" else "  DESIGNATED" if state == "designated" else
+          "  not locked")
+    return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state}
 
 
 def payload_count(f):

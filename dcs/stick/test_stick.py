@@ -745,8 +745,31 @@ def test_cockpit():
         cockpit.HOLD_OPTS.update(offset=None, dalt=None)
     nr = cockpit.nearest(cockpit.last_with(run.frames[-300:], "obj"))
     assert abs(nr[2] - 30.0) < 5.0 and abs(-nr[3] - 500.0) < 200.0 and res["steps"] > 0, (nr, buf.getvalue()[-800:])
+    # the radar page's text as DCS wrote it (13 October): the cursor's bullseye bearing and range, coverage, scale, SOI
+    real = ["Range_Scale_Root", "children are {", "Range_Scale_Value_Outlined", "40", "Range_Scale_Value", "40", "}",
+            "FCR_Bearing_range", "174 245", "DBG_AA_RadarContactsKeeper", "Cursor_Root", "children are {",
+            "Cursor_Line_Left", "Cursor_Line_Right", "Max_Search_Altitude", "34", "Min_Search_Altitude", "11", "}",
+            "FCR_TUC_contactData", "FCR_TUC_contact_Altitude", "23", "SOI"]
+    assert cockpit.fcr_info(real) == {"br": (174, 245), "hi": 34, "lo": 11, "scale": 40, "tuc": True, "tuc_alt": 23,
+                                      "soi": True}, cockpit.fcr_info(real)
+    # the aimed lock: a target 30 deg right and 2 km above, which only aiming designates (scan_needed 999), is locked;
+    # one 70 deg off the nose is refused
+    for az, dh, ok in ((30.0, 2000.0, True), (70.0, 0.0, False)):
+        link = FakeLink(cockpit_defs=defs, scan_needed=999)
+        c, ac = link.cockpit, link.ac
+        c.aa = True
+        a = ac.hdg + math.radians(az)
+        c.tx, c.tz, c.ty = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a), ac.alt + dh
+        run = stick_test.Run(link, None, "cp", lim)
+        run.next()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = cockpit.stage_aimlock(run, gains, defs)
+        assert res["locked"] == ok, buf.getvalue()[-1500:]
+        assert ok or "outside the radar's azimuth limits" in buf.getvalue(), buf.getvalue()[-800:]
+        assert "magnetic variation +6.0" in buf.getvalue() and "bullseye is 15 NM away" in buf.getvalue(), buf.getvalue()[:800]
     print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
-          "end on a fake cockpit, with and without a cursor scan; master arm ends OFF; refusals are shown)")
+          "end on a fake cockpit, with and without a cursor scan; the aimed lock off the nose and above; master arm ends OFF; refusals are shown)")
 
 
 def test_stall_message():

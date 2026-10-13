@@ -24,6 +24,7 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py cursortry           try nine ways of moving the radar cursor, announced; you say which moved it
     python dcs/stick/stick_test.py cursor              slew the radar cursor and print which lines of the radar page follow it
     python dcs/stick/stick_test.py lock                try to lock the target (needs make_mission --stick-test --target)
+    python dcs/stick/stick_test.py lock --aim          aim the cursor at the target (any azimuth within 60 deg, any altitude) and lock
     python dcs/stick/stick_test.py fire                master arm, release a missile, watch it go
     python dcs/stick/stick_test.py release             panic: axes to 0 (the F-16 holds 1 g, the bank)
     python dcs/stick/stick_test.py raw 2004 0.5        one LoSetCommand(2004, 0.5)
@@ -109,6 +110,7 @@ class Frame:
         self.agl = _num(d.get("agl"))
         self.tas, self.ias, self.mach = _num(d.get("tas")), _num(d.get("ias")), _num(d.get("mach"))
         self.hdg = _first(me.get("hdg"), adi.get("yaw"))
+        self.myaw = _num(d.get("myaw"))                 # magnetic heading, rad
         self.pitch = _first(me.get("pitch"), adi.get("pitch"))
         self.bank = _first(me.get("bank"), adi.get("bank"))
         self.nz = _num(g.get("y"))
@@ -848,6 +850,13 @@ def main(argv=None):
                          "(default: s for HOTAS controls, c for the rest)")
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
+    ap.add_argument("--aim", action="store_true",
+                    help="lock: put the cursor where the target is (bullseye readout) in range and azimuth, tilt the antenna "
+                         "to its altitude, then designate: works off the nose and off the level")
+    ap.add_argument("--bull", type=float, nargs=2, metavar=("X", "Z"), default=None,
+                    help="lock --aim: the bullseye in DCS metres (x north, z east); by default it is read off the radar page")
+    ap.add_argument("--magvar", type=float, default=None,
+                    help="lock --aim: magnetic variation, deg east (default: from the module's magnetic heading)")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
     ap.add_argument("--offset", type=float, default=None,
                     help="lock, fire, cursormap: first turn so the target is this many degrees right of the nose (negative: left)")
@@ -963,6 +972,10 @@ def main(argv=None):
                 elif a.test == "radar":
                     fn = cockpit.hold_fn(run, fgains, a.alt, a.match_alt) if fgains else None
                     summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
+                elif a.test == "lock" and a.aim:
+                    summary["lock"] = cockpit.stage_aimlock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
+                                                            bull=a.bull, magvar=a.magvar,
+                                                            aa=True if a.aa else False if a.no_aa else None)
                 elif a.test == "lock":
                     summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,
                                                          aa=True if a.aa else False if a.no_aa else None, soi=a.soi,

@@ -140,7 +140,9 @@ def missiles(typ, n=4):
 TARGET_BRIEFING = (
     "\n\nAn unarmed AI F-16C (TGT-1) flies the same way 60 km ahead of you at 240 m/s, for dcs/stick/stick_test.py "
     "radar, lock and fire. It carries no weapons, holds fire, ignores threats and flies straight on. "
-    "You close on it at about 40 m/s: watch the range and turn away well before 5 km.")
+    "You close on it at about 40 m/s: watch the range and turn away well before 5 km.\n\n"
+    "The bullseye is 30 km ahead of your start, halfway to TGT-1: stick_test.py aims the radar cursor by the "
+    "cursor's bullseye bearing and range on the radar page.")
 
 STICK_BRIEFING = (
     "You fly a Viper, in the air at 7000 m over the sea, heading east at 280 m/s. Nobody else is here.\n\n"
@@ -229,8 +231,15 @@ def build(args):
                 fg.load_pylon(weapon, pylon)
         return fg
 
+    def bullseye(p):
+        # the radar page shows the cursor's bearing and range from the bullseye (whole degrees and NM): close to the
+        # fight they place the cursor to well under a mile, which is what stick_test.py's aimed lock steers by
+        for side in ("blue", "red"):
+            m.coalition[side].set_bullseye({"x": p.x, "y": p.y})
+
     hdg_blue = math.degrees(brg) % 360
     if args.stick_test:
+        bullseye(mapping.Point(cx - 70_000.0, cy, m.terrain))     # halfway between the start and the target
         me = flight(blue_c, "VIPER", types["F-16C"], mapping.Point(cx - 100_000.0, cy, m.terrain),
                     mapping.Point(cx + 400_000.0, cy, m.terrain), args.alt_blue, 90.0, args.speed)
         me.units[0].skill = Skill.Player
@@ -247,6 +256,7 @@ def build(args):
                  (hdg_blue + 180) % 360, args.speed_red)
     if args.red_player:
         red.units[0].skill = Skill.Player
+    bullseye(mapping.Point(cx, cy, m.terrain))                     # the middle of the fight
 
     ts = TriggerStart(comment="BVR_RL bridge")
     ts.add_action(DoScriptFile(m.map_resource.add_resource_file(os.path.join(HERE, "bvr_bridge.lua"))))

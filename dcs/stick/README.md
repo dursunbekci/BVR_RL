@@ -306,3 +306,20 @@ rail. Held for 0.4 s it launched nothing by any of four routes (device SetComman
 DCS's generic pickle 350/351); held for 1.5 s (`--release-hold`, the default now) the SetCommand route fired. The missile showed in
 the default world objects, not in the `ballistic` list, and the payload table stays `None` for this module, so `fire` goes by
 the HUD's `N MRM` count and new world objects. Master arm: device 19 command 3002, value 1 (clickable route) shows `ARM` on the HUD.
+
+**Aimed lock, `lock --aim` (13 October; written from the `cursormap` pages, tested on the fake cockpit only)**: the range-only
+scan finds a target only dead ahead and level. `cursormap` showed what to steer by instead: the radar page's `FCR_Bearing_range`
+line is the cursor's bearing and range from the bullseye (whole magnetic degrees and NM: at the bottom edge, where the cursor is
+on our own aircraft, it read 174/255 with the HUD heading 354 on a true-north course, so the bearings are magnetic, 6 deg east
+here); left and right do move the cursor (the bearing rose to 177 with left, fell to 170 with right, at the edge within a second);
+`Cursor_Root` lists `Max_Search_Altitude` / `Min_Search_Altitude`, the height coverage at the cursor's range in thousands of feet;
+the page also shows RWS, A6 (60 deg either side), 4 B (four bars), the range scale and `SOI`. `make_mission.py` now puts the
+bullseye near the fight (stick test: halfway to the target; 1v1: the middle), and the module sends the magnetic heading
+(`myaw`, `LoGetMagneticYaw`) for the variation. `lock --aim`: (1) with the cursor at the bottom edge, its readout places the
+bullseye (or `--bull X Z`); (2) each step converts the readout to the cursor's range and azimuth from us and moves it toward
+the target's (from the world objects) with a pulse sized by the slew rate it has seen so far, range or azimuth, whichever is
+further off; a tolerance widens when its axis overshoots; (3) near the target's range, if its altitude is outside the coverage,
+antenna elevation up or down; (4) at the point, if nothing is under the cursor, a small search around it (1-3 NM, 2.5-5 deg);
+(5) target under the cursor: target management up, and again for the single-target track. A target more than 58 deg off the
+nose is refused (turn first). On the fake (my guess at the slew rates and a four-bar coverage of 3.4 deg either side) it locks
+targets at 0, +30 deg (+2 km), +10 deg (+6 km, antenna up) and -45 deg (-3 km) in 7 to 11 steps.

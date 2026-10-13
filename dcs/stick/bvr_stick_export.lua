@@ -151,7 +151,7 @@ local API = {"LoGetModelTime", "LoGetSelfData", "LoGetTrueAirSpeed", "LoGetIndic
   "LoGetVerticalVelocity", "LoGetAltitudeAboveSeaLevel", "LoGetAltitudeAboveGroundLevel",
   "LoGetADIPitchBankYaw", "LoGetVectorVelocity", "LoGetAngularVelocity", "LoGetEngineInfo",
   "LoGetWorldObjects", "LoGetTargetInformation", "LoGetLockedTargetInformation",
-  "LoGetPayloadInfo", "LoSetCommand"}
+  "LoGetPayloadInfo", "LoSetCommand", "LoGetMagneticYaw"}
 
 -- The axis command numbers: DCS's own table if it can be read, else 2001-2004.
 local CODES = {pitch = 2001, roll = 2002, rudder = 2003, throttle = 2004}
@@ -409,6 +409,7 @@ local function emit()
             lat = lla.Lat, lon = lla.Long, alt = lla.Alt, hdg = me.Heading, pitch = me.Pitch,
             bank = me.Bank, x = pos.x, y = pos.y, z = pos.z}
   end
+  f.myaw = try("LoGetMagneticYaw")       -- the cockpit's bearings are magnetic: true heading - myaw is the variation
   f.tas, f.ias, f.mach = try("LoGetTrueAirSpeed"), try("LoGetIndicatedAirSpeed"), try("LoGetMachNumber")
   f.aoa, f.beta = try("LoGetAngleOfAttack"), try("LoGetAngleOfSideSlip")
   f.g = vec(try("LoGetAccelerationUnits"))

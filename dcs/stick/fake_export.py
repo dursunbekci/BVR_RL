@@ -17,6 +17,7 @@ import math
 
 G = 9.80665
 DT = 0.02
+MAGVAR = 6.0          # deg east, as over the Black Sea: the cockpit's bearings are magnetic
 
 
 def wrap_pi(a):
@@ -71,6 +72,7 @@ class FakeAircraft:
             "me": {"name": "FAKE", "coal": 2, "l1": 1, "l2": 1, "lat": 42.0, "lon": 41.0, "alt": self.alt,
                    "hdg": self.hdg, "pitch": self.gamma, "bank": self.bank,
                    "x": self.x, "y": self.alt, "z": self.z},
+            "myaw": (self.hdg - math.radians(MAGVAR)) % (2 * math.pi),
             "tas": self.V, "ias": self.V * 0.8, "mach": self.V / 330.0, "aoa": 0.05, "beta": self.beta,
             "g": {"x": 0.0, "y": self.nz, "z": 0.0}, "vs": vs, "asl": self.alt, "agl": self.alt - 300.0,
             "adi": {"pitch": self.gamma, "bank": self.bank, "yaw": self.hdg},
@@ -95,6 +97,10 @@ class FakeCockpit:
                      (d["HOTAS"], h["STICK_TGT_MANAGE_UP"]): "tms_up",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_AFT"]): "cursor_aft",
+                     (d["HOTAS"], h["THROTTLE_RDR_CURSOR_LEFT"]): "cursor_left",
+                     (d["HOTAS"], h["THROTTLE_RDR_CURSOR_RIGHT"]): "cursor_right",
+                     (d["HOTAS"], h["THROTTLE_ANT_ELEV_UP"]): "elev_up",
+                     (d["HOTAS"], h["THROTTLE_ANT_ELEV_DOWN"]): "elev_down",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_LEFT"]): "dms_left",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
@@ -109,9 +115,27 @@ class FakeCockpit:
         self.tz = ac.z + tgt_range * math.sin(ac.hdg)
         self.ty = ac.alt                   # the target flies level at the start altitude
         self.ac0 = ac
+        # the B-scope cursor (range NM, azimuth deg off the nose) and the antenna elevation (deg): they move while
+        # their switch is held, at these rates; the radar page reads the cursor's place as a bearing and range from
+        # a bullseye 30 km ahead of the start, in whole magnetic degrees and NM, as the F-16C's does
+        self.cur_r, self.cur_az, self.el = 20.0, 0.0, 0.0
+        self.rate = {"cursor": ("cur_r", 6.0), "cursor_aft": ("cur_r", -6.0), "cursor_left": ("cur_az", -50.0),
+                     "cursor_right": ("cur_az", 50.0), "elev_up": ("el", 6.0), "elev_down": ("el", -6.0)}
+        self.held = {}
+        self.bx = ac.x + 30000.0 * math.cos(ac.hdg)
+        self.bz = ac.z + 30000.0 * math.sin(ac.hdg)
+        self.scale = 40
 
     def press(self, dev, cmd, value):
         name = self.code.get((dev, cmd))
+        if name in self.rate:
+            if value != 0.0 and self.soi_left:
+                self.held[name] = self.ac0.t
+            elif value == 0.0 and name in self.held:
+                attr, r = self.rate[name]
+                lim = {"cur_r": (0.0, 80.0), "cur_az": (-60.0, 60.0), "el": (-60.0, 60.0)}[attr]
+                v = getattr(self, attr) + r * (self.ac0.t - self.held.pop(name))
+                setattr(self, attr, max(lim[0], min(lim[1], v)))
         if name == "dms_left" and value != 0.0:            # the keymap sends -1.0 for left and down, +1.0 for right and up
             self.soi_left = True
         elif name == "dms_right" and value != 0.0:
@@ -123,7 +147,8 @@ class FakeCockpit:
             self.cursor += 1
         elif name == "cursor_aft" and value == 1.0 and self.soi_left:
             self.cursor -= 1
-        elif name == "tms_up" and value == 1.0 and self.aa and self.soi_left and self.cursor >= self.scan_needed:
+        elif name == "tms_up" and value == 1.0 and self.aa and self.soi_left and (
+                self.cursor >= self.scan_needed or self.under_cursor()):   # scan_needed 999: only by aiming
             self.stage = (self.stage + 1) % 3          # a third press drops the track
         elif name == "arm":
             self.armed = value == 1.0
@@ -135,6 +160,40 @@ class FakeCockpit:
             self.missile = {"id": 99, "name": "AIM_120C", "unit": "", "coal": 2, "l1": 4, "l2": 4,
                             "x": self.ac0.x, "y": self.ac0.alt, "z": self.ac0.z}
         return name is not None
+
+    def target_polar(self):
+        """The target from the aircraft: range NM, azimuth deg off the nose, and its altitude in feet."""
+        ac = self.ac0
+        dx, dz = self.tx - ac.x, self.tz - ac.z
+        az = math.degrees(wrap_pi(math.atan2(dz, dx) - ac.hdg))
+        return math.hypot(dx, dz) / 1852.0, az, self.ty / 0.3048
+
+    def coverage(self, r_nm):
+        """The radar's height coverage at r_nm, in thousands of feet: 4 bars, about 3.4 deg either side."""
+        alt_ft, r_ft = self.ac0.alt / 0.3048, r_nm * 6076.1
+        return ((alt_ft + r_ft * math.tan(math.radians(self.el + 3.4))) / 1000.0,
+                (alt_ft + r_ft * math.tan(math.radians(self.el - 3.4))) / 1000.0)
+
+    def under_cursor(self):
+        if not self.aa:
+            return False
+        tr, taz, talt = self.target_polar()
+        hi, lo = self.coverage(tr)
+        return abs(self.cur_r - tr) < 1.5 and abs(self.cur_az - taz) < 3.0 and lo <= talt / 1000.0 <= hi
+
+    def fcr_page(self):
+        ac = self.ac0
+        a = ac.hdg + math.radians(self.cur_az)
+        cx, cz = ac.x + self.cur_r * 1852.0 * math.cos(a), ac.z + self.cur_r * 1852.0 * math.sin(a)
+        brg = (math.degrees(math.atan2(cz - self.bz, cx - self.bx)) - MAGVAR) % 360
+        rng = math.hypot(cx - self.bx, cz - self.bz) / 1852.0
+        hi, lo = self.coverage(self.cur_r)
+        tuc = self.under_cursor() or (self.aa and self.scan_needed and self.cursor == self.scan_needed)
+        return ("Range_Scale_Root\nchildren are {\nRange_Scale_Value\n%d\n}\nFCR_Bearing_range\n%d %d\n"
+                "Cursor_Root\nchildren are {\nMax_Search_Altitude\n%d\nMin_Search_Altitude\n%d\n}\n"
+                % (self.scale, round(brg) % 360, round(rng), round(hi), round(lo))
+                + ("FCR_TUC_contactData\nFCR_TUC_contact_Altitude\n%d\n" % round(self.ty / 304.8) if tuc else "")
+                + ("SOI\n" if self.soi_left else ""))
 
     @property
     def locked(self):
@@ -219,8 +278,7 @@ class FakeLink:
                              + "%d MRM\n" % n_amraam + ("ARM\n" if self.cockpit and self.cockpit.armed else "") + "-----------",
                           4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n")
                              + "Cursor_Range\n%d\n" % (20 + 3 * (self.cockpit.cursor if self.cockpit else 0))
-                             + ("FCR_TUC_contactData\nFCR_TUC_contact_Altitude\n23\n" if self.cockpit and self.cockpit.aa
-                                and self.cockpit.cursor == self.cockpit.scan_needed else "") + "-----------"}
+                             + (self.cockpit.fcr_page() if self.cockpit else "") + "-----------"}
         self.events["ind_end"] = {"ev": "ind_end", "count": 2}
 
     def click(self, dev, cmd, value, mode=None):
