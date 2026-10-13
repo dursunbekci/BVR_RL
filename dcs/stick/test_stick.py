@@ -86,6 +86,10 @@ function LoGetWorldObjects()
 end
 function LoGetPayloadInfo() return {CurrentStation = 7, Stations = {{count = 1, CLSID = "{AIM-120C}"}}} end
 function LoSetCommand(c, v) CMDS[#CMDS + 1] = {c, v} end
+CLICKS = {}
+function GetDevice(id)
+  return {performClickableAction = function(self, dev, c, v) CLICKS[#CLICKS + 1] = {dev, c, v} end}
+end
 
 -- what Export.lua already defined before our dofile
 LuaExportStart = function() CALLS.start = (CALLS.start or 0) + 1 end
@@ -242,6 +246,47 @@ def test_lua_export():
     assert e.lines()[0]["source"] == "event"
     print(f"  Lua export module ........... OK  ({len(sent())} lines, {hz:.0f} telemetry/s per frame, {ehz:.0f}/s by "
           f"event at 60 fps; axes every frame, watchdog + RELEASE + PING + CMD, pause, callbacks chained)")
+
+
+def test_click():
+    """CLICK reaches performClickableAction; the dangerous devices and commands are refused."""
+    m = Mock()
+    m.g.LuaExportStart()
+    clicks = lambda: [(m.g.CLICKS[i][1], m.g.CLICKS[i][2], m.g.CLICKS[i][3]) for i in range(1, len(m.g.CLICKS) + 1)]
+    for text in ("CLICK 16 3010 1", "CLICK 16 3010 0", "CLICK 17 3018 1", "CLICK 19 3002 1.0", "CLICK 31 3001 1"):
+        m.send(text)
+    m.run(0.2)
+    assert clicks() == [(16, 3010, 1), (16, 3010, 0), (17, 3018, 1), (19, 3002, 1.0), (31, 3001, 1)], clicks()
+    ev = [d for d in m.lines() if d["ev"] == "click"]
+    assert len(ev) == 5 and all(d["ok"] for d in ev), ev
+    n = len(clicks())
+    refused = ["CLICK 10 3006 1",                           # CPT_MECH: ejection handle
+               "CLICK 10 3003 1", "CLICK 7 3001 1",         # canopy, landing gear handle
+               "CLICK 6 3003 1", "CLICK 4 3001 1", "CLICK 3 3001 1", "CLICK 2 3001 1",
+               "CLICK 32 3004 1",                           # countermeasures jettison
+               "CLICK 19 3003 1", "CLICK 19 3004 1", "CLICK 19 3005 1", "CLICK 19 3018 1"]   # stores jettison, ALT REL
+    for text in refused:
+        m.send(text)
+    m.run(0.3)
+    assert len(clicks()) == n, clicks()[n:]
+    ev = [d for d in m.lines() if d["ev"] == "click"][5:]
+    assert len(ev) == len(refused) and all(not d["ok"] and d["err"] == "refused" for d in ev), ev
+    # the deny list agrees with the module's own numbers
+    defs = json.load(open(os.path.join(HERE, "f16c_defs.json")))
+    mm = defs["commands"]["mmc"]
+    assert (mm["EmerStoresJett"], mm["GroundJett"], mm["AltRel"], mm["GroundJett_ITER"]) == (3003, 3004, 3005, 3018)
+    dv = defs["devices"]
+    assert [dv[k] for k in ("CONTROL_INTERFACE", "ELEC_INTERFACE", "FUEL_INTERFACE", "HYDRO_INTERFACE", "ENGINE_INTERFACE",
+                            "GEAR_INTERFACE", "OXYGEN_INTERFACE", "CPT_MECH", "CMDS")] == [2, 3, 4, 5, 6, 7, 8, 10, 32]
+    assert defs["devices"]["MMC"] == 19 and defs["commands"]["cmds"]["Jett"] == 3004
+    # a failing DCS call is reported, not fatal
+    m.L.execute("function GetDevice(id) error('no device') end")
+    m.send("CLICK 16 3010 1")
+    m.run(0.1)
+    last = [d for d in m.lines() if d["ev"] == "click"][-1]
+    assert last["ok"] is False and "no device" in last["err"], last
+    print("  CLICK ....................... OK  (5 cockpit commands pass; 12 dangerous ones refused, the deny list "
+          "matches the module's numbers; a DCS error is reported)")
 
 
 def test_precision_and_command_defs():
@@ -446,6 +491,86 @@ def test_roll_lead():
           f"{peaks[0.25]:.0f} with, for a 60 deg limit)")
 
 
+def test_cockpit():
+    import io
+    import contextlib
+    import cockpit
+    import stick_test
+    from fake_export import FakeLink
+    defs = cockpit.load_defs()
+    # names resolve to the module's own numbers and key values
+    assert cockpit.resolve("hotas.STICK_TGT_MANAGE_UP", defs) == (16, 3010, 1.0, 0.0)
+    assert cockpit.resolve("HOTAS.STICK_WEAPON_RELEASE", defs) == (16, 3022, 1.0, 0.0)
+    assert cockpit.resolve("ufc.AA", defs) == (17, 3018, 1.0, 0.0)
+    assert cockpit.resolve("mmc.MasterArmSw", defs, value=1.0) == (19, 3002, 1.0, None)
+    assert cockpit.resolve("left_osb.4", defs) == (24, 3004, 1.0, 0.0)
+    assert cockpit.resolve("right_osb.20", defs)[0] == 25
+    assert cockpit.resolve(["16", "3010"], defs) == (16, 3010, 1.0, 0.0)
+    for bad in ("mmc.MasterArmSw", "nope.X", "hotas.NOT_A_COMMAND", "mfd.OSB_1"):
+        try:
+            cockpit.resolve(bad, defs)
+        except ValueError as e:
+            assert bad.split(".")[0] in str(e) or "switch" in str(e) or "MFD" in str(e), str(e)
+        else:
+            raise AssertionError(f"{bad} should not resolve")
+    # the UDP line
+    import socket as so
+    rx = so.socket(so.AF_INET, so.SOCK_DGRAM)
+    rx.bind(("127.0.0.1", 25412))
+    rx.settimeout(2.0)
+    link = stick_test.UdpLink(25411, 25412)
+    try:
+        link.click(16, 3010, 1.0)
+        assert rx.recvfrom(100)[0].decode() == "CLICK 16 3010 1", "wire format"
+        link.click(19, 3002, -0.5)
+        assert rx.recvfrom(100)[0].decode() == "CLICK 19 3002 -0.5"
+    finally:
+        link.close()
+        rx.close()
+    # gains the fake aircraft is flown with
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    lim = stick_test.Limits(min_agl=0, min_alt=0)
+
+    def flow(scan_needed, scan):
+        link = FakeLink(cockpit_defs=defs, scan_needed=scan_needed)
+        run = stick_test.Run(link, None, "cp", lim)
+        run.next()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            r = cockpit.stage_radar(run, 4.0)
+            lk = cockpit.stage_lock(run, gains, defs, scan=scan)
+            fr = cockpit.stage_fire(run, gains, defs)
+        return r, lk, fr, buf.getvalue(), link
+    r, lk, fr, out, link = flow(0, False)
+    assert not r["locked_seen"] and not r["targets_seen"], r        # nothing set up before `lock`
+    assert lk["locked"] and fr["fired"] and fr["payload"] == [4, 3], (lk, fr)
+    assert "LOCKED" in out and "a missile left the aircraft" in out and "TGT-1" in out and "km" in out, out
+    assert not link.cockpit.armed, "master arm must be back OFF after fire"
+    # the radar cursor has to be slewed first: lock fails without --scan, works with it
+    r, lk, fr, out, link = flow(3, False)
+    assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)
+    r, lk, fr, out, link = flow(3, True)
+    assert lk["locked"] and fr["fired"], (lk, fr)
+    # a click the module refuses is reported
+    link = FakeLink(cockpit_defs=defs)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    link.click = lambda dev, cmd, value: link.events.__setitem__("click", {"ev": "click", "ok": False, "err": "refused"})
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cockpit.click(run, "hotas.STICK_TGT_MANAGE_UP", defs)
+    assert "NOT done: refused" in buf.getvalue(), buf.getvalue()
+    # the CLI
+    with tempfile.TemporaryDirectory() as d:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            stick_test.main(["click", "ufc.AA", "--fake", "--out", d])
+        assert "device 17, command 3018" in out.getvalue(), out.getvalue()
+    print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
+          "end on a fake cockpit, with and without a cursor scan; master arm ends OFF; refusals are shown)")
+
+
 def test_stall_message():
     import stick_test
     from fake_export import FakeLink
@@ -514,10 +639,12 @@ if __name__ == "__main__":
         sys.exit(0)
     test_lua_export()
     test_precision_and_command_defs()
+    test_click()
     test_udp_link()
     test_fake_end_to_end()
     test_fake_nonlinear()
     test_roll_lead()
+    test_cockpit()
     test_stall_message()
     test_install()
-    print("8/8 passed")
+    print("10/10 passed")

@@ -83,11 +83,63 @@ class FakeAircraft:
         }
 
 
+class FakeCockpit:
+    """Enough of the F-16C's radar and stores to test the click, radar, lock and fire logic: A-A mode
+    (ICP), a lock by target management up (after `scan_needed` radar cursor presses), master arm and weapon
+    release. The target is an unarmed aircraft 60 km ahead of the start, not moving."""
+
+    def __init__(self, defs, ac, scan_needed=0, tgt_range=60000.0):
+        h = defs["commands"]["hotas"]
+        d = defs["devices"]
+        self.code = {(d["UFC"], defs["commands"]["ufc"]["AA"]): "aa",
+                     (d["HOTAS"], h["STICK_TGT_MANAGE_UP"]): "tms_up",
+                     (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
+                     (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
+                     (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm"}
+        self.aa = self.locked = self.armed = False
+        self.cursor, self.scan_needed = 0, scan_needed
+        self.stores = {str(i): {"count": 1, "CLSID": "{AIM-120C}"} for i in (1, 2, 8, 9)}
+        self.missile = None
+        self.tx = ac.x + tgt_range * math.cos(ac.hdg)
+        self.tz = ac.z + tgt_range * math.sin(ac.hdg)
+        self.ac0 = ac
+
+    def press(self, dev, cmd, value):
+        name = self.code.get((dev, cmd))
+        if name == "aa" and value == 1.0:
+            self.aa = True
+        elif name == "cursor" and value == 1.0:
+            self.cursor += 1
+        elif name == "tms_up" and value == 1.0 and self.aa and self.cursor >= self.scan_needed:
+            self.locked = not self.locked if self.locked else True
+        elif name == "arm":
+            self.armed = value == 1.0
+        elif name == "release" and value == 1.0 and self.locked and self.armed and self.missile is None:
+            for k, v in self.stores.items():
+                if v["count"]:
+                    v["count"] = 0
+                    break
+            self.missile = {"id": 99, "name": "AIM_120C", "unit": "", "coal": 2, "l1": 4, "l2": 4,
+                            "x": self.ac0.x, "y": self.ac0.alt, "z": self.ac0.z}
+        return name is not None
+
+    def extras(self, ac):
+        rng = math.hypot(self.tx - ac.x, self.tz - ac.z)
+        tgt = {"id": 10, "name": "F-16C_50", "unit": "TGT-1", "coal": 1, "l1": 1, "l2": 1,
+               "x": self.tx, "y": ac.alt, "z": self.tz}
+        info = {"1": {"ID": 1, "distance": rng}}
+        out = {"obj": [tgt] + ([self.missile] if self.missile else []),
+               "radar": {"targets": info if self.aa else {}, "locked": info if self.locked else {}},
+               "pay": {"CurrentStation": 7, "Stations": self.stores}}
+        return out
+
+
 class FakeLink:
     """Same interface as stick_test.UdpLink, in lock step with a FakeAircraft."""
 
-    def __init__(self, **kw):
+    def __init__(self, cockpit_defs=None, scan_needed=0, **kw):
         self.ac = FakeAircraft(**kw)
+        self.cockpit = FakeCockpit(cockpit_defs, self.ac, scan_needed) if cockpit_defs else None
         self.ax = {"pitch": 0.0, "roll": 0.0, "rudder": 0.0, "throttle": None, "seq": 0}
         self.controlling = False
         self.n = 0
@@ -110,6 +162,8 @@ class FakeLink:
         self.ac.step(self.ax if self.controlling else {"roll": 0.0, "pitch": 0.0, "rudder": 0.0})
         self.n += 1
         d = self.ac.telemetry(self.n, self.ax, self.controlling, self._wall)
+        if self.cockpit and self.n % 5 == 0:
+            d.update(self.cockpit.extras(self.ac))
         f = Frame(d)
         if f.ax_seq in self.sent:
             self.latencies.append(self._wall - self.sent.pop(f.ax_seq))
@@ -131,6 +185,10 @@ class FakeLink:
 
     def raw(self, code, value):
         pass
+
+    def click(self, dev, cmd, value):
+        ok = self.cockpit.press(dev, cmd, value) if self.cockpit else False
+        self.events["click"] = {"ev": "click", "ok": True, "dev": dev, "cmd": cmd, "value": value, "known": ok}
 
     def info(self):
         pass

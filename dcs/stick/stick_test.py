@@ -17,6 +17,10 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py throttle            throttle code against RPM and acceleration
     python dcs/stick/stick_test.py hold                heading/altitude/speed steps, closed loop
     python dcs/stick/stick_test.py all                 rate, pulses, curve, throttle, hold
+    python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
+    python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
+    python dcs/stick/stick_test.py lock                try to lock the target (needs make_mission --stick-test --target)
+    python dcs/stick/stick_test.py fire                master arm, release a missile, watch it go
     python dcs/stick/stick_test.py release             panic: axes to 0 (the F-16 holds 1 g, the bank)
     python dcs/stick/stick_test.py raw 2004 0.5        one LoSetCommand(2004, 0.5)
 
@@ -176,6 +180,9 @@ class UdpLink:
 
     def info(self):
         self._send("INFO")
+
+    def click(self, dev, cmd, value):
+        self._send(f"CLICK {int(dev)} {int(cmd)} {float(value):g}")
 
     def close(self):
         self.rx.close()
@@ -822,8 +829,14 @@ def save_gains(path, gains):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw"])
-    ap.add_argument("args", nargs="*", help="raw: CODE VALUE")
+    ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
+                                        "click", "radar", "lock", "fire"])
+    ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
+    ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
+    ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
+    ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
+    ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
+    ap.add_argument("--no-fly", action="store_true", help="radar, lock, fire: do not hold heading, altitude and speed")
     ap.add_argument("--secs", type=float, default=10.0, help="rate: how long to listen (s)")
     ap.add_argument("--size", type=float, default=0.1, help="pulses: stick deflection (default 0.1)")
     ap.add_argument("--bank", type=float, default=60.0, help="hold: bank limit, deg (try 75 with --nz 6 once it works)")
@@ -870,6 +883,39 @@ def main(argv=None):
             return summary
         if a.test == "info":
             stage_info(link)
+            return summary
+        if a.test in ("click", "radar", "lock", "fire"):
+            import cockpit
+            defs = cockpit.load_defs()
+            gains = load_gains(gains_path)
+            have = all(k in gains for k in ("roll_sign", "pitch_sign", "thr_sign")) and gains.get("roll_curve") \
+                and gains.get("pitch_curve")
+            if a.test != "click" and not a.no_fly and not have:
+                raise SystemExit("heading, altitude and speed are held on the stick while this runs, which needs the gains "
+                                 "from pulses, curve and throttle (or add --no-fly and hold the aircraft yourself).")
+            run = Run(link, a.out, a.test, limits)
+            try:
+                first = run.next()
+                fgains = None if a.no_fly else gains
+                if a.test == "click":
+                    if not a.args:
+                        raise SystemExit("click NAME (e.g. hotas.STICK_TGT_MANAGE_UP, ufc.AA, left_osb.4) or click DEVICE COMMAND")
+                    spec = a.args if len(a.args) == 2 and all(x.lstrip("-").isdigit() for x in a.args) else a.args[0]
+                    try:
+                        cockpit.click(run, spec, defs, value=a.value, hold=a.hold)
+                    except ValueError as e:
+                        raise SystemExit(str(e))
+                elif a.test == "radar":
+                    summary["radar"] = cockpit.stage_radar(run, a.secs, a.out)
+                elif a.test == "lock":
+                    summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan)
+                else:
+                    summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force)
+            finally:
+                run.close()
+                link.release()
+            if a.test == "click":
+                return summary
             return summary
         todo = ["rate", "pulses", "curve", "throttle", "hold"] if a.test == "all" else [a.test]
         gains = load_gains(gains_path)

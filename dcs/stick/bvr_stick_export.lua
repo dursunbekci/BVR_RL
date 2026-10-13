@@ -14,6 +14,9 @@
 --   PING <id>                                       answered with ev = "pong"
 --   CMD <code> <value>                              one raw LoSetCommand (experiments)
 --   INFO                                            sends ev = "hello" again
+--   CLICK <device> <command> <value>                a cockpit switch or HOTAS control, as the
+--                                                   module's own key bindings do (answered with
+--                                                   ev = "click"); numbers from f16c_defs.json
 -- If no AXES line arrives for CFG.watchdog seconds, pitch, roll and rudder go to 0
 -- and control switches off (the F-16's flight control holds 1 g and the bank).
 --
@@ -38,6 +41,7 @@ local CFG = {
   watchdog = 0.5,        -- s without an AXES line before the axes are zeroed
   stats_every = 5.0,     -- s (real time) between ev = "stats" lines
   allow_raw = true,      -- accept CMD lines
+  allow_click = true,    -- accept CLICK lines (some devices and commands are always refused, below)
   codes = nil,           -- {pitch=, roll=, rudder=, throttle=} to force the command numbers
   version = 1,
 }
@@ -233,6 +237,15 @@ local function hello()
         rt = now()})
 end
 
+-- CLICK refuses whole devices and single commands whatever the script sends: the electrical,
+-- fuel, hydraulic, engine, gear and oxygen systems, the canopy and ejection (CPT_MECH), the flight
+-- control interface and the countermeasures dispenser, and the F-16C's stores jettison and
+-- alternate release (MMC 3003 emergency jettison, 3004 and 3018 ground jettison, 3005 ALT REL).
+-- Device ids and command numbers are the F-16C module's own (dcs/stick/f16c_defs.json).
+local CLICK_DENY_DEVICE = {[2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
+                           [8] = true, [10] = true, [32] = true}
+local CLICK_DENY = {["19:3003"] = true, ["19:3004"] = true, ["19:3005"] = true, ["19:3018"] = true}
+
 -- ── input ──────────────────────────────────────────────────────────────
 local function num(s, lo, hi)
   local v = tonumber(s)
@@ -263,6 +276,16 @@ local function handle(line)
   elseif cmd == "CMD" and CFG.allow_raw then
     local code, v = num(w[2]), num(w[3])
     if code and v then send({ev = "raw", code = code, value = v, ok = setcmd(code, v), rt = now()}) end
+  elseif cmd == "CLICK" and CFG.allow_click then
+    local dev, c, v = num(w[2]), num(w[3]), num(w[4])
+    if dev and c and v then
+      if CLICK_DENY_DEVICE[dev] or CLICK_DENY[string.format("%d:%d", dev, c)] then
+        send({ev = "click", ok = false, err = "refused", dev = dev, cmd = c, value = v, rt = now()})
+      else
+        local ok, err = pcall(function() GetDevice(0):performClickableAction(dev, c, v) end)
+        send({ev = "click", ok = ok, err = (not ok) and tostring(err) or nil, dev = dev, cmd = c, value = v, rt = now()})
+      end
+    end
   elseif cmd == "INFO" then
     hello()
   end

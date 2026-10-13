@@ -13,6 +13,7 @@ that runs bvr_bridge.lua (the file is packed into the .miz).
     python dcs/make_mission.py --range-km 70 --red-player --out my.miz
     python dcs/make_mission.py --defender               # -> dcs/bvr_rl_defender.miz
     python dcs/make_mission.py --stick-test             # -> dcs/bvr_rl_sticktest.miz
+    python dcs/make_mission.py --stick-test --target    # -> dcs/bvr_rl_sticktest_target.miz
 
   BLUE-1   the aircraft the policy flies (an AI unit; without dcs_live.py it
            flies a CAP and fights on its own)
@@ -24,6 +25,9 @@ so you can't shoot back beyond visual range: you defend, and the test is
 whether the policy can shoot down a human who evades. It sets --red-type
 Su-25T --red-player, starts red at 6000 m and 200 m/s (the Su-25T is slow),
 and writes a briefing for the DCS mission screen.
+
+--stick-test --target adds one unarmed AI F-16C 60 km ahead (same heading, 240 m/s) to lock and shoot at
+with stick_test.py lock / fire.
 
 --stick-test: only you, in the F-16C Viper module, in the air over the sea at
 7000 m and 280 m/s heading east, with no other aircraft and no bridge, for
@@ -133,6 +137,10 @@ def missiles(typ, n=4):
     return [(i, stations[i][1]) for i in sorted(order[:n])]
 
 
+TARGET_BRIEFING = (
+    "\n\nAn unarmed AI F-16C (TGT-1) flies the same way 60 km ahead of you at 240 m/s, for dcs/stick/stick_test.py "
+    "radar, lock and fire. It carries no weapons. You close on it at about 40 m/s.")
+
 STICK_BRIEFING = (
     "You fly a Viper, in the air at 7000 m over the sea, heading east at 280 m/s. Nobody else is here.\n\n"
     "For dcs/stick/stick_test.py: trim for level flight (Mach 0.85-0.9, about 300 m/s), take your hands "
@@ -172,7 +180,7 @@ def build(args):
     m = Mission(Caucasus())
     if args.stick_test:
         m.set_sortie_text("BVR_RL: stick control test (stick_test.py)")
-        m.set_description_text(STICK_BRIEFING)
+        m.set_description_text(STICK_BRIEFING + (TARGET_BRIEFING if args.target else ""))
     elif args.defender:
         m.set_sortie_text("BVR_RL: survive the policy")
         m.set_description_text(DEFENDER_BRIEFING)
@@ -201,7 +209,7 @@ def build(args):
     far = 4.0                                   # waypoints well past the other aircraft
     p_blue_wp = mapping.Point(cx + far * dx, cy + far * dy, m.terrain)
     p_red_wp = mapping.Point(cx - far * dx, cy - far * dy, m.terrain)
-    def flight(country, name, typ, pos, wp, alt, heading, speed):
+    def flight(country, name, typ, pos, wp, alt, heading, speed, armed=True):
         kmh = speed * 3.6
         fg = m.flight_group_inflight(country, name, typ, pos, altitude=alt, speed=kmh,
                                      maintask=task.CAP)
@@ -210,8 +218,9 @@ def build(args):
         u.name = f"{name}-1"
         u.heading = heading
         u.skill = Skill.Excellent
-        for pylon, weapon in missiles(typ, 4):
-            fg.load_pylon(weapon, pylon)
+        if armed:
+            for pylon, weapon in missiles(typ, 4):
+                fg.load_pylon(weapon, pylon)
         return fg
 
     hdg_blue = math.degrees(brg) % 360
@@ -219,6 +228,10 @@ def build(args):
         me = flight(blue_c, "VIPER", types["F-16C"], mapping.Point(cx - 100_000.0, cy, m.terrain),
                     mapping.Point(cx + 400_000.0, cy, m.terrain), args.alt_blue, 90.0, args.speed)
         me.units[0].skill = Skill.Player
+        if args.target:                         # an unarmed AI aircraft ahead, flying the same way
+            tgt = flight(red_c, "TGT", types["F-16C"], mapping.Point(cx - 40_000.0, cy, m.terrain),
+                         mapping.Point(cx + 400_000.0, cy, m.terrain), args.alt_blue, 90.0, 240.0, armed=False)
+            tgt.units[0].skill = Skill.Excellent
         m.save(args.out)                        # no bridge: the Export.lua script does the work
         return me, None
     blue = flight(blue_c, "BLUE", types[args.blue_type], p_blue, p_blue_wp, args.alt_blue,
@@ -255,6 +268,8 @@ def main():
     ap.add_argument("--red-player", action="store_true", help="fly RED-1 yourself")
     ap.add_argument("--stick-test", action="store_true",
                     help="only you, in the F-16C Viper, in the air (7000 m, 280 m/s); writes bvr_rl_sticktest.miz")
+    ap.add_argument("--target", action="store_true",
+                    help="with --stick-test: add one unarmed AI F-16C 60 km ahead to lock and shoot at")
     ap.add_argument("--defender", action="store_true",
                     help="you fly RED-1 in the free Su-25T and defend (sets --red-type Su-25T "
                          "--red-player; writes bvr_rl_defender.miz)")
@@ -265,7 +280,7 @@ def main():
             args.out = os.path.join(HERE, "bvr_rl_defender.miz")
     if args.stick_test:
         if args.out == ap.get_default("out"):
-            args.out = os.path.join(HERE, "bvr_rl_sticktest.miz")
+            args.out = os.path.join(HERE, "bvr_rl_sticktest_target.miz" if args.target else "bvr_rl_sticktest.miz")
         if args.alt_blue == ap.get_default("alt_blue"):
             args.alt_blue = 7000.0
         args.alt_red = args.speed_red = 0.0
@@ -276,7 +291,8 @@ def main():
         args.speed_red = 200.0 if slow else args.speed
     build(args)
     if args.stick_test:
-        print(f"written {args.out}: you in the F-16C at {args.alt_blue:.0f} m, {args.speed:.0f} m/s, alone over the sea")
+        print(f"written {args.out}: you in the F-16C at {args.alt_blue:.0f} m, {args.speed:.0f} m/s, "
+              f"{'with an unarmed target 60 km ahead' if args.target else 'alone'} over the sea")
         print("copy it to Saved Games\\DCS\\Missions\\ (or open it from anywhere in DCS)")
         return
     print(f"written {args.out}: BLUE-1 ({args.blue_type}, policy) v RED-1 ({args.red_type}"

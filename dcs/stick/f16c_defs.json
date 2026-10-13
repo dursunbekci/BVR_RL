@@ -1,0 +1,4412 @@
+{
+ "commands": {
+  "cmds": {
+   "ChExp": 3007,
+   "ChExp_ITER": 3018,
+   "DispBtn": 3011,
+   "FlExp": 3008,
+   "FlExp_ITER": 3019,
+   "Jett": 3004,
+   "Jett_ITER": 3015,
+   "JmrSrc": 3002,
+   "JmrSrc_ITER": 3013,
+   "Mode": 3010,
+   "Mode_ITER": 3021,
+   "MwsSrc": 3003,
+   "MwsSrc_ITER": 3014,
+   "O1Exp": 3005,
+   "O1Exp_ITER": 3016,
+   "O2Exp": 3006,
+   "O2Exp_ITER": 3017,
+   "Prgm": 3009,
+   "Prgm_ITER": 3020,
+   "RwrSrc": 3001,
+   "RwrSrc_ITER": 3012
+  },
+  "control": {
+   "AB_DETENT": 3018,
+   "AdvMode": 3015,
+   "AdvMode_ITER": 3034,
+   "AltFlaps": 3002,
+   "AltFlaps_ITER": 3020,
+   "ApPitchAlt": 3013,
+   "ApPitchAlt_EXT": 3032,
+   "ApPitchAtt": 3012,
+   "ApPitchAtt_EXT": 3031,
+   "ApRoll": 3014,
+   "ApRoll_ITER": 3033,
+   "BitSw": 3003,
+   "DigitalBackup": 3001,
+   "DigitalBackup_ITER": 3019,
+   "FlcsReset": 3004,
+   "LeFlaps": 3005,
+   "LeFlaps_ITER": 3021,
+   "ManualPitchOverride": 3010,
+   "ManualPitchOverride_ITER": 3029,
+   "ManualTfFlyup": 3016,
+   "ManualTfFlyup_ITER": 3035,
+   "PitchTrim": 3008,
+   "PitchTrim_AXIS": 3026,
+   "PitchTrim_ITER": 3025,
+   "RollTrim": 3007,
+   "RollTrim_AXIS": 3024,
+   "RollTrim_ITER": 3023,
+   "StoresConfig": 3011,
+   "StoresConfig_ITER": 3030,
+   "ThrottleFriction": 3017,
+   "ThrottleFriction_ITER": 3036,
+   "ThrottleOnOff": 3037,
+   "TrimApDisc": 3006,
+   "TrimApDisc_ITER": 3022,
+   "YawTrim": 3009,
+   "YawTrim_AXIS": 3028,
+   "YawTrim_ITER": 3027
+  },
+  "fcr": {
+   "PwrSw": 3001,
+   "PwrSw_ITER": 3002
+  },
+  "hotas": {
+   "STICK_CMS_MANAGE_AFT": 3015,
+   "STICK_CMS_MANAGE_FWD": 3014,
+   "STICK_CMS_MANAGE_LEFT": 3016,
+   "STICK_CMS_MANAGE_RIGHT": 3017,
+   "STICK_DISP_MANAGE_DOWN": 3007,
+   "STICK_DISP_MANAGE_LEFT": 3008,
+   "STICK_DISP_MANAGE_RIGHT": 3009,
+   "STICK_DISP_MANAGE_UP": 3006,
+   "STICK_EXPAND_FOV": 3018,
+   "STICK_NWS_AR_DISC_MSL_STEP": 3001,
+   "STICK_PADDLE": 3019,
+   "STICK_TGT_MANAGE_DOWN": 3011,
+   "STICK_TGT_MANAGE_LEFT": 3012,
+   "STICK_TGT_MANAGE_RIGHT": 3013,
+   "STICK_TGT_MANAGE_UP": 3010,
+   "STICK_TRIGGER_1ST_DETENT": 3020,
+   "STICK_TRIGGER_2ND_DETENT": 3021,
+   "STICK_TRIMMER_DOWN": 3003,
+   "STICK_TRIMMER_LEFT": 3004,
+   "STICK_TRIMMER_RIGHT": 3005,
+   "STICK_TRIMMER_UP": 3002,
+   "STICK_WEAPON_RELEASE": 3022,
+   "THROTTLE_ANT_ELEV_AXIS": 3032,
+   "THROTTLE_ANT_ELEV_DOWN": 3034,
+   "THROTTLE_ANT_ELEV_UP": 3033,
+   "THROTTLE_CUTOFF_RELEASE": 3023,
+   "THROTTLE_DOG_FIGHT": 3030,
+   "THROTTLE_DOG_FIGHT_CYCL": 3043,
+   "THROTTLE_DOG_FIGHT_EXT": 3044,
+   "THROTTLE_DOG_FIGHT_ITER": 3042,
+   "THROTTLE_ENABLE": 3039,
+   "THROTTLE_MAN_RNG": 3028,
+   "THROTTLE_MAN_RNG_DEC": 3041,
+   "THROTTLE_MAN_RNG_INC": 3040,
+   "THROTTLE_RDR_CURSOR_AFT": 3036,
+   "THROTTLE_RDR_CURSOR_FWD": 3035,
+   "THROTTLE_RDR_CURSOR_LEFT": 3037,
+   "THROTTLE_RDR_CURSOR_RIGHT": 3038,
+   "THROTTLE_RDR_CURSOR_X_AXIS": 3047,
+   "THROTTLE_RDR_CURSOR_Y_AXIS": 3046,
+   "THROTTLE_SPEEDSPEED_BRAKE_EXT": 3045,
+   "THROTTLE_SPEED_BRAKE": 3031,
+   "THROTTLE_TRANSMIT_AFT": 3025,
+   "THROTTLE_TRANSMIT_AFT_VOIP": 3049,
+   "THROTTLE_TRANSMIT_FWD": 3024,
+   "THROTTLE_TRANSMIT_FWD_VOIP": 3048,
+   "THROTTLE_TRANSMIT_LEFT": 3026,
+   "THROTTLE_TRANSMIT_RIGHT": 3027,
+   "THROTTLE_UNCAGE": 3029
+  },
+  "mfd": {
+   "OSB_1": 3001,
+   "OSB_10": 3010,
+   "OSB_11": 3011,
+   "OSB_12": 3012,
+   "OSB_13": 3013,
+   "OSB_14": 3014,
+   "OSB_15": 3015,
+   "OSB_16": 3016,
+   "OSB_17": 3017,
+   "OSB_18": 3018,
+   "OSB_19": 3019,
+   "OSB_2": 3002,
+   "OSB_20": 3020,
+   "OSB_3": 3003,
+   "OSB_4": 3004,
+   "OSB_5": 3005,
+   "OSB_6": 3006,
+   "OSB_7": 3007,
+   "OSB_8": 3008,
+   "OSB_9": 3009
+  },
+  "mmc": {
+   "Alt": 3011,
+   "AltRel": 3005,
+   "Alt_EXT": 3024,
+   "AttFpm": 3007,
+   "AttFpm_EXT": 3020,
+   "Brt": 3012,
+   "Brt_EXT": 3025,
+   "DedData": 3008,
+   "DedData_EXT": 3021,
+   "DeprRet": 3009,
+   "DeprRet_EXT": 3022,
+   "EmerStoresJett": 3003,
+   "GroundJett": 3004,
+   "GroundJett_ITER": 3018,
+   "MFD": 3014,
+   "MFD_ITER": 3027,
+   "MasterArmSw": 3002,
+   "MasterArmSw_EXT": 3017,
+   "MasterArmSw_ITER": 3016,
+   "MmcPwr": 3001,
+   "MmcPwr_ITER": 3015,
+   "Spd": 3010,
+   "Spd_EXT": 3023,
+   "Test": 3013,
+   "Test_EXT": 3026,
+   "VvVah": 3006,
+   "VvVah_EXT": 3019
+  },
+  "rwr": {
+   "ActPwr": 3010,
+   "Altitude": 3012,
+   "BrtKnob": 3008,
+   "BrtKnob_AXIS": 3016,
+   "BrtKnob_ITER": 3015,
+   "Handoff": 3002,
+   "IntKnob": 3001,
+   "IntKnob_AXIS": 3014,
+   "IntKnob_ITER": 3013,
+   "Launch": 3003,
+   "Mode": 3004,
+   "Power": 3011,
+   "Power_ITER": 3017,
+   "Search": 3009,
+   "SysTest": 3006,
+   "TgtSep": 3007,
+   "UnknownShip": 3005
+  },
+  "sms": {
+   "ChangeLaserCode1": 3011,
+   "ChangeLaserCode10": 3010,
+   "ChangeLaserCode100": 3009,
+   "LaserSw": 3004,
+   "LaserSw_ITER": 3008,
+   "LeftHDPT": 3002,
+   "LeftHDPT_ITER": 3006,
+   "RightHDPT": 3003,
+   "RightHDPT_ITER": 3007,
+   "StStaSw": 3001,
+   "StSta_ITER": 3005
+  },
+  "ufc": {
+   "AA": 3018,
+   "AG": 3019,
+   "BRT_Knob": 3023,
+   "BRT_Knob_AXIS": 3045,
+   "BRT_Knob_ITER": 3044,
+   "COM1": 3012,
+   "COM2": 3013,
+   "CONT_Knob": 3021,
+   "CONT_Knob_AXIS": 3047,
+   "CONT_Knob_ITER": 3046,
+   "DCS_DOWN": 3035,
+   "DCS_RTN": 3032,
+   "DCS_SEQ": 3033,
+   "DCS_UP": 3034,
+   "DED_DEC": 3031,
+   "DED_INC": 3030,
+   "DIG0_M_SEL": 3002,
+   "DIG1_T_ILS": 3003,
+   "DIG2_ALOW": 3004,
+   "DIG3": 3005,
+   "DIG4_STPT": 3006,
+   "DIG5_CRUS": 3007,
+   "DIG6_TIME": 3008,
+   "DIG7_MARK": 3009,
+   "DIG8_FIX": 3010,
+   "DIG9_A_CAL": 3011,
+   "DRIFT_CUTOUT": 3028,
+   "DriftCO_WarnReset_ITER": 3049,
+   "ENTR": 3016,
+   "FLIR_DEC": 3026,
+   "FLIR_GAIN_Sw": 3027,
+   "FLIR_GAIN_Sw_ITER": 3048,
+   "FLIR_INC": 3025,
+   "F_ACK": 3036,
+   "IFF": 3014,
+   "IFF_IDENT": 3037,
+   "LIST": 3015,
+   "RCL": 3017,
+   "RET_DEPR_Knob": 3020,
+   "RET_DEPR_Knob_AXIS": 3043,
+   "RET_DEPR_Knob_ITER": 3042,
+   "RF_Sw": 3038,
+   "RF_Sw_ITER": 3050,
+   "SYM_Knob": 3022,
+   "SYM_Knob_AXIS": 3041,
+   "SYM_Knob_ITER": 3040,
+   "UFC_Sw": 3001,
+   "UFC_Sw_ITER": 3039,
+   "WARN_RESET": 3029,
+   "Wx": 3024
+  }
+ },
+ "devices": {
+  "AAU34": 45,
+  "ADI": 50,
+  "AIHelper": 53,
+  "AMI": 46,
+  "AOA_INDICATOR": 44,
+  "ARCADE": 55,
+  "ATP_INTERFACE": 67,
+  "CADC": 20,
+  "CLOCK": 51,
+  "CMDS": 32,
+  "CONTROL_INTERFACE": 2,
+  "CPTLIGHTS_SYSTEM": 12,
+  "CPT_MECH": 10,
+  "DED": 26,
+  "DTE": 65,
+  "ECM_INTERFACE": 66,
+  "ECS_INTERFACE": 13,
+  "EHSI": 28,
+  "ELEC_INTERFACE": 3,
+  "ENGINE_INTERFACE": 6,
+  "EXTLIGHTS_SYSTEM": 11,
+  "FCR": 31,
+  "FLCC": 21,
+  "FM_PROXY": 1,
+  "FUEL_INTERFACE": 4,
+  "GEAR_INTERFACE": 7,
+  "GPS": 59,
+  "HARM_INTERFACE": 63,
+  "HEAD_WRAPPER": 68,
+  "HEARING_SENS": 9,
+  "HELMET": 29,
+  "HMCS": 30,
+  "HOTAS": 16,
+  "HTS_INTERFACE": 64,
+  "HUD": 23,
+  "HYDRO_INTERFACE": 5,
+  "IDM": 60,
+  "IFF": 34,
+  "IFF_CONTROL_PANEL": 35,
+  "ILS": 43,
+  "INS": 14,
+  "INTERCOM": 39,
+  "KNEEBOARD": 54,
+  "KY58": 42,
+  "MACROS": 52,
+  "MAP": 61,
+  "MAV_INTERFACE": 62,
+  "MFD_LEFT": 24,
+  "MFD_RIGHT": 25,
+  "MIDS": 41,
+  "MIDS_RT": 40,
+  "MMC": 19,
+  "MUX": 18,
+  "OXYGEN_INTERFACE": 8,
+  "PFLD": 27,
+  "RALT": 15,
+  "RWR": 33,
+  "SAI": 47,
+  "SIDEWINDER_INTERFACE": 57,
+  "SMS": 22,
+  "STANDBY_COMPASS": 49,
+  "TACAN_CTRL_PANEL": 56,
+  "TGP_INTERFACE": 58,
+  "UFC": 17,
+  "UHF_CONTROL_PANEL": 37,
+  "UHF_RADIO": 36,
+  "VHF_RADIO": 38,
+  "VVI": 48
+ },
+ "keys": {
+  "CLOCK.CLOCK_left_lev_up": [
+   {
+    "down": 1.0,
+    "name": "Clock Winding and Setting Knob - PULL",
+    "up": 0.0
+   }
+  ],
+  "CLOCK.CLOCK_right_lev_down": [
+   {
+    "down": 1.0,
+    "name": "Clock Elapsed Time Knob - START/STOP/RESET",
+    "up": 0.0
+   }
+  ],
+  "CMDS.ChExp": [
+   {
+    "down": 1.0,
+    "name": "CH Expendable Category Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "CH Expendable Category Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.ChExp_ITER": [
+   {
+    "down": 1.0,
+    "name": "CH Expendable Category Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.DispBtn": [
+   {
+    "down": 1.0,
+    "name": "CHAFF/FLARE Dispense Button",
+    "up": 0.0
+   }
+  ],
+  "CMDS.FlExp": [
+   {
+    "down": 1.0,
+    "name": "FL Expendable Category Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "FL Expendable Category Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.FlExp_ITER": [
+   {
+    "down": 1.0,
+    "name": "FL Expendable Category Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.Jett": [
+   {
+    "down": 1.0,
+    "name": "JETT Switch - JETT",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "JETT Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.Jett_ITER": [
+   {
+    "down": 1.0,
+    "name": "JETT Switch - JETT/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.JmrSrc": [
+   {
+    "down": 1.0,
+    "name": "JMR Source Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "JMR Source Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.JmrSrc_ITER": [
+   {
+    "down": 1.0,
+    "name": "JMR Source Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.Mode": [
+   {
+    "down": 0.0,
+    "name": "MODE Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "MODE Knob - STBY",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "MODE Knob - MAN",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "MODE Knob - SEMI",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "MODE Knob - AUTO",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "MODE Knob - BYP",
+    "up": null
+   }
+  ],
+  "CMDS.Mode_ITER": [
+   {
+    "down": -1.0,
+    "name": "MODE Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MODE Knob - CW",
+    "up": null
+   }
+  ],
+  "CMDS.MwsSrc": [
+   {
+    "down": 1.0,
+    "name": "MWS Source Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "MWS Source Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.MwsSrc_ITER": [
+   {
+    "down": 1.0,
+    "name": "MWS Source Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.O1Exp": [
+   {
+    "down": 1.0,
+    "name": "O1 Expendable Category Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "O1 Expendable Category Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.O1Exp_ITER": [
+   {
+    "down": 1.0,
+    "name": "O1 Expendable Category Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.O2Exp": [
+   {
+    "down": 1.0,
+    "name": "O2 Expendable Category Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "O2 Expendable Category Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.O2Exp_ITER": [
+   {
+    "down": 1.0,
+    "name": "O2 Expendable Category Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CMDS.Prgm": [
+   {
+    "down": 0.0,
+    "name": "PROGRAM Knob - BIT",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "PROGRAM Knob - 1",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "PROGRAM Knob - 2",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "PROGRAM Knob - 3",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "PROGRAM Knob - 4",
+    "up": null
+   }
+  ],
+  "CMDS.Prgm_ITER": [
+   {
+    "down": -1.0,
+    "name": "PROGRAM Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "PROGRAM Knob - CW",
+    "up": null
+   }
+  ],
+  "CMDS.RwrSrc": [
+   {
+    "down": 1.0,
+    "name": "RWR Source Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "RWR Source Switch - OFF",
+    "up": null
+   }
+  ],
+  "CMDS.RwrSrc_ITER": [
+   {
+    "down": 1.0,
+    "name": "RWR Source Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.AB_DETENT": [
+   {
+    "down": 1.0,
+    "name": "Cycle Afterburner Detent - ON/OFF",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.AdvMode": [
+   {
+    "down": 1.0,
+    "name": "ADV MODE Switch - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ADV MODE Switch - Released",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.AdvMode_ITER": [
+   {
+    "down": 1.0,
+    "name": "ADV MODE Switch - Depressed/Released",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.AltFlaps": [
+   {
+    "down": 0.0,
+    "name": "ALT FLAPS Switch - NORM",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ALT FLAPS Switch - EXTEND",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.AltFlaps_ITER": [
+   {
+    "down": 1.0,
+    "name": "ALT FLAPS Switch - NORM/EXTEND",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.ApPitchAlt": [
+   {
+    "down": 1.0,
+    "name": "Autopilot PITCH Switch - Up",
+    "up": 0.0
+   }
+  ],
+  "CONTROL_INTERFACE.ApPitchAlt_EXT": [
+   {
+    "down": 1.0,
+    "name": "Autopilot PITCH Switch - ALT HOLD",
+    "up": 0.0
+   },
+   {
+    "down": -1.0,
+    "name": "Autopilot PITCH Switch - A/P OFF",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.ApPitchAtt": [
+   {
+    "down": -1.0,
+    "name": "Autopilot PITCH Switch - Down",
+    "up": 0.0
+   }
+  ],
+  "CONTROL_INTERFACE.ApPitchAtt_EXT": [
+   {
+    "down": -1.0,
+    "name": "Autopilot PITCH Switch - ATT HOLD",
+    "up": 0.0
+   }
+  ],
+  "CONTROL_INTERFACE.ApRoll": [
+   {
+    "down": -1.0,
+    "name": "Autopilot ROLL Switch - STRG SEL",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "Autopilot ROLL Switch - ATT HOLD",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Autopilot ROLL Switch - HDG SEL",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.ApRoll_ITER": [
+   {
+    "down": 1.0,
+    "name": "Autopilot ROLL Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "Autopilot ROLL Switch - Down",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.BitSw": [
+   {
+    "down": 1.0,
+    "name": "BIT Switch - OFF/BIT",
+    "up": 0.0
+   }
+  ],
+  "CONTROL_INTERFACE.DigitalBackup": [
+   {
+    "down": 0.0,
+    "name": "DIGITAL BACKUP Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "DIGITAL BACKUP Switch - BACKUP",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.DigitalBackup_ITER": [
+   {
+    "down": 1.0,
+    "name": "DIGITAL BACKUP Switch - OFF/BACKUP",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.FlcsReset": [
+   {
+    "down": 1.0,
+    "name": "FLCS RESET Switch - OFF/RESET",
+    "up": 0.0
+   }
+  ],
+  "CONTROL_INTERFACE.LeFlaps": [
+   {
+    "down": 0.0,
+    "name": "LE FLAPS Switch - AUTO",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "LE FLAPS Switch - LOCK",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.LeFlaps_ITER": [
+   {
+    "down": 1.0,
+    "name": "LE FLAPS Switch - AUTO/LOCK",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.ManualPitchOverride": [
+   {
+    "down": 1.0,
+    "name": "MANUAL PITCH Override Switch - OVRD/NORM",
+    "up": 0.0
+   }
+  ],
+  "CONTROL_INTERFACE.ManualTfFlyup": [
+   {
+    "down": 0.0,
+    "name": "MANUAL TF FLYUP Switch - DISABLE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MANUAL TF FLYUP Switch - ENABLE",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.ManualTfFlyup_ITER": [
+   {
+    "down": 1.0,
+    "name": "MANUAL TF FLYUP Switch - ENABLE/DISABLE",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.StoresConfig": [
+   {
+    "down": 1.0,
+    "name": "STORES CONFIG Switch - CAT I",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "STORES CONFIG Switch - CAT III",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.StoresConfig_ITER": [
+   {
+    "down": 1.0,
+    "name": "STORES CONFIG Switch - CAT I/CAT III",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.TrimApDisc": [
+   {
+    "down": 0.0,
+    "name": "TRIM/AP DISC Switch - DISC",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "TRIM/AP DISC Switch - NORM",
+    "up": null
+   }
+  ],
+  "CONTROL_INTERFACE.TrimApDisc_ITER": [
+   {
+    "down": 1.0,
+    "name": "TRIM/AP DISC Switch - DISC/NORM",
+    "up": null
+   }
+  ],
+  "CPTLIGHTS_SYSTEM.MalIndLtsBrt": [
+   {
+    "down": 1.0,
+    "name": "MAL & IND LTS Switch - BRT/Center",
+    "up": 0.0
+   }
+  ],
+  "CPTLIGHTS_SYSTEM.MalIndLtsDim": [
+   {
+    "down": -1.0,
+    "name": "MAL & IND LTS Switch - DIM/Center",
+    "up": 0.0
+   }
+  ],
+  "CPTLIGHTS_SYSTEM.MalIndLtsTest": [
+   {
+    "down": 1.0,
+    "name": "MAL & IND LTS Test Button",
+    "up": 0.0
+   }
+  ],
+  "CPTLIGHTS_SYSTEM.MasterCaution": [
+   {
+    "down": 1.0,
+    "name": "Master Caution Button",
+    "up": 0.0
+   }
+  ],
+  "CPTLIGHTS_SYSTEM.UtilityBrt_ITER": [
+   {
+    "down": 0.1,
+    "name": "Flashlight BRT Control - Increase",
+    "up": null
+   },
+   {
+    "down": -0.1,
+    "name": "Flashlight BRT Control - Decrease",
+    "up": null
+   }
+  ],
+  "CPT_MECH.CanopyHandle": [
+   {
+    "down": 0.0,
+    "name": "Canopy Handle - UP",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Canopy Handle - DOWN",
+    "up": null
+   }
+  ],
+  "CPT_MECH.CanopyHandle_ITER": [
+   {
+    "down": 1.0,
+    "name": "Canopy Handle - DOWN/UP",
+    "up": null
+   }
+  ],
+  "CPT_MECH.CanopySwitchClose": [
+   {
+    "down": -1.0,
+    "name": "Canopy Switch - CLOSE",
+    "up": 0.0
+   }
+  ],
+  "CPT_MECH.CanopySwitchOpen": [
+   {
+    "down": 0.0,
+    "name": "Canopy Switch - STOP",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Canopy Switch - OPEN",
+    "up": null
+   }
+  ],
+  "CPT_MECH.CanopySwitch_ITER": [
+   {
+    "down": -1.0,
+    "name": "Canopy Switch - Down",
+    "up": 0.0
+   },
+   {
+    "down": 1.0,
+    "name": "Canopy Switch - Up",
+    "up": null
+   }
+  ],
+  "CPT_MECH.CanopyTHandle": [
+   {
+    "down": 0.0,
+    "name": "CANOPY JETTISON T-Handle - STOW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "CANOPY JETTISON T-Handle - PULL",
+    "up": null
+   }
+  ],
+  "CPT_MECH.CanopyTHandle_ITER": [
+   {
+    "down": 1.0,
+    "name": "CANOPY JETTISON T-Handle - PULL/STOW",
+    "up": null
+   }
+  ],
+  "CPT_MECH.SmokeDevice": [
+   {
+    "down": 1.0,
+    "name": "Smoke Device - ON/OFF",
+    "up": null
+   }
+  ],
+  "CPT_MECH.StickHide": [
+   {
+    "down": 1.0,
+    "name": "Control Stick - HIDE",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "Control Stick - SHOW",
+    "up": null
+   }
+  ],
+  "CPT_MECH.StickHide_EXT": [
+   {
+    "down": 1.0,
+    "name": "Control Stick - HIDE/SHOW",
+    "up": null
+   }
+  ],
+  "DTE.OpenDTCInterface": [
+   {
+    "down": 1.0,
+    "name": "Open DTC Interface",
+    "up": 0.0
+   }
+  ],
+  "ECM_INTERFACE.BitBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM BIT Button",
+    "up": 0.0
+   }
+  ],
+  "ECM_INTERFACE.FiveBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM 5 Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM 5 Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.FiveBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM 5 Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.FourBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM 4 Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM 4 Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.FourBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM 4 Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.FrmBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM FRM Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM FRM Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.FrmBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM FRM Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.OneBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM 1 Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM 1 Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.OneBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM 1 Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.PwrSw": [
+   {
+    "down": -1.0,
+    "name": "ECM Power Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM Power Switch - STBY",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ECM Power Switch - OPR",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM Power Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "ECM Power Switch - Down",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.ResetBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM RESET Button",
+    "up": 0.0
+   }
+  ],
+  "ECM_INTERFACE.SixBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM 6 Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM 6 Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.SixBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM 6 Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.SplBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM SPL Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM SPL Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.SplBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM SPL Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.ThreeBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM 3 Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM 3 Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.ThreeBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM 3 Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.TwoBtn": [
+   {
+    "down": 1.0,
+    "name": "ECM 2 Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM 2 Button - Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.TwoBtn_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM 2 Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.XmitSw": [
+   {
+    "down": -1.0,
+    "name": "ECM XMIT Switch - 3",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ECM XMIT Switch - 2",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ECM XMIT Switch - 1",
+    "up": null
+   }
+  ],
+  "ECM_INTERFACE.XmitSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "ECM XMIT Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "ECM XMIT Switch - Down",
+    "up": null
+   }
+  ],
+  "ECS_INTERFACE.AirSourceKnob": [
+   {
+    "down": 0.0,
+    "name": "AIR SOURCE Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "AIR SOURCE Knob - NORM",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "AIR SOURCE Knob - DUMP",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "AIR SOURCE Knob - RAM",
+    "up": null
+   }
+  ],
+  "ECS_INTERFACE.AirSourceKnob_ITER": [
+   {
+    "down": 1.0,
+    "name": "AIR SOURCE Knob - CW",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "AIR SOURCE Knob - CCW",
+    "up": null
+   }
+  ],
+  "EHSI.LeftKnobBtn": [
+   {
+    "down": 1.0,
+    "name": "HDG Set Knob - Depress",
+    "up": 0.0
+   }
+  ],
+  "EHSI.ModeBtn": [
+   {
+    "down": 1.0,
+    "name": "Mode (M) Button - Depress",
+    "up": 0.0
+   }
+  ],
+  "EHSI.RightKnobBtn": [
+   {
+    "down": 1.0,
+    "name": "CRS Set / Brightness Control Knob - Depress",
+    "up": 0.0
+   }
+  ],
+  "ELEC_INTERFACE.CautionResetBtn": [
+   {
+    "down": 1.0,
+    "name": "ELEC CAUTION RESET Button",
+    "up": 0.0
+   }
+  ],
+  "ELEC_INTERFACE.EPU_GEN_TestSw": [
+   {
+    "down": 1.0,
+    "name": "EPU/GEN Test Switch",
+    "up": 0.0
+   }
+  ],
+  "ELEC_INTERFACE.FlcsPwrTestSwMAINT": [
+   {
+    "down": -1.0,
+    "name": "FLCS PWR TEST Switch - MAINT",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "FLCS PWR TEST Switch - NORM",
+    "up": null
+   }
+  ],
+  "ELEC_INTERFACE.FlcsPwrTestSwTEST": [
+   {
+    "down": 1.0,
+    "name": "FLCS PWR TEST Switch - TEST",
+    "up": 0.0
+   }
+  ],
+  "ELEC_INTERFACE.FlcsPwrTestSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "FLCS PWR TEST Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FLCS PWR TEST Switch - Up",
+    "up": 0.0
+   }
+  ],
+  "ELEC_INTERFACE.MainPwrSw": [
+   {
+    "down": -1.0,
+    "name": "MAIN PWR Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "MAIN PWR Switch - BATT",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MAIN PWR Switch - MAIN PWR",
+    "up": null
+   }
+  ],
+  "ELEC_INTERFACE.MainPwrSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "MAIN PWR Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MAIN PWR Switch - Up",
+    "up": null
+   }
+  ],
+  "ELEC_INTERFACE.ProbeHeatSw": [
+   {
+    "down": 0.0,
+    "name": "PROBE HEAT Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "PROBE HEAT Switch - PROBE HEAT",
+    "up": null
+   }
+  ],
+  "ELEC_INTERFACE.ProbeHeatSwTEST": [
+   {
+    "down": -1.0,
+    "name": "PROBE HEAT Switch - TEST",
+    "up": 0.0
+   }
+  ],
+  "ELEC_INTERFACE.ProbeHeatSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "PROBE HEAT Switch - Down",
+    "up": 0.0
+   },
+   {
+    "down": 1.0,
+    "name": "PROBE HEAT Switch - Up",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.ABResetSwEngData": [
+   {
+    "down": -1.0,
+    "name": "AB RESET Switch - ENG DATA/NORM",
+    "up": 0.0
+   }
+  ],
+  "ENGINE_INTERFACE.ABResetSwReset": [
+   {
+    "down": 1.0,
+    "name": "AB RESET Switch - AB RESET/NORM",
+    "up": 0.0
+   }
+  ],
+  "ENGINE_INTERFACE.EngAntiIceSw": [
+   {
+    "down": -1.0,
+    "name": "Engine ANTI ICE Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "Engine ANTI ICE Switch - AUTO",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Engine ANTI ICE Switch - ON",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EngAntiIceSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "Engine ANTI ICE Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "Engine ANTI ICE Switch - Down",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EngContSw": [
+   {
+    "down": 0.0,
+    "name": "ENG CONT Switch - PRI",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ENG CONT Switch - SEC",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EngContSwCvr": [
+   {
+    "down": 0.0,
+    "name": "ENG CONT Switch Cover - CLOSE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ENG CONT Switch Cover - OPEN",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EngContSwCvr_ITER": [
+   {
+    "down": 1.0,
+    "name": "ENG CONT Switch Cover - OPEN/CLOSE",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EngContSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "ENG CONT Switch - PRI/SEC",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EpuSw": [
+   {
+    "down": -1.0,
+    "name": "EPU Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "EPU Switch - NORM",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "EPU Switch - ON",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EpuSwCvrOff": [
+   {
+    "down": 0.0,
+    "name": "EPU Switch Cover for OFF - CLOSE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "EPU Switch Cover for OFF - OPEN",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EpuSwCvrOff_ITER": [
+   {
+    "down": 1.0,
+    "name": "EPU Switch Cover for OFF - OPEN/CLOSE",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EpuSwCvrOn": [
+   {
+    "down": 0.0,
+    "name": "EPU Switch Cover for ON - CLOSE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "EPU Switch Cover for ON - OPEN",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EpuSwCvrOn_ITER": [
+   {
+    "down": 1.0,
+    "name": "EPU Switch Cover for ON - OPEN/CLOSE",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.EpuSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "EPU Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "EPU Switch - Up",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.FireOheatTestBtn": [
+   {
+    "down": 1.0,
+    "name": "FIRE & OHEAT DETECT Test Button",
+    "up": 0.0
+   }
+  ],
+  "ENGINE_INTERFACE.JfsSwStart1": [
+   {
+    "down": 1.0,
+    "name": "JFS Switch - START 1 / OFF",
+    "up": 0.0
+   }
+  ],
+  "ENGINE_INTERFACE.JfsSwStart2": [
+   {
+    "down": -1.0,
+    "name": "JFS Switch - START 2 / OFF",
+    "up": 0.0
+   }
+  ],
+  "ENGINE_INTERFACE.MaxPowerSw": [
+   {
+    "down": 0.0,
+    "name": "MAX POWER Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MAX POWER Switch - MAX POWER",
+    "up": null
+   }
+  ],
+  "ENGINE_INTERFACE.MaxPowerSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "MAX POWER Switch - MAX POWER/OFF",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.AntiCollKn": [
+   {
+    "down": 0.0,
+    "name": "ANTI-COLL Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "ANTI-COLL Knob - 1",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "ANTI-COLL Knob - 2",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "ANTI-COLL Knob - 3",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "ANTI-COLL Knob - 4",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "ANTI-COLL Knob - A",
+    "up": null
+   },
+   {
+    "down": 0.6,
+    "name": "ANTI-COLL Knob - B",
+    "up": null
+   },
+   {
+    "down": 0.7,
+    "name": "ANTI-COLL Knob - C",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.AntiCollKn_ITER": [
+   {
+    "down": -1.0,
+    "name": "ANTI-COLL Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ANTI-COLL Knob - CW",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.LandingTaxi": [
+   {
+    "down": -1.0,
+    "name": "LANDING TAXI LIGHTS Switch - TAXI",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "LANDING TAXI LIGHTS Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "LANDING TAXI LIGHTS Switch - LANDING",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.LandingTaxi_ITER": [
+   {
+    "down": 1.0,
+    "name": "LANDING TAXI LIGHTS Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "LANDING TAXI LIGHTS Switch - Down",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.Master": [
+   {
+    "down": 0.0,
+    "name": "MASTER Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "MASTER Switch - ALL",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "MASTER Switch - A-C",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "MASTER Switch - FORM",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "MASTER Switch - NORM",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.Master_ITER": [
+   {
+    "down": -1.0,
+    "name": "MASTER Switch - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MASTER Switch - CW",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.PosFlash": [
+   {
+    "down": 0.0,
+    "name": "FLASH STEADY Switch - STEADY",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FLASH STEADY Switch - FLASH",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.PosFlash_ITER": [
+   {
+    "down": 1.0,
+    "name": "FLASH STEADY Switch - FLASH/STEADY",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.PosFus": [
+   {
+    "down": -1.0,
+    "name": "FUSELAGE Switch - DIM",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "FUSELAGE Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FUSELAGE Switch - BRT",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.PosFus_ITER": [
+   {
+    "down": -1.0,
+    "name": "FUSELAGE Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FUSELAGE Switch - Up",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.PosWingTail": [
+   {
+    "down": -1.0,
+    "name": "WING/TAIL Switch - DIM",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "WING/TAIL Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "WING/TAIL Switch - BRT",
+    "up": null
+   }
+  ],
+  "EXTLIGHTS_SYSTEM.PosWingTail_ITER": [
+   {
+    "down": -1.0,
+    "name": "WING/TAIL Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "WING/TAIL Switch - Up",
+    "up": null
+   }
+  ],
+  "FCR.PwrSw": [
+   {
+    "down": 0.0,
+    "name": "FCR Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FCR Switch - FCR",
+    "up": null
+   }
+  ],
+  "FCR.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "FCR Switch - FCR/OFF",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.AirRefuelSw": [
+   {
+    "down": 0.0,
+    "name": "AIR REFUEL Switch - CLOSE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "AIR REFUEL Switch - OPEN",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.AirRefuelSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "AIR REFUEL Switch - OPEN/CLOSE",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.EngineFeedSw": [
+   {
+    "down": 0.0,
+    "name": "ENGINE FEED Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "ENGINE FEED Knob - NORM",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "ENGINE FEED Knob - AFT",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "ENGINE FEED Knob - FWD",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.EngineFeedSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "ENGINE FEED Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ENGINE FEED Knob - CW",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.ExtFuelTransferSw": [
+   {
+    "down": 1.0,
+    "name": "External Fuel Transfer Switch - NORM",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "External Fuel Transfer Switch - WING FIRST",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.ExtFuelTransferSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "External Fuel Transfer Switch - NORM/ WING FIRST",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.FuelMasterSw": [
+   {
+    "down": 0.0,
+    "name": "FUEL MASTER Switch - MASTER",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FUEL MASTER Switch - OFF",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.FuelMasterSwCvr": [
+   {
+    "down": 0.0,
+    "name": "FUEL MASTER Switch Cover - CLOSE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "FUEL MASTER Switch Cover - OPEN",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.FuelMasterSwCvr_ITER": [
+   {
+    "down": 1.0,
+    "name": "FUEL MASTER Switch Cover - OPEN/CLOSE",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.FuelMasterSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "FUEL MASTER Switch - MASTER/OFF",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.FuelQtySelSw": [
+   {
+    "down": 0.0,
+    "name": "FUEL QTY SEL Knob - TEST",
+    "up": 0.1
+   },
+   {
+    "down": 0.1,
+    "name": "FUEL QTY SEL Knob - NORM",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "FUEL QTY SEL Knob - RSVR",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "FUEL QTY SEL Knob - INT WING",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "FUEL QTY SEL Knob - EXT WING",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "FUEL QTY SEL Knob - EXT CTR",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.FuelQtySelSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "FUEL QTY SEL Knob - CW",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "FUEL QTY SEL Knob - CCW",
+    "up": 0.0
+   }
+  ],
+  "FUEL_INTERFACE.TankInertingSw": [
+   {
+    "down": 0.0,
+    "name": "TANK INERTING Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "TANK INERTING Switch - TANK INERTING",
+    "up": null
+   }
+  ],
+  "FUEL_INTERFACE.TankInertingSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "TANK INERTING Switch - TANK INERTING /OFF",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.AltGearHandle": [
+   {
+    "down": 1.0,
+    "name": "ALT GEAR Handle, PULL",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ALT GEAR Handle, STOW",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.AltGearHandle_ITER": [
+   {
+    "down": 1.0,
+    "name": "ALT GEAR Handle, PULL/STOW",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.AltGearResetBtn": [
+   {
+    "down": 1.0,
+    "name": "ALT GEAR Handle, RESET",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.AntiSkidSw": [
+   {
+    "down": -1.0,
+    "name": "ANTI-SKID Switch - Down",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.AntiSkidSw_EXT": [
+   {
+    "down": -1.0,
+    "name": "ANTI-SKID Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ANTI-SKID Switch - ANTI-SKID",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.BrakesChannelSw": [
+   {
+    "down": 1.0,
+    "name": "BRAKES Channel Switch - CHAN 1",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "BRAKES Channel Switch - CHAN 2",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.BrakesChannelSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "BRAKES Channel Switch - CHAN 1/CHAN 2",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.DownLockRelBtn": [
+   {
+    "down": 1.0,
+    "name": "DN LOCK REL Button",
+    "up": 0.0
+   }
+  ],
+  "GEAR_INTERFACE.HookSw": [
+   {
+    "down": 1.0,
+    "name": "HOOK Switch - UP",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HOOK Switch - DN",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.HookSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "HOOK Switch - UP/DN",
+    "up": null
+   }
+  ],
+  "GEAR_INTERFACE.HornSilencerBtn": [
+   {
+    "down": 1.0,
+    "name": "HORN SILENCER Button",
+    "up": 0.0
+   }
+  ],
+  "GEAR_INTERFACE.ParkingSw": [
+   {
+    "down": 1.0,
+    "name": "ANTI-SKID Switch - Up",
+    "up": 0.0
+   }
+  ],
+  "GEAR_INTERFACE.ParkingSw_EXT": [
+   {
+    "down": 1.0,
+    "name": "ANTI-SKID Switch - PARKING BRAKE",
+    "up": 0.0
+   }
+  ],
+  "GPS.PwrSw": [
+   {
+    "down": 0.0,
+    "name": "GPS Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "GPS Switch - GPS",
+    "up": null
+   }
+  ],
+  "GPS.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "GPS Switch - GPS/OFF",
+    "up": null
+   }
+  ],
+  "HEAD_WRAPPER.LockCrewBody": [
+   {
+    "down": -1.0,
+    "name": "Lock pilot body position",
+    "up": null
+   }
+  ],
+  "HELMET.HMD_VISOR": [
+   {
+    "down": 0.0,
+    "name": "Raise helmet visor",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Lower helmet visor",
+    "up": null
+   }
+  ],
+  "HELMET.HMD_VISOR_TOGGLE": [
+   {
+    "down": 1.0,
+    "name": "Toggle helmet visor",
+    "up": null
+   }
+  ],
+  "HOTAS.STICK_CMS_MANAGE_AFT": [
+   {
+    "down": -1.0,
+    "name": "Countermeasures Management Switch - Aft",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_CMS_MANAGE_FWD": [
+   {
+    "down": 1.0,
+    "name": "Countermeasures Management Switch - Fwd",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_CMS_MANAGE_LEFT": [
+   {
+    "down": -1.0,
+    "name": "Countermeasures Management Switch - Left",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_CMS_MANAGE_RIGHT": [
+   {
+    "down": 1.0,
+    "name": "Countermeasures Management Switch - Right",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_DISP_MANAGE_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Display Management Switch - Down",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_DISP_MANAGE_LEFT": [
+   {
+    "down": -1.0,
+    "name": "Display Management Switch - Left",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_DISP_MANAGE_RIGHT": [
+   {
+    "down": 1.0,
+    "name": "Display Management Switch - Right",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_DISP_MANAGE_UP": [
+   {
+    "down": 1.0,
+    "name": "Display Management Switch - Up",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_EXPAND_FOV": [
+   {
+    "down": 1.0,
+    "name": "Expand/FOV Button - Depress",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_NWS_AR_DISC_MSL_STEP": [
+   {
+    "down": 1.0,
+    "name": "NWS A/R DISC MSL STEP Button",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_PADDLE": [
+   {
+    "down": 1.0,
+    "name": "Paddle Switch - Depress",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_TGT_MANAGE_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Target Management Switch - Down",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_TGT_MANAGE_LEFT": [
+   {
+    "down": -1.0,
+    "name": "Target Management Switch - Left",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_TGT_MANAGE_RIGHT": [
+   {
+    "down": 1.0,
+    "name": "Target Management Switch - Right",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_TGT_MANAGE_UP": [
+   {
+    "down": 1.0,
+    "name": "Target Management Switch - Up",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_TRIGGER_1ST_DETENT": [
+   {
+    "down": 1.0,
+    "name": "CAMERA/GUN Trigger - FIRST DETENT",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_TRIGGER_2ND_DETENT": [
+   {
+    "down": 1.0,
+    "name": "CAMERA/GUN Trigger - SECOND DETENT",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.STICK_WEAPON_RELEASE": [
+   {
+    "down": 1.0,
+    "name": "WPN REL Button - Depress",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_CUTOFF_RELEASE": [
+   {
+    "down": 1.0,
+    "name": "Throttle Cutoff Release - Depress",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_DOG_FIGHT": [
+   {
+    "down": 1.0,
+    "name": "DOGFIGHT/Missile Override Switch - DOGFIGHT",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "DOGFIGHT/Missile Override Switch - CENTER",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "DOGFIGHT/Missile Override Switch - MISSILE OVERRIDE",
+    "up": null
+   }
+  ],
+  "HOTAS.THROTTLE_DOG_FIGHT_CYCL": [
+   {
+    "down": 0.0,
+    "name": "DOGFIGHT/Missile Override Switch - Cycle",
+    "up": null
+   }
+  ],
+  "HOTAS.THROTTLE_DOG_FIGHT_EXT": [
+   {
+    "down": 1.0,
+    "name": "DOGFIGHT/Missile Override Switch - DOGFIGHT/CENTER",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "DOGFIGHT/Missile Override Switch - MISSILE OVERRIDE/CENTER",
+    "up": null
+   }
+  ],
+  "HOTAS.THROTTLE_DOG_FIGHT_ITER": [
+   {
+    "down": 1.0,
+    "name": "DOGFIGHT/Missile Override Switch - Cycle Outboard",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "DOGFIGHT/Missile Override Switch - Cycle Inboard",
+    "up": null
+   }
+  ],
+  "HOTAS.THROTTLE_ENABLE": [
+   {
+    "down": 1.0,
+    "name": "ENABLE Switch - Depress",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_RDR_CURSOR_AFT": [
+   {
+    "down": 1.0,
+    "name": "RDR CURSOR Switch - Down",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_RDR_CURSOR_FWD": [
+   {
+    "down": 1.0,
+    "name": "RDR CURSOR Switch - Up",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_RDR_CURSOR_LEFT": [
+   {
+    "down": 1.0,
+    "name": "RDR CURSOR Switch - Left",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_RDR_CURSOR_RIGHT": [
+   {
+    "down": 1.0,
+    "name": "RDR CURSOR Switch - Right",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_SPEED_BRAKE": [
+   {
+    "down": -1.0,
+    "name": "SPD BRK Switch - Aft/EXTEND (Momentary)",
+    "up": 0.0
+   },
+   {
+    "down": 0.0,
+    "name": "SPD BRK Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "SPD BRK Switch - Fwd/RETRACT",
+    "up": null
+   }
+  ],
+  "HOTAS.THROTTLE_TRANSMIT_AFT": [
+   {
+    "down": 1.0,
+    "name": "Transmit Switch - UHF (call radio menu)",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_TRANSMIT_FWD": [
+   {
+    "down": 1.0,
+    "name": "Transmit Switch - VHF (call radio menu)",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_TRANSMIT_LEFT": [
+   {
+    "down": 1.0,
+    "name": "Transmit Switch - IFF OUT",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_TRANSMIT_RIGHT": [
+   {
+    "down": 1.0,
+    "name": "Transmit Switch - IFF IN",
+    "up": 0.0
+   }
+  ],
+  "HOTAS.THROTTLE_UNCAGE": [
+   {
+    "down": 1.0,
+    "name": "UNCAGE Switch",
+    "up": 0.0
+   }
+  ],
+  "IDM.PwrSw": [
+   {
+    "down": 0.0,
+    "name": "DL Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "DL Switch - DL",
+    "up": null
+   }
+  ],
+  "IDM.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "DL Switch - DL/OFF",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.CNI_Knob": [
+   {
+    "down": 0.0,
+    "name": "C & I Knob - BACKUP",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "C & I Knob - UFC",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.CNI_Knob_ITER": [
+   {
+    "down": 1.0,
+    "name": "C & I Knob - UFC/BACKUP",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.EnableSw": [
+   {
+    "down": -1.0,
+    "name": "IFF ENABLE Switch - M1/M3",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "IFF ENABLE Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF ENABLE Switch - M3/MS",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.EnableSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "IFF ENABLE Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF ENABLE Switch - Up",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector1_Dec": [
+   {
+    "down": -1.0,
+    "name": "IFF MODE 1 Selector Lever (DIGIT 1) - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector1_Inc": [
+   {
+    "down": 1.0,
+    "name": "IFF MODE 1 Selector Lever (DIGIT 1) - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector2_Dec": [
+   {
+    "down": -1.0,
+    "name": "IFF MODE 1 Selector Lever (DIGIT 2) - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector2_Inc": [
+   {
+    "down": 1.0,
+    "name": "IFF MODE 1 Selector Lever (DIGIT 2) - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector3_Dec": [
+   {
+    "down": -1.0,
+    "name": "IFF MODE 3 Selector Lever (DIGIT 1) - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector3_Inc": [
+   {
+    "down": 1.0,
+    "name": "IFF MODE 3 Selector Lever (DIGIT 1) - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector4_Dec": [
+   {
+    "down": -1.0,
+    "name": "IFF MODE 3 Selector Lever (DIGIT 2) - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M1M3Selector4_Inc": [
+   {
+    "down": 1.0,
+    "name": "IFF MODE 3 Selector Lever (DIGIT 2) - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "IFF_CONTROL_PANEL.M4CodeSw": [
+   {
+    "down": -1.0,
+    "name": "IFF M-4 CODE Switch - HOLD",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "IFF M-4 CODE Switch - A/B",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF M-4 CODE Switch - ZERO",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.M4CodeSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "IFF M-4 CODE Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF M-4 CODE Switch - Up",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.M4MonitorSw": [
+   {
+    "down": 0.0,
+    "name": "IFF MODE 4 MONITOR Switch - OUT",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF MODE 4 MONITOR Switch - AUDIO",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.M4MonitorSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "IFF MODE 4 MONITOR Switch - OUT/AUDIO",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.M4ReplySw": [
+   {
+    "down": -1.0,
+    "name": "IFF MODE 4 REPLY Switch - OUT",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "IFF MODE 4 REPLY Switch - A",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF MODE 4 REPLY Switch - B",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.M4ReplySw_ITER": [
+   {
+    "down": -1.0,
+    "name": "IFF MODE 4 REPLY Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF MODE 4 REPLY Switch - Up",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.MasterKnob": [
+   {
+    "down": 0.0,
+    "name": "IFF MASTER Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "IFF MASTER Knob - STBY",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "IFF MASTER Knob - LOW",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "IFF MASTER Knob - NORM",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "IFF MASTER Knob - EMER",
+    "up": null
+   }
+  ],
+  "IFF_CONTROL_PANEL.MasterKnob_ITER": [
+   {
+    "down": -1.0,
+    "name": "IFF MASTER Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF MASTER Knob - CW",
+    "up": null
+   }
+  ],
+  "INS.ModeKnob": [
+   {
+    "down": 0.0,
+    "name": "INS Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "INS Knob - STOR HDG (ALIGN)",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "INS Knob - NORM (ALIGN)",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "INS Knob - NAV",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "INS Knob - CAL",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "INS Knob - INFLT ALIGN",
+    "up": null
+   },
+   {
+    "down": 0.6,
+    "name": "INS Knob - ATT",
+    "up": null
+   }
+  ],
+  "INS.ModeKnob_ITER": [
+   {
+    "down": 1.0,
+    "name": "INS Knob - CW",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "INS Knob - CCW",
+    "up": null
+   }
+  ],
+  "INTERCOM.COM1_ModeKnob": [
+   {
+    "down": 0.0,
+    "name": "COMM 1 (UHF) Mode Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "COMM 1 (UHF) Mode Knob - SQL",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "COMM 1 (UHF) Mode Knob - GD",
+    "up": null
+   }
+  ],
+  "INTERCOM.COM1_ModeKnob_ITER": [
+   {
+    "down": -1.0,
+    "name": "COMM 1 (UHF) Mode Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "COMM 1 (UHF) Mode Knob - CW",
+    "up": null
+   }
+  ],
+  "INTERCOM.COM2_ModeKnob": [
+   {
+    "down": 0.0,
+    "name": "COMM 2 (VHF) Mode Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "COMM 2 (VHF) Mode Knob - SQL",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "COMM 2 (VHF) Mode Knob - GD",
+    "up": null
+   }
+  ],
+  "INTERCOM.COM2_ModeKnob_ITER": [
+   {
+    "down": -1.0,
+    "name": "COMM 2 (VHF) Mode Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "COMM 2 (VHF) Mode Knob - CW",
+    "up": null
+   }
+  ],
+  "INTERCOM.HotMicCipherSw": [
+   {
+    "down": -1.0,
+    "name": "HOT MIC CIPHER Switch - CIPHER",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HOT MIC CIPHER Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HOT MIC CIPHER Switch - HOT MIC",
+    "up": null
+   }
+  ],
+  "INTERCOM.HotMicCipherSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "HOT MIC CIPHER Switch - Down",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HOT MIC CIPHER Switch - Up",
+    "up": null
+   }
+  ],
+  "INTERCOM.IFF_AntSelSw": [
+   {
+    "down": -1.0,
+    "name": "IFF ANT SEL Switch - LOWER",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "IFF ANT SEL Switch - NORM",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "IFF ANT SEL Switch - UPPER",
+    "up": null
+   }
+  ],
+  "INTERCOM.IFF_AntSelSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "IFF ANT SEL Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "IFF ANT SEL Switch - Down",
+    "up": null
+   }
+  ],
+  "INTERCOM.PlainCipherSw": [
+   {
+    "down": -1.0,
+    "name": "PLAIN Cipher Switch - CRAD 2",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "PLAIN Cipher Switch - PLAIN",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "PLAIN Cipher Switch - CRAD 1",
+    "up": null
+   }
+  ],
+  "INTERCOM.PlainCipherSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "PLAIN Cipher Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "PLAIN Cipher Switch - Down",
+    "up": null
+   }
+  ],
+  "INTERCOM.UHF_AntSelSw": [
+   {
+    "down": -1.0,
+    "name": "UHF ANT SEL Switch - LOWER",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "UHF ANT SEL Switch - NORM",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "UHF ANT SEL Switch - UPPER",
+    "up": null
+   }
+  ],
+  "INTERCOM.UHF_AntSelSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "UHF ANT SEL Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "UHF ANT SEL Switch - Down",
+    "up": null
+   }
+  ],
+  "INTERCOM.VMS_InhibitSw": [
+   {
+    "down": 0.0,
+    "name": "Voice Message Inhibit Switch - INHIBIT",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Voice Message Inhibit Switch - VOICE MESSAGE",
+    "up": null
+   }
+  ],
+  "INTERCOM.VMS_InhibitSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "Voice Message Inhibit Switch - VOICE MESSAGE/INHIBIT",
+    "up": null
+   }
+  ],
+  "INTERCOM.ZeroizeSw": [
+   {
+    "down": -1.0,
+    "name": "ZEROIZE Switch - DATA",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ZEROIZE Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ZEROIZE Switch - OFP",
+    "up": null
+   }
+  ],
+  "INTERCOM.ZeroizeSwCvr": [
+   {
+    "down": 0.0,
+    "name": "ZEROIZE Switch Cover - CLOSE",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ZEROIZE Switch Cover - OPEN",
+    "up": null
+   }
+  ],
+  "INTERCOM.ZeroizeSwCvr_ITER": [
+   {
+    "down": 1.0,
+    "name": "ZEROIZE Switch Cover - OPEN/CLOSE",
+    "up": null
+   }
+  ],
+  "INTERCOM.ZeroizeSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "ZEROIZE Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "ZEROIZE Switch - Down",
+    "up": null
+   }
+  ],
+  "KY58.KY58_FillSw": [
+   {
+    "down": 0.1,
+    "name": "KY-58 FILL Knob - 1",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "KY-58 FILL Knob - 2",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "KY-58 FILL Knob - 3",
+    "up": null
+   },
+   {
+    "down": 0.4,
+    "name": "KY-58 FILL Knob - 4",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "KY-58 FILL Knob - 5",
+    "up": null
+   },
+   {
+    "down": 0.6,
+    "name": "KY-58 FILL Knob - 6",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "KY-58 FILL Knob - Z 1-5",
+    "up": null
+   },
+   {
+    "down": 0.7,
+    "name": "KY-58 FILL Knob - Z ALL",
+    "up": null
+   }
+  ],
+  "KY58.KY58_FillSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "KY-58 FILL Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "KY-58 FILL Knob - CW",
+    "up": null
+   }
+  ],
+  "KY58.KY58_FillSw_Pull": [
+   {
+    "down": 1.0,
+    "name": "KY-58 FILL Knob - PULL",
+    "up": 0.0
+   }
+  ],
+  "KY58.KY58_ModeSw": [
+   {
+    "down": 0.0,
+    "name": "KY-58 MODE Knob - P",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "KY-58 MODE Knob - C",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "KY-58 MODE Knob - LD",
+    "up": null
+   },
+   {
+    "down": 0.3,
+    "name": "KY-58 MODE Knob - RV",
+    "up": null
+   }
+  ],
+  "KY58.KY58_ModeSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "KY-58 MODE Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "KY-58 MODE Knob - CW",
+    "up": null
+   }
+  ],
+  "KY58.KY58_PowerSw": [
+   {
+    "down": 0.0,
+    "name": "KY-58 Power Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "KY-58 Power Knob - ON",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "KY-58 Power Knob - TD",
+    "up": null
+   }
+  ],
+  "KY58.KY58_PowerSw_ITER": [
+   {
+    "down": -1.0,
+    "name": "KY-58 Power Knob - CCW",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "KY-58 Power Knob - CW",
+    "up": null
+   }
+  ],
+  "MAP.PwrSw": [
+   {
+    "down": 0.0,
+    "name": "MAP Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MAP Switch - MAP",
+    "up": null
+   }
+  ],
+  "MAP.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "MAP Switch - MAP/OFF",
+    "up": null
+   }
+  ],
+  "MFD_LEFT.BRT_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Left MFD BRT Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.BRT_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Left MFD BRT Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.CON_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Left MFD CON Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.CON_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Left MFD CON Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.GAIN_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Left MFD GAIN Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.GAIN_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Left MFD GAIN Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_1": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 1",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_10": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 10",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_11": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 11",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_12": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 12",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_13": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 13",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_14": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 14",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_15": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 15",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_16": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 16",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_17": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 17",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_18": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 18",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_19": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 19",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_2": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 2",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_20": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 20",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_3": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 3",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_4": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 4",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_5": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 5",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_6": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 6",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_7": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 7",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_8": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 8",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.OSB_9": [
+   {
+    "down": 1.0,
+    "name": "Left MFD OSB 9",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.SYM_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Left MFD SYM Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_LEFT.SYM_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Left MFD SYM Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.BRT_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Right MFD BRT Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.BRT_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Right MFD BRT Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.CON_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Right MFD CON Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.CON_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Right MFD CON Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.GAIN_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Right MFD GAIN Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.GAIN_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Right MFD GAIN Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_1": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 1",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_10": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 10",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_11": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 11",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_12": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 12",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_13": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 13",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_14": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 14",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_15": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 15",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_16": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 16",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_17": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 17",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_18": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 18",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_19": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 19",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_2": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 2",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_20": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 20",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_3": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 3",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_4": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 4",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_5": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 5",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_6": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 6",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_7": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 7",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_8": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 8",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.OSB_9": [
+   {
+    "down": 1.0,
+    "name": "Right MFD OSB 9",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.SYM_Rocker_DOWN": [
+   {
+    "down": -1.0,
+    "name": "Right MFD SYM Rocker Switch - Down/Decrease",
+    "up": 0.0
+   }
+  ],
+  "MFD_RIGHT.SYM_Rocker_UP": [
+   {
+    "down": 1.0,
+    "name": "Right MFD SYM Rocker Switch - Up/Increase",
+    "up": 0.0
+   }
+  ],
+  "MIDS.PwrSw": [
+   {
+    "down": 0.0,
+    "name": "MIDS LVT Knob - ZERO",
+    "up": null
+   },
+   {
+    "down": 0.1,
+    "name": "MIDS LVT Knob - OFF",
+    "up": null
+   },
+   {
+    "down": 0.2,
+    "name": "MIDS LVT Knob - ON",
+    "up": null
+   }
+  ],
+  "MIDS.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "MIDS LVT Knob - CW",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "MIDS LVT Knob - CCW",
+    "up": null
+   }
+  ],
+  "MMC.Alt": [
+   {
+    "down": -1.0,
+    "name": "HUD Altitude Switch - AUTO",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD Altitude Switch - BARO",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD Altitude Switch - RADAR",
+    "up": null
+   }
+  ],
+  "MMC.AltRel": [
+   {
+    "down": 1.0,
+    "name": "ALT REL Button",
+    "up": 0.0
+   }
+  ],
+  "MMC.Alt_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD Altitude Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD Altitude Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.AttFpm": [
+   {
+    "down": -1.0,
+    "name": "HUD Flightpath Marker Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD Flightpath Marker Switch - FPM",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD Flightpath Marker Switch - ATT/FPM",
+    "up": null
+   }
+  ],
+  "MMC.AttFpm_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD Flightpath Marker Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD Flightpath Marker Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.Brt": [
+   {
+    "down": -1.0,
+    "name": "HUD Brightness Control Switch - NIGHT",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD Brightness Control Switch - AUTO BRT",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD Brightness Control Switch - DAY",
+    "up": null
+   }
+  ],
+  "MMC.Brt_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD Brightness Control Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD Brightness Control Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.DedData": [
+   {
+    "down": -1.0,
+    "name": "HUD DED/PFLD Data Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD DED/PFLD Data Switch - PFL",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD DED/PFLD Data Switch - DED",
+    "up": null
+   }
+  ],
+  "MMC.DedData_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD DED/PFLD Data Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD DED/PFLD Data Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.DeprRet": [
+   {
+    "down": -1.0,
+    "name": "HUD Depressible Reticle Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD Depressible Reticle Switch - PRI",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD Depressible Reticle Switch - STBY",
+    "up": null
+   }
+  ],
+  "MMC.DeprRet_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD Depressible Reticle Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD Depressible Reticle Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.EmerStoresJett": [
+   {
+    "down": 1.0,
+    "name": "EMER STORES JETTISON Button",
+    "up": 0.0
+   }
+  ],
+  "MMC.GroundJett": [
+   {
+    "down": 1.0,
+    "name": "GND JETT ENABLE Switch - ENABLE",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "GND JETT ENABLE Switch - OFF",
+    "up": null
+   }
+  ],
+  "MMC.GroundJett_ITER": [
+   {
+    "down": 1.0,
+    "name": "GND JETT ENABLE Switch - ENABLE/OFF",
+    "up": null
+   }
+  ],
+  "MMC.MFD": [
+   {
+    "down": 0.0,
+    "name": "MFD Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MFD Switch - MFD",
+    "up": null
+   }
+  ],
+  "MMC.MFD_ITER": [
+   {
+    "down": 1.0,
+    "name": "MFD Switch - MFD/OFF",
+    "up": null
+   }
+  ],
+  "MMC.MasterArmSw": [
+   {
+    "down": -1.0,
+    "name": "MASTER ARM Switch - SIMULATE",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "MASTER ARM Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MASTER ARM Switch - MASTER ARM",
+    "up": null
+   }
+  ],
+  "MMC.MasterArmSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "MASTER ARM Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "MASTER ARM Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.MmcPwr": [
+   {
+    "down": 0.0,
+    "name": "MMC Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "MMC Switch - MMC",
+    "up": null
+   }
+  ],
+  "MMC.MmcPwr_ITER": [
+   {
+    "down": 1.0,
+    "name": "MMC Switch - MMC/OFF",
+    "up": null
+   }
+  ],
+  "MMC.Spd": [
+   {
+    "down": -1.0,
+    "name": "HUD Velocity Switch - GND SPD",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD Velocity Switch - TAS",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD Velocity Switch - CAS",
+    "up": null
+   }
+  ],
+  "MMC.Spd_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD Velocity Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD Velocity Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.Test": [
+   {
+    "down": -1.0,
+    "name": "HUD TEST Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD TEST Switch - ON",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD TEST Switch - STEP",
+    "up": null
+   }
+  ],
+  "MMC.Test_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD TEST Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD TEST Switch - Down",
+    "up": null
+   }
+  ],
+  "MMC.VvVah": [
+   {
+    "down": -1.0,
+    "name": "HUD Scales Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "HUD Scales Switch - VAH",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "HUD Scales Switch - VV/VAH",
+    "up": null
+   }
+  ],
+  "MMC.VvVah_EXT": [
+   {
+    "down": 1.0,
+    "name": "HUD Scales Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "HUD Scales Switch - Down",
+    "up": null
+   }
+  ],
+  "OXYGEN_INTERFACE.DiluterLever": [
+   {
+    "down": 0.0,
+    "name": "Diluter Lever - NORM",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Diluter Lever - 100 percent",
+    "up": null
+   }
+  ],
+  "OXYGEN_INTERFACE.DiluterLever_ITER": [
+   {
+    "down": 1.0,
+    "name": "Diluter Lever - 100 percent/NORM",
+    "up": null
+   }
+  ],
+  "OXYGEN_INTERFACE.EmergencyLever": [
+   {
+    "down": 1.0,
+    "name": "Emergency Lever - Up",
+    "up": null
+   }
+  ],
+  "OXYGEN_INTERFACE.EmergencyLeverTestMask": [
+   {
+    "down": -1.0,
+    "name": "Emergency Lever - Down",
+    "up": 0.0
+   }
+  ],
+  "OXYGEN_INTERFACE.EmergencyLever_ITER": [
+   {
+    "down": -1.0,
+    "name": "Emergency Lever - TEST MASK",
+    "up": 0.0
+   },
+   {
+    "down": 0.0,
+    "name": "Emergency Lever - NORMAL",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Emergency Lever - EMERGENCY",
+    "up": null
+   }
+  ],
+  "OXYGEN_INTERFACE.ObogsBitSw": [
+   {
+    "down": 1.0,
+    "name": "OBOGS BIT Switch - BIT/OFF",
+    "up": 0.0
+   }
+  ],
+  "OXYGEN_INTERFACE.SupplyLever": [
+   {
+    "down": 0.0,
+    "name": "Supply Lever - OFF",
+    "up": null
+   },
+   {
+    "down": 0.5,
+    "name": "Supply Lever - ON",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "Supply Lever - PBG",
+    "up": null
+   }
+  ],
+  "OXYGEN_INTERFACE.SupplyLever_ITER": [
+   {
+    "down": 1.0,
+    "name": "Supply Lever - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "Supply Lever - Down",
+    "up": null
+   }
+  ],
+  "RALT.PwrSw": [
+   {
+    "down": -1.0,
+    "name": "RDR ALT Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "RDR ALT Switch - STBY",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "RDR ALT Switch - RDR ALT",
+    "up": null
+   }
+  ],
+  "RALT.PwrSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "RDR ALT Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "RDR ALT Switch - Down",
+    "up": null
+   }
+  ],
+  "RWR.ActPwr": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control ACT/PWR Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.Altitude": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control ALTITUDE Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.Handoff": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control HANDOFF Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.Launch": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control LAUNCH Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.Mode": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control MODE Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.Power": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control POWER Button - Depressed",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "RWR Indicator Control POWER Button - Released",
+    "up": null
+   }
+  ],
+  "RWR.Power_ITER": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control POWER Button - Depressed/Released",
+    "up": null
+   }
+  ],
+  "RWR.Search": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control SEARCH Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.SysTest": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control SYS TEST Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.TgtSep": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control T Button",
+    "up": 0.0
+   }
+  ],
+  "RWR.UnknownShip": [
+   {
+    "down": 1.0,
+    "name": "RWR Indicator Control UNKNOWN SHIP Button",
+    "up": 0.0
+   }
+  ],
+  "SAI.cage": [
+   {
+    "down": 1.0,
+    "name": "SAI Cage Knob - Pull",
+    "up": 0.0
+   }
+  ],
+  "SMS.LaserSw": [
+   {
+    "down": 0.0,
+    "name": "LASER ARM Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "LASER ARM Switch - ARM",
+    "up": null
+   }
+  ],
+  "SMS.LaserSw_ITER": [
+   {
+    "down": 1.0,
+    "name": "LASER ARM Switch - ARM/OFF",
+    "up": null
+   }
+  ],
+  "SMS.LeftHDPT": [
+   {
+    "down": 0.0,
+    "name": "LEFT HDPT Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "LEFT HDPT Switch - ON",
+    "up": null
+   }
+  ],
+  "SMS.LeftHDPT_ITER": [
+   {
+    "down": 1.0,
+    "name": "LEFT HDPT Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "SMS.RightHDPT": [
+   {
+    "down": 0.0,
+    "name": "RIGHT HDPT Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "RIGHT HDPT Switch - ON",
+    "up": null
+   }
+  ],
+  "SMS.RightHDPT_ITER": [
+   {
+    "down": 1.0,
+    "name": "RIGHT HDPT Switch - ON/OFF",
+    "up": null
+   }
+  ],
+  "SMS.StStaSw": [
+   {
+    "down": 0.0,
+    "name": "ST STA Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "ST STA Switch - ST STA",
+    "up": null
+   }
+  ],
+  "SMS.StSta_ITER": [
+   {
+    "down": 1.0,
+    "name": "ST STA Switch - ST STA/OFF",
+    "up": null
+   }
+  ],
+  "UFC.AA": [
+   {
+    "down": 1.0,
+    "name": "ICP Master Mode Button - A-A",
+    "up": 0.0
+   }
+  ],
+  "UFC.AG": [
+   {
+    "down": 1.0,
+    "name": "ICP Master Mode Button - A-G",
+    "up": 0.0
+   }
+  ],
+  "UFC.COM1": [
+   {
+    "down": 1.0,
+    "name": "ICP COM Override Button - COM1(UHF)",
+    "up": 0.0
+   }
+  ],
+  "UFC.COM2": [
+   {
+    "down": 1.0,
+    "name": "ICP COM Override Button - COM2(VHF)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DCS_DOWN": [
+   {
+    "down": -1.0,
+    "name": "ICP Data Control Switch - DOWN",
+    "up": 0.0
+   }
+  ],
+  "UFC.DCS_RTN": [
+   {
+    "down": -1.0,
+    "name": "ICP Data Control Switch - RET",
+    "up": 0.0
+   }
+  ],
+  "UFC.DCS_SEQ": [
+   {
+    "down": 1.0,
+    "name": "ICP Data Control Switch - SEQ",
+    "up": 0.0
+   }
+  ],
+  "UFC.DCS_UP": [
+   {
+    "down": 1.0,
+    "name": "ICP Data Control Switch - UP",
+    "up": 0.0
+   }
+  ],
+  "UFC.DED_DEC": [
+   {
+    "down": -1.0,
+    "name": "ICP DED Increment/Decrement Switch - Decrement",
+    "up": 0.0
+   }
+  ],
+  "UFC.DED_INC": [
+   {
+    "down": 1.0,
+    "name": "ICP DED Increment/Decrement Switch - Increment",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG0_M_SEL": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 0(M-SEL)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG1_T_ILS": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 1(T-ILS)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG2_ALOW": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 2/N(ALOW)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG3": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 3",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG4_STPT": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 4/W(STPT)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG5_CRUS": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 5(CRUS)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG6_TIME": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 6/E(TIME)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG7_MARK": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 7(MARK)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG8_FIX": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 8/S(FIX)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DIG9_A_CAL": [
+   {
+    "down": 1.0,
+    "name": "ICP Priority Function Button - 9(A-CAL)",
+    "up": 0.0
+   }
+  ],
+  "UFC.DRIFT_CUTOUT": [
+   {
+    "down": 1.0,
+    "name": "ICP DRIFT CUTOUT/WARN RESET Switch - DRIFT C/O",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ICP DRIFT CUTOUT/WARN RESET Switch - NORM",
+    "up": null
+   }
+  ],
+  "UFC.DriftCO_WarnReset_ITER": [
+   {
+    "down": -1.0,
+    "name": "ICP DRIFT CUTOUT/WARN RESET Switch - Down",
+    "up": 0.0
+   },
+   {
+    "down": 1.0,
+    "name": "ICP DRIFT CUTOUT/WARN RESET Switch - Up",
+    "up": null
+   }
+  ],
+  "UFC.ENTR": [
+   {
+    "down": 1.0,
+    "name": "ICP Enter Button - ENTR",
+    "up": 0.0
+   }
+  ],
+  "UFC.FLIR_DEC": [
+   {
+    "down": -1.0,
+    "name": "ICP FLIR Increment/Decrement Switch - Decrement",
+    "up": 0.0
+   }
+  ],
+  "UFC.FLIR_GAIN_Sw": [
+   {
+    "down": 1.0,
+    "name": "ICP FLIR GAIN/LEVEL Switch - GAIN",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "ICP FLIR GAIN/LEVEL Switch - LVL",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "ICP FLIR GAIN/LEVEL Switch - AUTO",
+    "up": null
+   }
+  ],
+  "UFC.FLIR_GAIN_Sw_ITER": [
+   {
+    "down": 1.0,
+    "name": "ICP FLIR GAIN/LEVEL Switch - Cycle Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "ICP FLIR GAIN/LEVEL Switch - Cycle Down",
+    "up": null
+   }
+  ],
+  "UFC.FLIR_INC": [
+   {
+    "down": 1.0,
+    "name": "ICP FLIR Increment/Decrement Switch - Increment",
+    "up": 0.0
+   }
+  ],
+  "UFC.F_ACK": [
+   {
+    "down": 1.0,
+    "name": "F-ACK Button",
+    "up": 0.0
+   }
+  ],
+  "UFC.IFF": [
+   {
+    "down": 1.0,
+    "name": "ICP IFF Override Button - IFF",
+    "up": 0.0
+   }
+  ],
+  "UFC.IFF_IDENT": [
+   {
+    "down": 1.0,
+    "name": "IFF IDENT Button",
+    "up": 0.0
+   }
+  ],
+  "UFC.LIST": [
+   {
+    "down": 1.0,
+    "name": "ICP LIST Override Button - LIST",
+    "up": 0.0
+   }
+  ],
+  "UFC.RCL": [
+   {
+    "down": 1.0,
+    "name": "ICP Recall Button - RCL",
+    "up": 0.0
+   }
+  ],
+  "UFC.RF_Sw": [
+   {
+    "down": -1.0,
+    "name": "RF Switch - SILENT",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "RF Switch - QUIET",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "RF Switch - NORM",
+    "up": null
+   }
+  ],
+  "UFC.RF_Sw_ITER": [
+   {
+    "down": 1.0,
+    "name": "RF Switch - Up",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "RF Switch - Down",
+    "up": null
+   }
+  ],
+  "UFC.UFC_Sw": [
+   {
+    "down": 0.0,
+    "name": "UFC Switch - OFF",
+    "up": null
+   },
+   {
+    "down": 1.0,
+    "name": "UFC Switch - UFC",
+    "up": null
+   }
+  ],
+  "UFC.UFC_Sw_ITER": [
+   {
+    "down": 1.0,
+    "name": "UFC Switch - UFC/OFF",
+    "up": null
+   }
+  ],
+  "UFC.WARN_RESET": [
+   {
+    "down": -1.0,
+    "name": "ICP DRIFT CUTOUT/WARN RESET Switch - WARN RESET /NORM",
+    "up": 0.0
+   }
+  ],
+  "UFC.Wx": [
+   {
+    "down": 1.0,
+    "name": "ICP FLIR Polarity Button",
+    "up": 0.0
+   }
+  ],
+  "UHF_CONTROL_PANEL.AccessDoor": [
+   {
+    "down": 1.0,
+    "name": "UHF Access Door - OPEN",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "UHF Access Door - CLOSE",
+    "up": null
+   }
+  ],
+  "UHF_CONTROL_PANEL.FreqModeKnob_ITER": [
+   {
+    "down": 1.0,
+    "name": "UHF Mode Knob - CW",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "UHF Mode Knob - CCW",
+    "up": null
+   }
+  ],
+  "UHF_CONTROL_PANEL.FreqSelector100Mhz_ITER": [
+   {
+    "down": 1.0,
+    "name": "UHF A-3-2 Knob - CW/Increase",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "UHF A-3-2 Knob - CCW/Decrease",
+    "up": null
+   }
+  ],
+  "UHF_CONTROL_PANEL.FunctionKnob_ITER": [
+   {
+    "down": 1.0,
+    "name": "UHF Function Knob - CW",
+    "up": null
+   },
+   {
+    "down": -1.0,
+    "name": "UHF Function Knob - CCW",
+    "up": null
+   }
+  ],
+  "UHF_CONTROL_PANEL.SquelchSw": [
+   {
+    "down": 1.0,
+    "name": "UHF SQUELCH Switch - ON",
+    "up": null
+   },
+   {
+    "down": 0.0,
+    "name": "UHF SQUELCH Switch - OFF",
+    "up": null
+   }
+  ]
+ }
+}

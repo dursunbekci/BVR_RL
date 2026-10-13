@@ -200,3 +200,29 @@ agile as the simulator's model (route mode gave 1.6 deg/s). Altitude hold 7 m, s
 (the proportional heading law, K = 2, as in the simulator) and the speed step (the afterburner spools slowly).
 Steps 1 and 2 of the plan are done. Open: radar lock and launch (step 3), the policy loop on this link, a
 speed range test (`hold --speed 400`), a model trained on F-16C-DCS at SIM_REV 15.
+
+## Step 3: radar lock and launch (13 October; written from the module's own files, not yet run in DCS)
+
+The F-16C's controls are (device, command, value) triples. `extract_f16_defs.py` ran the module's own
+`command_defs.lua` and `devices.lua` and read `Input\F-16C\keyboard\default.lua` for the value a key sends on press
+and release: `f16c_defs.json` (HOTAS is device 16, the target management switch up is 3010, the weapon release
+button 3022, the master arm switch device 19 command 3002, the ICP A-A button device 17 command 3018, the FCR
+power switch device 31 command 3001, MFD buttons devices 24 and 25 commands 3001 to 3020). The Export module takes
+`CLICK <device> <command> <value>` and calls `GetDevice(0):performClickableAction`, the same call the key bindings
+make. It always refuses the electrical, fuel, hydraulic, engine, gear and oxygen devices, the canopy and ejection
+(CPT_MECH), the flight control interface, the countermeasures dispenser, and the stores jettison and alternate
+release commands.
+
+`python dcs\make_mission.py --stick-test --target` adds an unarmed AI F-16C (TGT-1) 60 km ahead, flying the same way.
+Commands, in the order to try them (`cockpit.py` describes each):
+
+```
+python dcs\stick\stick_test.py click ufc.AA                 press a control by name (see f16c_defs.json)
+python dcs\stick\stick_test.py radar --secs 40              what the radar and the world objects report, once a second;
+                                                            lock the target yourself while it runs
+python dcs\stick\stick_test.py lock                         A-A mode, target management up; --scan also slews the cursor
+python dcs\stick\stick_test.py fire                         master arm, weapon release, watch the payload; arm back OFF
+```
+`lock` and `fire` keep heading, altitude and speed on the stick (they need the gains from `pulses`, `curve`, `throttle`).
+What the radar needs to lock (the page, the cursor, the mode) is learned by trying: each step prints what the radar
+reports afterwards, and `radar` saves the raw tables (`stick_radar_sample_*.json`) for the next step.
