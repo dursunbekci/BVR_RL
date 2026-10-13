@@ -596,14 +596,24 @@ def test_cockpit():
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             r = cockpit.stage_radar(run, 4.0)
-            lk = cockpit.stage_lock(run, gains, defs, scan=scan)
-            fr = cockpit.stage_fire(run, gains, defs)
+            lk = cockpit.stage_lock(run, gains, defs, scan=scan, aa=True)
+            fr = cockpit.stage_fire(run, gains, defs, aa=True)
         return r, lk, fr, buf.getvalue(), link
     r, lk, fr, out, link = flow(0, False)
     assert not r["locked_seen"] and not r["targets_seen"], r        # nothing set up before `lock`
     assert lk["locked"] and fr["fired"] and fr["payload"] == [4, 3], (lk, fr)
     assert "LOCKED" in out and "a missile left the aircraft" in out and "TGT-1" in out and "km" in out, out
     assert not link.cockpit.armed, "master arm must be back OFF after fire"
+    # without --aa the A-A button is not pressed (it toggles): a cockpit already in A-A mode stays in it
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk2 = cockpit.stage_lock(run, gains, defs)
+    assert lk2["locked"] and "assumed to be selected already" in buf.getvalue() and "ICP Master" not in buf.getvalue(), buf.getvalue()
+    assert link.cockpit.aa, "A-A mode was toggled off"
     # the radar cursor has to be slewed first: lock fails without --scan, works with it
     r, lk, fr, out, link = flow(3, False)
     assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)
@@ -641,7 +651,7 @@ def test_cockpit():
     assert "matching the target's altitude" in buf.getvalue(), buf.getvalue()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        frr = cockpit.stage_fire(run, gains, defs, force=True)
+        frr = cockpit.stage_fire(run, gains, defs, force=True, aa=True)
     assert frr["fired"] and "maddog" in buf.getvalue() and "stations that changed" in buf.getvalue(), buf.getvalue()
     # a click the module refuses is reported
     link = FakeLink(cockpit_defs=defs)

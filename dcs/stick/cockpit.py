@@ -261,7 +261,7 @@ def _observe(run, secs, fn, label):
     return st
 
 
-def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False):
+def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=False):
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -283,9 +283,14 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False):
 
     def done(st):
         return st.get("state") == "stt" or (st.get("state") is None and st["locked"])
-    steps = [("A-A master mode (ICP)", "ufc.AA"),
-             ("target management up: designate the target under the cursor", "hotas.STICK_TGT_MANAGE_UP"),
+    # The ICP's A-A button toggles (pressed in A-A mode it goes back to the previous mode), so it is pressed
+    # only when asked for (--aa); otherwise the cockpit is assumed to be in A-A already.
+    steps = [("target management up: designate the target under the cursor", "hotas.STICK_TGT_MANAGE_UP"),
              ("target management up again: single-target track", "hotas.STICK_TGT_MANAGE_UP")]
+    if aa:
+        steps.insert(0, ("A-A master mode (ICP)", "ufc.AA"))
+    else:
+        print("  A-A master mode is assumed to be selected already (its ICP button toggles: --aa presses it)")
     for label, spec in steps:
         if done(st):
             break
@@ -344,7 +349,7 @@ def stations(f):
     return out
 
 
-def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False):
+def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=False):
     """Arm, release, watch: master arm on, the weapon release button, then ten seconds of watching the
     payload and the world objects for a missile; master arm back to OFF at the end."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -365,8 +370,11 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False):
     if not st["locked"]:
         print("  no lock: the AIM-120 will be released without a track (a 'maddog' shot: it flies along the nose "
               "and looks for a target with its own seeker). The target is dead ahead, so this can still work.")
-    print("  step: A-A master mode")
-    click(run, "ufc.AA", defs, fn=fn)
+    if aa:
+        print("  step: A-A master mode")
+        click(run, "ufc.AA", defs, fn=fn)
+    else:
+        print("  A-A master mode is assumed to be selected already (its ICP button toggles: --aa presses it)")
     print("  step: MASTER ARM")
     click(run, "mmc.MasterArmSw", defs, value=1.0, fn=fn)
     settle(run, 1.0, fn)

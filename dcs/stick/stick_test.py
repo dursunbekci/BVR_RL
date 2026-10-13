@@ -843,6 +843,8 @@ def main(argv=None):
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
+    ap.add_argument("--aa", action="store_true",
+                    help="lock, fire: press the ICP A-A button (it toggles: only when the cockpit is not in A-A mode)")
     ap.add_argument("--match-alt", action="store_true",
                     help="radar, lock, fire: fly to the nearest aircraft's altitude (a radar sees it best there)")
     ap.add_argument("--alt", type=float, default=None, help="radar, lock, fire: fly at this altitude, m")
@@ -932,10 +934,11 @@ def main(argv=None):
                     fn = cockpit.hold_fn(run, fgains, a.alt, a.match_alt) if fgains else None
                     summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
                 elif a.test == "lock":
-                    summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt)
+                    summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,
+                                                         aa=a.aa)
                 else:
                     summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force, alt=a.alt,
-                                                         match_alt=a.match_alt)
+                                                         match_alt=a.match_alt, aa=a.aa)
             finally:
                 run.close()
                 link.release()

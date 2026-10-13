@@ -258,3 +258,8 @@ line, drawn when the target is out of view) and `HUD_TargetAngleReadout`; the RW
 (the target's radar). The module reads these markers every 20 frames (`rd` in the telemetry: fcr, tracked, cursor, sam, limits,
 td, tll, threat) and `cockpit.lock_state` turns them into search / designated / stt; `radar`, `lock` and `fire` use it.
 Marker names are in `MARK` in the module (override with `BVR_STICK_CFG = {markers = {...}}`).
+
+**`radar --match-alt` (13 October)**: the reading follows the hand presses: `search`, then `designated` (10 s), then `stt`
+(11 s, stable for the 50 s after), with the target 55 to 59 km ahead, 0.1 deg off the nose, within 15 m of the Viper's altitude
+(`--match-alt`), closing at 60 m/s on its passive route. The ICP's A-A button toggles (pressed in A-A mode it goes back), so
+`lock` and `fire` press it only with `--aa`; otherwise A-A is assumed selected.
