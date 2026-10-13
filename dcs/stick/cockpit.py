@@ -409,10 +409,26 @@ def stations(f):
     return out
 
 
-def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None):
-    """Arm, release, watch: master arm on, the weapon release button, then ten seconds of watching the
-    payload and the world objects for a missile; master arm back to OFF at the end."""
+def hud_mrm(run, link, ident=1):
+    """The AIM-120 count the HUD shows ('4 MRM'), or None."""
+    import re
+    for x in ind_text(run, link, ident):
+        m = re.search(r"(\d+)\s*MRM", x)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _ids(f, key):
+    return {o.get("id") for o in ((f.raw.get(key) or []) if f else []) if isinstance(o, dict)}
+
+
+def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None, watch=15):
+    """Arm, release, watch: master arm on, the weapon release button, then `watch` seconds of looking for the
+    missile: the HUD's AIM-120 count ('4 MRM'), the weapons in flight (the module's `ball`), new world objects and
+    the payload; master arm back to OFF at the end."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    link = run.link
     fr0 = settle(run, 1.5, fn)
     f_r, f_o, f_p, f_d = last_with(fr0, "radar"), last_with(fr0, "obj"), last_with(fr0, "pay"), last_with(fr0, "rd")
     st = radar_state(f_r) if f_r else {"targets": 0, "locked": 0}
@@ -424,9 +440,12 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
         return {"fired": False, "why": "no lock"}
     st["locked"] = 1 if have else 0
     pay0 = payload_count(f_p) if f_p else None
-    objs0 = {o.get("id") for o in ((f_o.raw.get("obj") or []) if f_o else [])}
+    objs0 = _ids(f_o, "obj")
+    ball0 = _ids(last_with(fr0, "ball"), "ball")
+    mrm0 = hud_mrm(run, link)
     sts0 = stations(f_p)
-    print(f"  payload before: {pay0}  {sts0 or ''}; world objects: {len(objs0)}")
+    print(f"  before: HUD shows {mrm0} AIM-120 (MRM); payload table {pay0} {sts0 or ''}; world objects {len(objs0)}; "
+          f"weapons in flight {len(ball0)}")
     if not st["locked"]:
         print("  no lock: the AIM-120 will be released without a track (a 'maddog' shot: it flies along the nose "
               "and looks for a target with its own seeker). The target is dead ahead, so this can still work.")
@@ -446,14 +465,22 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
     settle(run, 1.0, fn)
     print("  step: weapon release button")
     click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=0.4, fn=fn)
-    new, pay1 = [], pay0
-    for i in range(10):
+    new, pay1, mrm1, seen = [], pay0, mrm0, False
+    for i in range(int(watch)):
         fr = settle(run, 1.0, fn)
-        fp, fo2 = last_with(fr, "pay"), last_with(fr, "obj")
+        fp, fo2, fb = last_with(fr, "pay"), last_with(fr, "obj"), last_with(fr, "ball")
         pay1 = payload_count(fp) if fp else pay1
         new = [o for o in ((fo2.raw.get("obj") or []) if fo2 else []) if o.get("id") not in objs0]
-        print(f"    +{i + 1} s: payload {pay1}, new world objects {[(o.get('name'), o.get('l1'), o.get('l2')) for o in new]}")
-        if new and (pay0 is None or pay1 != pay0):
+        fly = [o for o in ((fb.raw.get("ball") or []) if fb else []) if o.get("id") not in ball0]
+        if i < 4 or i % 5 == 4:
+            mrm1 = hud_mrm(run, link)
+        gone = len(objs0 - _ids(fo2, "obj")) if fo2 else 0
+        print(f"    +{i + 1} s: HUD MRM {mrm1}, payload {pay1}, weapons in flight "
+              f"{[(o.get('name'), round(o.get('alt') or 0)) for o in fly]}, new world objects "
+              f"{[(o.get('name'), o.get('l1'), o.get('l2')) for o in new]}"
+              + (f", {gone} world object(s) gone (target destroyed?)" if gone else ""))
+        seen = seen or bool(fly or new)
+        if gone:
             break
     fp_end = last_with(run.frames[-300:], "pay")
     sts1 = stations(fp_end)
@@ -462,11 +489,14 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
         print("  stations that changed: " + "; ".join(f"{k}: {a} -> {b}" for k, (a, b) in changed.items()))
     print("  step: MASTER ARM back to OFF")
     click(run, "mmc.MasterArmSw", defs, value=0.0, fn=fn)
-    fired = bool(new) or (pay0 is not None and pay1 is not None and pay1 < pay0)
-    print("  a missile left the aircraft" if fired else
-          "  no missile seen: check the SMS page on the right MFD (is AIM-120 selected, is the master arm switch up?) "
-          "and tell me what the cockpit shows")
-    return {"fired": fired, "payload": [pay0, pay1]}
+    by_hud = mrm0 is not None and mrm1 is not None and mrm1 < mrm0
+    by_pay = pay0 is not None and pay1 is not None and pay1 < pay0
+    fired = seen or by_hud or by_pay
+    print("  a missile left the aircraft (" + ", ".join(w for w, ok in (("seen in flight", seen), ("HUD count down", by_hud),
+          ("payload down", by_pay)) if ok) + ")" if fired else
+          "  no missile seen by any of the four checks (HUD count, weapons in flight, new world objects, payload): "
+          "tell me what the cockpit showed (right MFD SMS page, HUD, a launch sound, a missile on the external view)")
+    return {"fired": fired, "payload": [pay0, pay1], "hud_mrm": [mrm0, mrm1]}
 
 
 def _lines(text):

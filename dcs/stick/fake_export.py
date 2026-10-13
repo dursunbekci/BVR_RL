@@ -153,6 +153,7 @@ class FakeCockpit:
                "rd": {"fcr": 4, "tracked": self.stage >= 1, "cursor": self.stage < 2, "sam": self.stage == 1,
                       "limits": self.stage == 1, "td": self.stage == 1, "tll": self.stage == 2, "threat": self.aa,
                       "aa": self.aa, "msl120": self.aa},
+               "ball": [self.missile] if self.missile else [],
                "pay": {"CurrentStation": 7, "Stations": self.stores}}
         return out
 
@@ -212,7 +213,9 @@ class FakeLink:
 
     def ind(self, first=0, last=49):
         stage = self.cockpit.stage if self.cockpit else 0
-        self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "") + "-----------",
+        n_amraam = sum(v["count"] for v in self.cockpit.stores.values()) if self.cockpit else 0
+        self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "")
+                             + "%d MRM\n" % n_amraam + "-----------",
                           4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n")
                              + "Cursor_Range\n%d\n" % (20 + 3 * (self.cockpit.cursor if self.cockpit else 0))
                              + ("FCR_TUC_contactData\nFCR_TUC_contact_Altitude\n23\n" if self.cockpit and self.cockpit.aa

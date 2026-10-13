@@ -362,8 +362,10 @@ local function vec(v)
   return {x = v.x, y = v.y, z = v.z}
 end
 
-local function objects(me)
-  local all = try("LoGetWorldObjects")
+local function objects(me, kind)
+  -- kind "ballistic": the weapons in flight (missiles, bombs), which the default list does not hold
+  local all
+  if kind then all = try("LoGetWorldObjects", kind) else all = try("LoGetWorldObjects") end
   if type(all) ~= "table" then return nil end
   local list = {}
   local px, pz = 0, 0
@@ -420,6 +422,7 @@ local function emit()
           seq = S.ax.seq, on = S.controlling}
   if S.n % CFG.objects_every == 0 then
     f.obj = objects(type(me) == "table" and me or nil)
+    f.ball = objects(type(me) == "table" and me or nil, "ballistic")
     f.radar = {targets = plain(try("LoGetTargetInformation")),
                locked = plain(try("LoGetLockedTargetInformation"))}
   end

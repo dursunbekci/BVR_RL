@@ -640,6 +640,7 @@ def test_cockpit():
     assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)
     r, lk, fr, out, link = flow(3, True)
     assert lk["locked"] and fr["fired"], (lk, fr)
+    assert fr["hud_mrm"] == [4, 3], fr                # the HUD's AIM-120 count goes down with the release
     # ind through the fake: saved, and the difference between "not locked" and "locked" is what inddiff shows
     with tempfile.TemporaryDirectory() as d:
         link = FakeLink(cockpit_defs=defs)
