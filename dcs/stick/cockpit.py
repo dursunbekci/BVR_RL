@@ -497,9 +497,15 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
                 return True
         return False
 
-    for mode in ("s", "c", "l"):
-        print(f"  step: weapon release button (route {mode}: {'device SetCommand' if mode == 's' else 'clickable element' if mode == 'c' else 'global command queue'})")
-        click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=0.4, fn=fn, mode=mode)
+    for mode in ("s", "c", "l", "g"):
+        print(f"  step: weapon release button (route {mode}: " + {"s": "device SetCommand", "c": "clickable element",
+              "l": "global command queue", "g": "DCS's generic pickle command, 350 and 351"}[mode] + ")")
+        if mode == "g":                      # iCommandPlanePickleOn / Off of command_defs.lua
+            link.raw(350, 1.0)
+            settle(run, 0.4, fn)
+            link.raw(351, 1.0)
+        else:
+            click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=0.4, fn=fn, mode=mode)
         if look(4, f"route {mode}"):
             worked = mode
             print(f"  the release went through route {mode}")
