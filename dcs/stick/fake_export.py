@@ -95,10 +95,13 @@ class FakeCockpit:
                      (d["HOTAS"], h["STICK_TGT_MANAGE_UP"]): "tms_up",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_AFT"]): "cursor_aft",
+                     (d["HOTAS"], h["STICK_DISP_MANAGE_LEFT"]): "dms_left",
+                     (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
                      (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm"}
         self.aa = self.armed = False
         self.stage = 0                     # 0 searching, 1 designated (bugged), 2 single-target track
+        self.soi_left = True               # which MFD the cursor and target management act on
         self.cursor, self.scan_needed = 0, scan_needed
         self.stores = {str(i): {"count": 1, "CLSID": "{AIM-120C}"} for i in (1, 2, 8, 9)}
         self.missile = None
@@ -108,13 +111,18 @@ class FakeCockpit:
 
     def press(self, dev, cmd, value):
         name = self.code.get((dev, cmd))
-        if name == "aa" and value == 1.0:
+        if name == "dms_left" and value != 0.0:            # the keymap sends -1.0 for left and down, +1.0 for right and up
+            self.soi_left = True
+        elif name == "dms_right" and value != 0.0:
+            self.soi_left = False
+        elif name == "aa" and value == 1.0:
             self.aa = True
-        elif name == "cursor" and value == 1.0:
+            self.soi_left = False          # A-A brings the weapons page up on the right MFD and the SOI goes with it
+        elif name == "cursor" and value == 1.0 and self.soi_left:
             self.cursor += 1
-        elif name == "cursor_aft" and value == 1.0:
+        elif name == "cursor_aft" and value == 1.0 and self.soi_left:
             self.cursor -= 1
-        elif name == "tms_up" and value == 1.0 and self.aa and self.cursor >= self.scan_needed:
+        elif name == "tms_up" and value == 1.0 and self.aa and self.soi_left and self.cursor >= self.scan_needed:
             self.stage = (self.stage + 1) % 3          # a third press drops the track
         elif name == "arm":
             self.armed = value == 1.0

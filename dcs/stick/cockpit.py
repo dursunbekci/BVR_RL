@@ -79,9 +79,12 @@ def settle(run, secs, fn=None):
     return drive(run, secs, fn)
 
 
-def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True):
-    """Press (and release after `hold` s) a control. Returns the module's answers."""
+def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True, release=None):
+    """Press (and release after `hold` s) a control; `release` sets the value sent afterwards (for axes).
+    Returns the module's answers."""
     dev, cmd, down, up = resolve(spec, defs, value)
+    if release is not None:
+        up = float(release)
     link = run.link
     n0 = link.clicks_seen if hasattr(link, "clicks_seen") else 0
     link.click(dev, cmd, down)
@@ -275,7 +278,7 @@ def _observe(run, secs, fn, label):
     return st
 
 
-def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None):
+def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None, soi="left"):
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -305,6 +308,11 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None)
     in_aa = master_mode(fr_m)
     if aa is None:
         aa = in_aa is False
+    if soi in ("left", "right"):
+        # target management and the radar cursor act on the sensor of interest; A-A mode brings the weapons page up on
+        # the right MFD and the SOI can sit there: display management left makes the left MFD (the radar page) the SOI
+        steps.insert(0, (f"display management {soi}: the {soi} MFD (radar page) becomes the sensor of interest",
+                         f"hotas.STICK_DISP_MANAGE_{soi.upper()}"))
     if aa:
         steps.insert(0, ("A-A master mode (ICP)", "ufc.AA"))
         print("  the HUD is not in A-A: pressing the ICP A-A button first" if in_aa is False else

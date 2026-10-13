@@ -277,3 +277,11 @@ reports `aa` and `msl120` in `rd`; `lock` and `fire` press the ICP A-A button (a
 both saves apart from the OSB labels and two numbers beside the cursor line (34 and 10, then 35 and 11), which look like the
 search altitude band at the cursor's range. In the latest screenshot the cursor mark sat nearer than the contact: target
 management up designates only a contact near the cursor, which fits a press that does nothing.
+
+**`cursor` probe and `lock` (13 October)**: slewing the radar cursor out and back in range 8 times each way changed none of the radar page's
+lines (the altitude band beside the cursor, 34 and 11, did not move; only a slowly drifting `174 24x` did), and `lock` (A-A mode seen
+by the HUD, so not toggled) sent target management up with no effect, as did the same key by hand. The earlier hand run that
+worked had the radar page as the sensor of interest; A-A mode puts the weapons page on the right MFD (seen in the screenshot) and
+the cursor slew and target management act on the sensor of interest. `lock` now first sends display management left (`--soi
+left`, `right` or `none`): the keymap sends -1.0 for left and down, +1.0 for right and up. `click` takes `--release` to set an
+axis back after `--hold`.

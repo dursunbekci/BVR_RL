@@ -847,6 +847,10 @@ def main(argv=None):
     ap.add_argument("--aa", action="store_true",
                     help="lock, fire: always press the ICP A-A button (it toggles; by default it is pressed only if the HUD is not in A-A)")
     ap.add_argument("--no-aa", action="store_true", help="lock, fire: never press the ICP A-A button")
+    ap.add_argument("--soi", choices=["left", "right", "none"], default="left",
+                    help="lock: first make this MFD the sensor of interest (display management switch); default left")
+    ap.add_argument("--release", type=float, default=None,
+                    help="click: the value to send after --hold (for axes such as hotas.THROTTLE_RDR_CURSOR_Y_AXIS --value 0.5 --release 0)")
     ap.add_argument("--match-alt", action="store_true",
                     help="radar, lock, fire: fly to the nearest aircraft's altitude (a radar sees it best there)")
     ap.add_argument("--alt", type=float, default=None, help="radar, lock, fire: fly at this altitude, m")
@@ -929,7 +933,7 @@ def main(argv=None):
                         raise SystemExit("click NAME (e.g. hotas.STICK_TGT_MANAGE_UP, ufc.AA, left_osb.4) or click DEVICE COMMAND")
                     spec = a.args if len(a.args) == 2 and all(x.lstrip("-").isdigit() for x in a.args) else a.args[0]
                     try:
-                        cockpit.click(run, spec, defs, value=a.value, hold=a.hold)
+                        cockpit.click(run, spec, defs, value=a.value, hold=a.hold, release=a.release)
                     except ValueError as e:
                         raise SystemExit(str(e))
                 elif a.test == "cursor":
@@ -940,7 +944,7 @@ def main(argv=None):
                     summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
                 elif a.test == "lock":
                     summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,
-                                                         aa=True if a.aa else False if a.no_aa else None)
+                                                         aa=True if a.aa else False if a.no_aa else None, soi=a.soi)
                 else:
                     summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force, alt=a.alt,
                                                          match_alt=a.match_alt, aa=True if a.aa else False if a.no_aa else None)

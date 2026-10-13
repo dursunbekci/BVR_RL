@@ -684,6 +684,28 @@ def test_cockpit():
         res = cockpit.stage_cursorprobe(run, gains, defs, steps=3, hold=0.2)
     text = buf.getvalue()
     assert res["steps"] == 6 and "+ 23" in text and "- 20" in text and "cursor back 3" in text and "+ 20" in text, text
+    # the sensor of interest: with it on the weapons page, target management does nothing until display management left
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa, link.cockpit.soi_left = True, False
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk5 = cockpit.stage_lock(run, gains, defs, soi="none")
+    assert not lk5["locked"], buf.getvalue()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk6 = cockpit.stage_lock(run, gains, defs)                         # default soi = left
+    assert lk6["locked"] and "sensor of interest" in buf.getvalue(), buf.getvalue()
+    # an axis control is pressed, held, then set back with --release
+    buf = io.StringIO()
+    sent = []
+    link.click = lambda dev, cmd, value: (sent.append((dev, cmd, value)), link.events.__setitem__("click", {"ev": "click", "ok": True}))
+    with contextlib.redirect_stdout(buf):
+        cockpit.click(run, "hotas.THROTTLE_RDR_CURSOR_Y_AXIS", defs, value=0.5, hold=0.2, release=0.0)
+    assert [x[2] for x in sent] == [0.5, 0.0], sent
     # a click the module refuses is reported
     link = FakeLink(cockpit_defs=defs)
     run = stick_test.Run(link, None, "cp", lim)
