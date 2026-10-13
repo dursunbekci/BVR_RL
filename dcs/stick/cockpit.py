@@ -460,28 +460,52 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
     if f_d is not None and f_d.raw.get("rd", {}).get("msl120") is False and in_aa:
         print("  WARNING: the HUD does not show the AIM-120 selected: step the missile selection "
               "(S in DCS, or click hotas.STICK_NWS_AR_DISC_MSL_STEP) and run fire again")
+    def hud_arm():
+        return any(x.strip() == "ARM" for x in ind_text(run, link, 1))
+
     print("  step: MASTER ARM")
-    click(run, "mmc.MasterArmSw", defs, value=1.0, fn=fn)
-    settle(run, 1.0, fn)
-    print("  step: weapon release button")
-    click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=0.4, fn=fn)
-    new, pay1, mrm1, seen = [], pay0, mrm0, False
-    for i in range(int(watch)):
-        fr = settle(run, 1.0, fn)
-        fp, fo2, fb = last_with(fr, "pay"), last_with(fr, "obj"), last_with(fr, "ball")
-        pay1 = payload_count(fp) if fp else pay1
-        new = [o for o in ((fo2.raw.get("obj") or []) if fo2 else []) if o.get("id") not in objs0]
-        fly = [o for o in ((fb.raw.get("ball") or []) if fb else []) if o.get("id") not in ball0]
-        if i < 4 or i % 5 == 4:
-            mrm1 = hud_mrm(run, link)
-        gone = len(objs0 - _ids(fo2, "obj")) if fo2 else 0
-        print(f"    +{i + 1} s: HUD MRM {mrm1}, payload {pay1}, weapons in flight "
-              f"{[(o.get('name'), round(o.get('alt') or 0)) for o in fly]}, new world objects "
-              f"{[(o.get('name'), o.get('l1'), o.get('l2')) for o in new]}"
-              + (f", {gone} world object(s) gone (target destroyed?)" if gone else ""))
-        seen = seen or bool(fly or new)
-        if gone:
+    for mode in (None, "s", "l"):
+        click(run, "mmc.MasterArmSw", defs, value=1.0, fn=fn, mode=mode, verbose=mode is None)
+        settle(run, 1.0, fn)
+        armed = hud_arm()
+        print(f"    HUD shows ARM: {armed}" + ("" if armed else f"   (route {mode or 'c'} did not arm it)"))
+        if armed:
             break
+    if not armed:
+        print("  WARNING: the HUD does not show ARM: continuing anyway, but the master arm switch may not have moved")
+    new, pay1, mrm1, seen, worked = [], pay0, mrm0, False, None
+
+    def look(secs, label):
+        """Watch `secs` seconds for the missile; returns True at the first sign of it."""
+        nonlocal new, pay1, mrm1, seen
+        for i in range(int(secs)):
+            fr = settle(run, 1.0, fn)
+            fp, fo2, fb = last_with(fr, "pay"), last_with(fr, "obj"), last_with(fr, "ball")
+            pay1 = payload_count(fp) if fp else pay1
+            new = [o for o in ((fo2.raw.get("obj") or []) if fo2 else []) if o.get("id") not in objs0]
+            fly = [o for o in ((fb.raw.get("ball") or []) if fb else []) if o.get("id") not in ball0]
+            if i < 4 or i % 5 == 4:
+                mrm1 = hud_mrm(run, link)
+            gone = len(objs0 - _ids(fo2, "obj")) if fo2 else 0
+            print(f"    {label} +{i + 1} s: HUD MRM {mrm1}, payload {pay1}, weapons in flight "
+                  f"{[(o.get('name'), round(o.get('alt') or 0)) for o in fly]}, new world objects "
+                  f"{[(o.get('name'), o.get('l1'), o.get('l2')) for o in new]}"
+                  + (f", {gone} world object(s) gone (target destroyed?)" if gone else ""))
+            seen = seen or bool(fly or new)
+            hud_down = mrm0 is not None and mrm1 is not None and mrm1 < mrm0
+            if seen or hud_down or (pay0 is not None and pay1 is not None and pay1 < pay0):
+                return True
+        return False
+
+    for mode in ("s", "c", "l"):
+        print(f"  step: weapon release button (route {mode}: {'device SetCommand' if mode == 's' else 'clickable element' if mode == 'c' else 'global command queue'})")
+        click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=0.4, fn=fn, mode=mode)
+        if look(4, f"route {mode}"):
+            worked = mode
+            print(f"  the release went through route {mode}")
+            break
+    if worked:
+        look(max(int(watch) - 4, 0), "watching")
     fp_end = last_with(run.frames[-300:], "pay")
     sts1 = stations(fp_end)
     changed = {k: (sts0.get(k), v) for k, v in sts1.items() if sts0.get(k) != v}

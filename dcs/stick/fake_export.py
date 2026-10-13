@@ -215,7 +215,7 @@ class FakeLink:
         stage = self.cockpit.stage if self.cockpit else 0
         n_amraam = sum(v["count"] for v in self.cockpit.stores.values()) if self.cockpit else 0
         self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "")
-                             + "%d MRM\n" % n_amraam + "-----------",
+                             + "%d MRM\n" % n_amraam + ("ARM\n" if self.cockpit and self.cockpit.armed else "") + "-----------",
                           4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n")
                              + "Cursor_Range\n%d\n" % (20 + 3 * (self.cockpit.cursor if self.cockpit else 0))
                              + ("FCR_TUC_contactData\nFCR_TUC_contact_Altitude\n23\n" if self.cockpit and self.cockpit.aa
