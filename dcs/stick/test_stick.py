@@ -349,6 +349,27 @@ def _check_fake(roll_sign, pitch_sign):
     return gains, t1
 
 
+def test_fake_nonlinear():
+    """DCS's first pulses gave a tenth of a linear stick's response: the curve stage must measure it
+    and hold must fly through the inverse."""
+    import stick_test
+    with tempfile.TemporaryDirectory() as d:
+        s = stick_test.main(["all", "--fake", "--fake-curve", "2.0", "--out", d])
+        gains = json.load(open(os.path.join(d, "stick_gains.json")))
+    assert "aborted" not in s, s
+    rc, pc = dict((round(a, 2), r) for a, r in gains["roll_curve"]), dict((round(a, 2), r) for a, r in gains["pitch_curve"])
+    assert rc[0.1] < 0.05 and rc[0.5] > 0.5 and rc[0.5] > 20 * rc[0.1], rc            # rad/s: ~ 2.6 a^2
+    assert abs(rc[0.5] - 2.6 * 0.25) < 0.1, rc
+    assert pc[0.1] < 0.1 and abs(pc[0.5] - 6.0 * 0.25) < 0.2, pc                     # g: ~ 6 a^2
+    assert stick_test.inverse(gains["roll_curve"], 0.65) > 0.45 and abs(stick_test.inverse(gains["roll_curve"], 0.65) - 0.5) < 0.05
+    assert stick_test.inverse(gains["roll_curve"], -0.65) < -0.45 and stick_test.inverse(gains["roll_curve"], 100.0) == 1.0
+    t1 = s["hold"]["heading_steps"][0]
+    assert 50 < t1["peak_bank_deg"] < 64 and t1["half_s"] < 15 and t1["rate_bulk_dps"] > 3.0, t1
+    assert s["hold"]["hold_error"]["alt_m"] < 15, s["hold"]["hold_error"]
+    print(f"  stick_test.py, non-linear ... OK  (response ~ command squared measured; hold through the inverse "
+          f"turns {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank)")
+
+
 def test_fake_end_to_end():
     import stick_test
     from fake_export import FakeLink
@@ -419,5 +440,6 @@ if __name__ == "__main__":
     test_precision_and_command_defs()
     test_udp_link()
     test_fake_end_to_end()
+    test_fake_nonlinear()
     test_install()
-    print("5/5 passed")
+    print("6/6 passed")

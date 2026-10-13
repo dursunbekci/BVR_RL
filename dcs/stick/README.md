@@ -68,6 +68,7 @@ Do not pause or accelerate time. Then, in a second window:
 python dcs\stick\stick_test.py info        # codes found, API functions missing
 python dcs\stick\stick_test.py rate        # 10 s: lines per second, gaps, fields, units
 python dcs\stick\stick_test.py pulses      # 0.1 stick pulses: signs, g and roll rate per unit, lag
+python dcs\stick\stick_test.py curve       # pulses up to full stick: response against command (the axes are not linear)
 python dcs\stick\stick_test.py throttle    # code against RPM and acceleration
 python dcs\stick\stick_test.py hold        # +60 deg heading, back, +300 m, +40 m/s, closed loop
 ```
@@ -130,3 +131,15 @@ What the first run decides:
 - The transport, the ports and the exact command numbers are not tested yet.
 - A controller that is slower or looser than the simulator's autopilot is a
   new gap between training and DCS; measure it first (plan item 2).
+
+## First results in DCS (13 October)
+
+Export.lua telemetry works: 78 lines a second at 125 fps, all fields present, units as
+expected, model time 1.00 x real time. Axis codes 2001 to 2003 are right (every axis
+responded, symmetric both ways; `command_defs.lua` could not be found, so they are the
+defaults). Lag from command to response: 105 ms in roll, 228 ms in pitch.
+
+`pulses` at 0.1 gave only 0.94 g and 61 deg/s per unit of stick, a fraction of what a
+linear Viper stick would: the exported axes are **strongly non-linear** (or scaled). A
+linear gain would saturate far below the airframe's limits, so `curve` measures the
+response up to full stick and `hold` flies through the inverse of the measured curve.

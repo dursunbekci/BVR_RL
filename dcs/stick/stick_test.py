@@ -13,9 +13,10 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py info                see what Export.lua found
     python dcs/stick/stick_test.py rate                telemetry rate and fields (no control)
     python dcs/stick/stick_test.py pulses              small stick pulses: signs, gains, lag
+    python dcs/stick/stick_test.py curve               pulses up to full stick: response against command
     python dcs/stick/stick_test.py throttle            throttle code against RPM and acceleration
     python dcs/stick/stick_test.py hold                heading/altitude/speed steps, closed loop
-    python dcs/stick/stick_test.py all                 rate, pulses, throttle, hold
+    python dcs/stick/stick_test.py all                 rate, pulses, curve, throttle, hold
     python dcs/stick/stick_test.py release             panic: axes to 0 (the F-16 holds 1 g, the bank)
     python dcs/stick/stick_test.py raw 2004 0.5        one LoSetCommand(2004, 0.5)
 
@@ -262,6 +263,22 @@ def pct(a, p):
 
 # ── the control law: the simulator's autopilot, on stick axes ───────────
 
+def inverse(curve, y):
+    """Command (-1..1, odd symmetric) that gives the response y, from the measured curve
+    [[command, response], ...] (responses positive for positive commands); beyond the last
+    point the last slope is extended, and the command is capped at 1."""
+    pts = sorted((float(a), float(r)) for a, r in curve if a > 0)
+    xs, ys = [0.0] + [a for a, _ in pts], [0.0] + [r for _, r in pts]
+    ys = list(np.maximum.accumulate(np.array(ys) + np.arange(len(ys)) * 1e-9))
+    mag = abs(y)
+    if mag >= ys[-1]:
+        slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) if len(xs) > 1 and ys[-1] > ys[-2] else 1e-3
+        x = xs[-1] + (mag - ys[-1]) / max(slope, 1e-6)
+    else:
+        x = float(np.interp(mag, ys, xs))
+    return math.copysign(min(1.0, x), y)
+
+
 class Hold:
     """Heading, altitude and speed hold: heading -> bank -> roll rate -> roll axis; altitude ->
     flight-path angle -> load factor -> pitch axis; speed -> acceleration -> throttle axis.
@@ -284,13 +301,19 @@ class Hold:
         tas = max(f.tas or 150.0, 80.0)
         bank_cmd = max(-self.bank_max, min(self.bank_max, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
         rate_cmd = max(-3.0, min(3.0, self.K_BANK_RATE * (bank_cmd - f.bank)))
-        roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
+        if g.get("roll_curve"):
+            roll = g["roll_sign"] * inverse(g["roll_curve"], rate_cmd)
+        else:
+            roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
         gam = math.asin(max(-0.9, min(0.9, vs / tas)))
         vs_cmd = max(-30.0, min(30.0, 0.12 * (alt - f.alt)))
         gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
         nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
         nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
-        pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
+        if g.get("pitch_curve"):
+            pitch = g["pitch_sign"] * inverse(g["pitch_curve"], nz_cmd - 1.0)
+        else:
+            pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
         if v is not None:
             thr = g.get("thr_trim", 0.0) + ((v - tas) / self.TAU_SPEED) / g.get("thr_slope", 6.0)
         out = {"pitch": max(-1.0, min(1.0, pitch)), "roll": max(-1.0, min(1.0, roll)), "rudder": 0.0}
@@ -467,6 +490,80 @@ def stage_pulses(run, size=0.1, on=0.5):
     return g
 
 
+def drive_until(run, max_s, fn, done):
+    f = run.next()
+    t0 = f.t
+    while f.t - t0 < max_s and not done(f):
+        run.link.axes(**fn(f, f.t - t0))
+        f = run.next()
+    return f
+
+
+CURVE_AMPS = (0.1, 0.2, 0.35, 0.5, 0.75, 1.0)
+
+
+def stage_curve(run, gains, amps=CURVE_AMPS, max_bank_change=math.radians(20), max_nz_change=3.5):
+    """Response of the pitch and roll axes against the command, up to full stick. Each pulse
+    stops early (and the aircraft is brought back by the known sign) when the bank has
+    changed by 20 deg, or the load factor by 3.5 g or the pitch by 8 deg."""
+    for k in ("roll_sign", "pitch_sign"):
+        if k not in gains:
+            raise SystemExit("curve needs the signs: run `pulses` first (or `all`).")
+    out = {}
+    print(f"\n  pulses of {', '.join(f'{a:g}' for a in amps)} each way, stopped early at 20 deg of bank, "
+          f"3.5 g or 8 deg of pitch")
+    for axis in ("pitch", "roll"):
+        rows = []
+        for a in amps:
+            peak, held = {}, {}
+            for sgn in (1, -1):
+                base = drive(run, 1.5, lambda f, tau: dict(ZERO))
+                f0 = base[-1]
+                bank0, gam0 = f0.bank, f0.pitch
+                nz0 = float(np.nanmean(series(base[-25:], "nz")))
+                rate0 = float(np.nanmean(deriv(series(base, "t"), series(base, "bank"), wrap=True)))
+                st = {"stop": None}
+                on_max = 1.0 if axis == "pitch" else 0.7
+
+                def fn(f, tau):
+                    if st["stop"] is None:
+                        if tau >= on_max or (axis == "roll" and abs(wrap_pi(f.bank - bank0)) > max_bank_change) \
+                                or (axis == "pitch" and (abs(f.nz - nz0) > max_nz_change
+                                                         or abs(f.pitch - gam0) > math.radians(8))):
+                            st["stop"] = tau
+                    return {**ZERO, axis: 0.0 if st["stop"] is not None else sgn * a}
+                fr = drive(run, on_max + 0.5, fn)
+                held[sgn] = st["stop"] if st["stop"] is not None else on_max
+                if axis == "roll":
+                    r = deriv(series(fr, "t"), series(fr, "bank"), wrap=True) - rate0
+                    peak[sgn] = float(r[np.nanargmax(np.abs(r))])
+                else:
+                    d = series(fr, "nz") - nz0
+                    peak[sgn] = float(d[np.nanargmax(np.abs(d))])
+                # bring it back with the known sign
+                if axis == "roll":
+                    drive_until(run, 8.0, lambda f, tau: {**ZERO, "roll": gains["roll_sign"] * max(-0.25, min(0.25, -0.8 * wrap_pi(f.bank - bank0)))},
+                                lambda f: abs(wrap_pi(f.bank - bank0)) < math.radians(3))
+                else:
+                    drive_until(run, 10.0, lambda f, tau: {**ZERO, "pitch": gains["pitch_sign"] * max(-0.2, min(0.2, -2.0 * (f.pitch - gam0)))},
+                                lambda f: abs(f.pitch - gam0) < math.radians(1.5) and abs(f.nz - nz0) < 0.25)
+            resp = (peak[1] - peak[-1]) / 2.0
+            rows.append((a, peak[1], peak[-1], resp, 0.5 * (held[1] + held[-1])))
+        k = DEG if axis == "roll" else 1.0
+        unit = "deg/s" if axis == "roll" else "g"
+        print(f"\n  {axis}: {'rate' if axis == 'roll' else 'load factor change'} against command")
+        print(f"  {'cmd':>6}{'+ pulse':>12}{'- pulse':>12}{'response':>12}{'per unit':>12}{'held s':>9}")
+        for a, pp, pm, resp, held in rows:
+            print(f"  {a:>6.2f}{pp * k:>+12.2f}{pm * k:>+12.2f}{abs(resp) * k:>9.2f} {unit:<4}{abs(resp) * k / a:>8.2f}{held:>9.2f}")
+        out[f"{axis}_curve"] = [[a, abs(resp)] for a, _, _, resp, _ in rows]
+        sgn_resp = [1 if resp >= 0 else -1 for _, _, _, resp, _ in rows]
+        if len(set(sgn_resp)) > 1:
+            print(f"  WARN: the {axis} response changes sign along the sweep")
+        top = rows[-1]
+        print(f"  at full command ({top[0]:g}): {abs(top[3]) * k:.1f} {unit}")
+    return out
+
+
 def stage_throttle(run, gains, hold_s=7.0, bank_max=math.radians(30)):
     """Throttle code against RPM and acceleration, holding heading and altitude on the stick."""
     link = run.link
@@ -610,7 +707,7 @@ def save_gains(path, gains):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("test", choices=["info", "rate", "pulses", "throttle", "hold", "all", "release", "raw"])
+    ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE")
     ap.add_argument("--secs", type=float, default=10.0, help="rate: how long to listen (s)")
     ap.add_argument("--size", type=float, default=0.1, help="pulses: stick deflection (default 0.1)")
@@ -623,13 +720,14 @@ def main(argv=None):
     ap.add_argument("--fake", action="store_true", help="fly a synthetic aircraft instead of DCS")
     ap.add_argument("--fake-roll-sign", type=int, default=1)
     ap.add_argument("--fake-pitch-sign", type=int, default=1)
+    ap.add_argument("--fake-curve", type=float, default=1.0, help="fake aircraft: response ~ command ** this")
     ap.add_argument("--port-tel", type=int, default=TEL_PORT)
     ap.add_argument("--port-cmd", type=int, default=CMD_PORT)
     a = ap.parse_args(argv)
 
     if a.fake:
         from fake_export import FakeLink
-        link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign)
+        link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign, curve_pow=a.fake_curve)
     else:
         link = UdpLink(a.port_tel, a.port_cmd)
     gains_path = a.gains or os.path.join(a.out, "stick_gains.json")
@@ -651,7 +749,7 @@ def main(argv=None):
         if a.test == "info":
             stage_info(link)
             return summary
-        todo = ["rate", "pulses", "throttle", "hold"] if a.test == "all" else [a.test]
+        todo = ["rate", "pulses", "curve", "throttle", "hold"] if a.test == "all" else [a.test]
         gains = load_gains(gains_path)
         for name in todo:
             print(f"\n=== {name} " + "=" * (60 - len(name)))
@@ -663,6 +761,10 @@ def main(argv=None):
                     gains.update(stage_pulses(run, a.size))
                     save_gains(gains_path, gains)
                     summary["pulses"] = {k: v for k, v in gains.items()}
+                elif name == "curve":
+                    gains.update(stage_curve(run, gains))
+                    save_gains(gains_path, gains)
+                    summary["curve"] = {k: gains[k] for k in ("pitch_curve", "roll_curve")}
                 elif name == "throttle":
                     gains.update(stage_throttle(run, gains))
                     save_gains(gains_path, gains)
