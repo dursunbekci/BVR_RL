@@ -145,16 +145,32 @@ def nearest(f):
     return best
 
 
-def hold_fn(run, gains):
-    """A function (frame, tau) -> axes that keeps heading, altitude and speed as they are now."""
+def target_altitude(run):
+    """Altitude of the nearest other aircraft, from the latest world objects (None if there are none)."""
+    fo = last_with(run.frames[-300:], "obj")
+    nr = nearest(fo) if fo else None
+    if nr is None:
+        return None
+    return (fo.alt or 0.0) + nr[3]
+
+
+def hold_fn(run, gains, alt=None, match_alt=False):
+    """A function (frame, tau) -> axes that keeps the heading and speed as they are now and the altitude as
+    they are, or at `alt`, or at the nearest aircraft's altitude (match_alt): a radar sees a target best at
+    its own height."""
     from stick_test import Hold
     f0 = run.next()
     h = Hold(gains, bank_max=math.radians(30))
-    hdg, alt, v = f0.hdg, f0.alt, f0.tas
+    hdg, v = f0.hdg, f0.tas
+    if match_alt and alt is None:
+        alt = target_altitude(run)
+        print(f"  matching the target's altitude: {alt:.0f} m (now {f0.alt:.0f})" if alt else
+              "  --match-alt: no other aircraft in the world objects yet; keeping the altitude")
+    alt = alt if alt is not None else f0.alt
     return lambda f, tau: h.axes(f, hdg, alt, v=v)
 
 
-def stage_radar(run, secs=20.0, out_dir=None):
+def stage_radar(run, secs=20.0, out_dir=None, fn=None):
     """Print the nearest aircraft and the radar's target counts every second; keep samples of the raw
     tables for the first moments there were targets and a lock."""
     import datetime
@@ -167,6 +183,10 @@ def stage_radar(run, secs=20.0, out_dir=None):
     prev_rng, prev_t = None, None
     rows = 0
     while f.t - t0 < secs:
+        if fn is not None:
+            ax = fn(f, f.t - t0)
+            if ax:
+                run.link.axes(**ax)
         if "radar" in f.raw:
             st = radar_state(f)
         if "obj" in f.raw:
@@ -194,7 +214,8 @@ def stage_radar(run, secs=20.0, out_dir=None):
         f = run.next()
     print()
     if samples["targets"] is None:
-        print("  the radar's target list (LoGetTargetInformation) stayed empty")
+        print("  the radar's target list (LoGetTargetInformation) stayed empty: this module may not export its "
+              "radar through that call. Run `ind` (the cockpit display text) with and without a lock instead.")
     else:
         print("  radar target table, first sample:\n" + json.dumps(samples["targets"]["radar"], indent=1)[:1600])
     if samples["locked"] is None:
@@ -220,10 +241,10 @@ def _observe(run, secs, fn, label):
     return st
 
 
-def stage_lock(run, gains, defs, scan=False):
+def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False):
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
-    fn = hold_fn(run, gains) if gains else None
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
     fr0 = settle(run, 1.5, fn)
     f_o = last_with(fr0, "obj")
     nr = nearest(f_o) if f_o else None
@@ -272,10 +293,23 @@ def payload_count(f):
     return sum(int(v.get("count", 0)) for v in sts.values() if isinstance(v, dict))
 
 
-def stage_fire(run, gains, defs, force=False):
+def stations(f):
+    """{station: (CLSID or weapon name, count)} from a payload table, or {}."""
+    pay = f.raw.get("pay") if f else None
+    sts = pay.get("Stations") if isinstance(pay, dict) else None
+    out = {}
+    if isinstance(sts, dict):
+        for k, v in sts.items():
+            if isinstance(v, dict):
+                w = v.get("weapon") if isinstance(v.get("weapon"), dict) else {}
+                out[str(k)] = (v.get("CLSID") or w.get("name") or "?", int(v.get("count", 0) or 0))
+    return out
+
+
+def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False):
     """Arm, release, watch: master arm on, the weapon release button, then ten seconds of watching the
     payload and the world objects for a missile; master arm back to OFF at the end."""
-    fn = hold_fn(run, gains) if gains else None
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
     fr0 = settle(run, 1.5, fn)
     f_r, f_o, f_p = last_with(fr0, "radar"), last_with(fr0, "obj"), last_with(fr0, "pay")
     st = radar_state(f_r) if f_r else {"targets": 0, "locked": 0}
@@ -284,7 +318,13 @@ def stage_fire(run, gains, defs, force=False):
         return {"fired": False, "why": "no lock"}
     pay0 = payload_count(f_p) if f_p else None
     objs0 = {o.get("id") for o in ((f_o.raw.get("obj") or []) if f_o else [])}
-    print(f"  payload before: {pay0}; world objects: {len(objs0)}")
+    sts0 = stations(f_p)
+    print(f"  payload before: {pay0}  {sts0 or ''}; world objects: {len(objs0)}")
+    if not st["locked"]:
+        print("  no lock: the AIM-120 will be released without a track (a 'maddog' shot: it flies along the nose "
+              "and looks for a target with its own seeker). The target is dead ahead, so this can still work.")
+    print("  step: A-A master mode")
+    click(run, "ufc.AA", defs, fn=fn)
     print("  step: MASTER ARM")
     click(run, "mmc.MasterArmSw", defs, value=1.0, fn=fn)
     settle(run, 1.0, fn)
@@ -299,6 +339,11 @@ def stage_fire(run, gains, defs, force=False):
         print(f"    +{i + 1} s: payload {pay1}, new world objects {[(o.get('name'), o.get('l1'), o.get('l2')) for o in new]}")
         if new and (pay0 is None or pay1 != pay0):
             break
+    fp_end = last_with(run.frames[-300:], "pay")
+    sts1 = stations(fp_end)
+    changed = {k: (sts0.get(k), v) for k, v in sts1.items() if sts0.get(k) != v}
+    if changed:
+        print("  stations that changed: " + "; ".join(f"{k}: {a} -> {b}" for k, (a, b) in changed.items()))
     print("  step: MASTER ARM back to OFF")
     click(run, "mmc.MasterArmSw", defs, value=0.0, fn=fn)
     fired = bool(new) or (pay0 is not None and pay1 is not None and pay1 < pay0)
@@ -306,3 +351,34 @@ def stage_fire(run, gains, defs, force=False):
           "  no missile seen: check the SMS page on the right MFD (is AIM-120 selected, is the master arm switch up?) "
           "and tell me what the cockpit shows")
     return {"fired": fired, "payload": [pay0, pay1]}
+
+
+def stage_ind(link, tag="", out_dir=None, first=0, last=49):
+    """Ask the module for the text of the cockpit displays and print it (read-only)."""
+    import datetime
+    link.events.pop("ind", None)
+    link.ind(first, last)
+    import time as _t
+    end = _t.time() + 4.0
+    while _t.time() < end and "ind" not in link.events:
+        link.next(timeout=0.3)
+    r = link.events.get("ind")
+    if not r:
+        print("  no answer: reinstall the Export module (python dcs\\stick\\install_export.py) and restart the mission")
+        return None
+    items = r.get("items") or []
+    print(f"  {len(items)} displays with text (ids {first} to {last})")
+    for it in items:
+        lines = [x for x in it["text"].replace("\r", "").split("\n") if x.strip() and not set(x.strip()) <= {"-"}]
+        print(f"\n  display {it['id']}: {len(it['text'])} characters, {len(lines)} lines")
+        for x in lines[:14]:
+            print("     " + x[:110])
+        if len(lines) > 14:
+            print(f"     ... {len(lines) - 14} more lines (all of it is in the saved file)")
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, f"stick_ind_{tag + '_' if tag else ''}{datetime.datetime.now():%Y%m%d_%H%M%S}.json")
+        with open(path, "w") as fh:
+            json.dump(r, fh, indent=1)
+        print(f"\n  saved: {path}")
+    return r

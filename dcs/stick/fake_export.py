@@ -114,7 +114,7 @@ class FakeCockpit:
             self.locked = not self.locked if self.locked else True
         elif name == "arm":
             self.armed = value == 1.0
-        elif name == "release" and value == 1.0 and self.locked and self.armed and self.missile is None:
+        elif name == "release" and value == 1.0 and self.aa and self.armed and self.missile is None:   # no lock: a maddog shot
             for k, v in self.stores.items():
                 if v["count"]:
                     v["count"] = 0
@@ -185,6 +185,11 @@ class FakeLink:
 
     def raw(self, code, value):
         pass
+
+    def ind(self, first=0, last=49):
+        locked = bool(self.cockpit and self.cockpit.locked)
+        self.events["ind"] = {"ev": "ind", "items": [
+            {"id": 3, "text": "-----------\nMODE\nCRM\nSUBMODE\n" + ("STT" if locked else "RWS") + "\n-----------"}]}
 
     def click(self, dev, cmd, value):
         ok = self.cockpit.press(dev, cmd, value) if self.cockpit else False

@@ -226,3 +226,12 @@ python dcs\stick\stick_test.py fire                         master arm, weapon r
 `lock` and `fire` keep heading, altitude and speed on the stick (they need the gains from `pulses`, `curve`, `throttle`).
 What the radar needs to lock (the page, the cursor, the mode) is learned by trying: each step prints what the radar
 reports afterwards, and `radar` saves the raw tables (`stick_radar_sample_*.json`) for the next step.
+
+**First `radar` run (13 October)**: the target showed in the world objects all the way (56 km down to 10 km, 0.1 to 2 deg
+off the nose), but `LoGetTargetInformation` and `LoGetLockedTargetInformation` stayed empty: the F-16C module may not export
+its radar through those calls (they come from the Flaming Cliffs aircraft). The target was 2.2 to 3.7 km above the Viper
+(2 to 4 deg at 50 km), at the edge of the radar's default vertical scan. Changes: `radar`, `lock` and `fire` take
+`--match-alt` (fly to the target's altitude) and `--alt M`; `radar` also flies heading, altitude and speed now; `ind` prints
+and saves the text of the cockpit displays (`list_indication`, read-only), to be run with and without a lock to see how the
+lock shows on the HUD and the MFDs; `fire` presses A-A itself, says when it is a maddog shot (no lock) and prints which
+stations changed.

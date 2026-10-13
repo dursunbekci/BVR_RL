@@ -87,6 +87,13 @@ end
 function LoGetPayloadInfo() return {CurrentStation = 7, Stations = {{count = 1, CLSID = "{AIM-120C}"}}} end
 function LoSetCommand(c, v) CMDS[#CMDS + 1] = {c, v} end
 CLICKS = {}
+function list_indication(id)
+  if id == 3 then return "-----------\nMODE\nCRM\n-----------" end
+  if id == 5 then error("no such indicator") end
+  if id == 7 then return "" end
+  if id == 9 then return "-----------\nSTT\n-----------" end
+  return nil
+end
 function GetDevice(id)
   return {performClickableAction = function(self, dev, c, v) CLICKS[#CLICKS + 1] = {dev, c, v} end}
 end
@@ -287,6 +294,22 @@ def test_click():
     assert last["ok"] is False and "no device" in last["err"], last
     print("  CLICK ....................... OK  (5 cockpit commands pass; 12 dangerous ones refused, the deny list "
           "matches the module's numbers; a DCS error is reported)")
+
+
+def test_ind():
+    m = Mock()
+    m.g.LuaExportStart()
+    m.send("IND 0 20")
+    m.run(0.2)
+    r = [d for d in m.lines() if d["ev"] == "ind"][-1]
+    assert [it["id"] for it in r["items"]] == [3, 9], r                # nil, "", and an error are skipped
+    assert "CRM" in r["items"][0]["text"] and "STT" in r["items"][1]["text"]
+    m.send("IND 8 8")
+    m.run(0.1)
+    assert [it["id"] for it in [d for d in m.lines() if d["ev"] == "ind"][-1]["items"]] == []
+    m.send("IND 0 100000")                                              # the range is capped
+    m.run(0.1)
+    print("  IND ......................... OK  (cockpit display texts read; nil, empty and failing ids skipped)")
 
 
 def test_precision_and_command_defs():
@@ -552,6 +575,32 @@ def test_cockpit():
     assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)
     r, lk, fr, out, link = flow(3, True)
     assert lk["locked"] and fr["fired"], (lk, fr)
+    # ind through the fake, saved to a file
+    with tempfile.TemporaryDirectory() as d:
+        link = FakeLink(cockpit_defs=defs)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            r1 = cockpit.stage_ind(link, "before", d)
+            link.cockpit.aa = True
+            link.cockpit.locked = True
+            r2 = cockpit.stage_ind(link, "locked", d)
+        assert "RWS" in out.getvalue() and "STT" in out.getvalue() and len(os.listdir(d)) == 2, (out.getvalue(), os.listdir(d))
+    # match-alt: the script flies to the target's altitude, and fire without a lock says it is a maddog shot
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.tx, link.cockpit.tz = link.cockpit.tx, link.cockpit.tz
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(12):
+        run.next()
+    link.ac.alt = 6000.0                                                # the target is at 6000 m + the fake's own height
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn = cockpit.hold_fn(run, gains, match_alt=True)
+    assert "matching the target's altitude" in buf.getvalue(), buf.getvalue()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        frr = cockpit.stage_fire(run, gains, defs, force=True)
+    assert frr["fired"] and "maddog" in buf.getvalue() and "stations that changed" in buf.getvalue(), buf.getvalue()
     # a click the module refuses is reported
     link = FakeLink(cockpit_defs=defs)
     run = stick_test.Run(link, None, "cp", lim)
@@ -640,6 +689,7 @@ if __name__ == "__main__":
     test_lua_export()
     test_precision_and_command_defs()
     test_click()
+    test_ind()
     test_udp_link()
     test_fake_end_to_end()
     test_fake_nonlinear()
@@ -647,4 +697,4 @@ if __name__ == "__main__":
     test_cockpit()
     test_stall_message()
     test_install()
-    print("10/10 passed")
+    print("11/11 passed")

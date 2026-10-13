@@ -19,6 +19,7 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py all                 rate, pulses, curve, throttle, hold
     python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
     python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
+    python dcs/stick/stick_test.py ind --tag locked    the text of the cockpit displays (HUD, MFDs): run it with and without a lock
     python dcs/stick/stick_test.py lock                try to lock the target (needs make_mission --stick-test --target)
     python dcs/stick/stick_test.py fire                master arm, release a missile, watch it go
     python dcs/stick/stick_test.py release             panic: axes to 0 (the F-16 holds 1 g, the bank)
@@ -183,6 +184,9 @@ class UdpLink:
 
     def click(self, dev, cmd, value):
         self._send(f"CLICK {int(dev)} {int(cmd)} {float(value):g}")
+
+    def ind(self, first=0, last=49):
+        self._send(f"IND {int(first)} {int(last)}")
 
     def close(self):
         self.rx.close()
@@ -830,12 +834,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
-                                        "click", "radar", "lock", "fire"])
+                                        "click", "radar", "lock", "fire", "ind"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
     ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
+    ap.add_argument("--match-alt", action="store_true",
+                    help="radar, lock, fire: fly to the nearest aircraft's altitude (a radar sees it best there)")
+    ap.add_argument("--alt", type=float, default=None, help="radar, lock, fire: fly at this altitude, m")
+    ap.add_argument("--tag", default="", help="ind: a name for the saved file (before_lock, locked)")
     ap.add_argument("--no-fly", action="store_true", help="radar, lock, fire: do not hold heading, altitude and speed")
     ap.add_argument("--secs", type=float, default=10.0, help="rate: how long to listen (s)")
     ap.add_argument("--size", type=float, default=0.1, help="pulses: stick deflection (default 0.1)")
@@ -884,6 +892,10 @@ def main(argv=None):
         if a.test == "info":
             stage_info(link)
             return summary
+        if a.test == "ind":
+            import cockpit
+            cockpit.stage_ind(link, a.tag, a.out)
+            return summary
         if a.test in ("click", "radar", "lock", "fire"):
             import cockpit
             defs = cockpit.load_defs()
@@ -906,11 +918,13 @@ def main(argv=None):
                     except ValueError as e:
                         raise SystemExit(str(e))
                 elif a.test == "radar":
-                    summary["radar"] = cockpit.stage_radar(run, a.secs, a.out)
+                    fn = cockpit.hold_fn(run, fgains, a.alt, a.match_alt) if fgains else None
+                    summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
                 elif a.test == "lock":
-                    summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan)
+                    summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt)
                 else:
-                    summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force)
+                    summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force, alt=a.alt,
+                                                         match_alt=a.match_alt)
             finally:
                 run.close()
                 link.release()
