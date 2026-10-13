@@ -847,6 +847,8 @@ def main(argv=None):
     ap.add_argument("--aa", action="store_true",
                     help="lock, fire: always press the ICP A-A button (it toggles; by default it is pressed only if the HUD is not in A-A)")
     ap.add_argument("--no-aa", action="store_true", help="lock, fire: never press the ICP A-A button")
+    ap.add_argument("--scan-steps", type=int, default=40, help="lock --scan: cursor steps (default 40)")
+    ap.add_argument("--scan-hold", type=float, default=0.2, help="lock --scan: seconds of cursor slew per step (default 0.2)")
     ap.add_argument("--soi", choices=["left", "right", "none"], default="left",
                     help="lock: first make this MFD the sensor of interest (display management switch); default left")
     ap.add_argument("--release", type=float, default=None,
@@ -944,7 +946,8 @@ def main(argv=None):
                     summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
                 elif a.test == "lock":
                     summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,
-                                                         aa=True if a.aa else False if a.no_aa else None, soi=a.soi)
+                                                         aa=True if a.aa else False if a.no_aa else None, soi=a.soi,
+                                                         scan_steps=a.scan_steps, scan_hold=a.scan_hold)
                 else:
                     summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force, alt=a.alt,
                                                          match_alt=a.match_alt, aa=True if a.aa else False if a.no_aa else None)

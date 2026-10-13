@@ -278,7 +278,8 @@ def _observe(run, secs, fn, label):
     return st
 
 
-def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None, soi="left"):
+def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None, soi="left",
+               scan_steps=40, scan_hold=0.2):
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -330,12 +331,17 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None,
         st = _observe(run, 2.0, fn, "after")
         log.append((label, st.get("state"), st["locked"]))
     if st.get("state") not in ("designated", "stt") and scan:
-        print("  scan: slewing the radar cursor in range and pressing target management up after each move")
-        for i in range(10):
-            click(run, "hotas.THROTTLE_RDR_CURSOR_FWD", defs, hold=0.4, fn=fn, verbose=False)
+        # The radar page's text does not show where the cursor is, so it is found by trying: to the near end first, then
+        # out in small steps with target management up after each (a press away from the contact does nothing).
+        print(f"  scan: cursor to the near end, then out in {scan_steps} steps of {scan_hold:g} s with target "
+              f"management up after each. Watch the radar page: the cursor should go down, then climb.")
+        click(run, "hotas.THROTTLE_RDR_CURSOR_AFT", defs, hold=5.0, fn=fn, verbose=False)
+        for i in range(scan_steps):
+            click(run, "hotas.THROTTLE_RDR_CURSOR_FWD", defs, hold=scan_hold, fn=fn, verbose=False)
             click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
-            st = _observe(run, 1.5, fn, f"scan {i + 1}")
+            st = _observe(run, 0.8, fn, f"scan {i + 1}")
             if st.get("state") in ("designated", "stt"):
+                print(f"  designated after {i + 1} cursor steps ({(i + 1) * scan_hold:.1f} s of slewing from the near end)")
                 break
         if st.get("state") == "designated":
             print("  step: target management up again: single-target track")
