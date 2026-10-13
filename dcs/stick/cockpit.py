@@ -136,6 +136,14 @@ def lock_state(f):
     return "search"
 
 
+def master_mode(f):
+    """True if the HUD draws the A-A master mode, False if not (NAV), None if there is no display data."""
+    rd = f.raw.get("rd") if f is not None else None
+    if rd is None or "aa" not in rd:
+        return None
+    return bool(rd["aa"])
+
+
 def radar_state(f):
     r = f.raw.get("radar") or {}
     return {"targets": _count(r.get("targets")), "locked": _count(r.get("locked")), "present": "radar" in f.raw}
@@ -198,7 +206,7 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
           "contact, target management up; again for stt) and watch it change.\n")
     f = run.next()
     t0, last = f.t, -1.0
-    st, fo, ls = {"targets": 0, "locked": 0}, None, None
+    st, fo, ls, ma = {"targets": 0, "locked": 0}, None, None, None
     samples = {"targets": None, "locked": None, "pay": None, "obj": None}
     prev_rng, prev_t = None, None
     rows = 0
@@ -213,6 +221,7 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
             fo = f
         if "rd" in f.raw:
             ls = lock_state(f)
+            ma = master_mode(f)
         if st["targets"] and samples["targets"] is None:
             samples["targets"] = {"t": f.t, "radar": f.raw.get("radar")}
         if st["locked"] and samples["locked"] is None:
@@ -231,7 +240,8 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
                 near = f"{name} {rng / 1000:6.1f} km, {rel:+6.1f} deg off the nose, {dy:+6.0f} m{clo}"
             else:
                 near = "no other aircraft in the world objects"
-            print(f"  t {f.t - t0:5.1f}  radar: {ls or 'no display data'}   {near}")
+            mode = {True: "A-A", False: "NAV", None: "?"}[ma]
+            print(f"  t {f.t - t0:5.1f}  {mode:3s}  radar: {ls or 'no display data'}   {near}")
             rows += 1
         f = run.next()
     print()
@@ -265,7 +275,7 @@ def _observe(run, secs, fn, label):
     return st
 
 
-def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=False):
+def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None):
     """Try to lock the nearest target: A-A mode, then the target management switch up; with `scan`
     also slew the radar cursor in range between presses. Prints what the radar reports after each step."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -288,13 +298,19 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=False
     def done(st):
         return st.get("state") == "stt" or (st.get("state") is None and st["locked"])
     # The ICP's A-A button toggles (pressed in A-A mode it goes back to the previous mode), so it is pressed
-    # only when asked for (--aa); otherwise the cockpit is assumed to be in A-A already.
+    # only when the HUD says the cockpit is not in A-A (aa=None), or always (aa=True), or never (aa=False).
     steps = [("target management up: designate the target under the cursor", "hotas.STICK_TGT_MANAGE_UP"),
              ("target management up again: single-target track", "hotas.STICK_TGT_MANAGE_UP")]
+    fr_m = last_with(run.frames[-300:], "rd")
+    in_aa = master_mode(fr_m)
+    if aa is None:
+        aa = in_aa is False
     if aa:
         steps.insert(0, ("A-A master mode (ICP)", "ufc.AA"))
+        print("  the HUD is not in A-A: pressing the ICP A-A button first" if in_aa is False else
+              "  pressing the ICP A-A button (asked for)")
     else:
-        print("  A-A master mode is assumed to be selected already (its ICP button toggles: --aa presses it)")
+        print("  A-A master mode: " + ("the HUD shows it" if in_aa else "not known (no display data), assumed selected"))
     for label, spec in steps:
         if done(st):
             break
@@ -353,7 +369,7 @@ def stations(f):
     return out
 
 
-def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=False):
+def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None):
     """Arm, release, watch: master arm on, the weapon release button, then ten seconds of watching the
     payload and the world objects for a missile; master arm back to OFF at the end."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
@@ -374,11 +390,17 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=Fals
     if not st["locked"]:
         print("  no lock: the AIM-120 will be released without a track (a 'maddog' shot: it flies along the nose "
               "and looks for a target with its own seeker). The target is dead ahead, so this can still work.")
+    in_aa = master_mode(f_d)
+    if aa is None:
+        aa = in_aa is False
     if aa:
-        print("  step: A-A master mode")
+        print("  step: A-A master mode (the HUD is not in A-A)" if in_aa is False else "  step: A-A master mode (asked for)")
         click(run, "ufc.AA", defs, fn=fn)
     else:
-        print("  A-A master mode is assumed to be selected already (its ICP button toggles: --aa presses it)")
+        print("  A-A master mode: " + ("the HUD shows it" if in_aa else "not known (no display data), assumed selected"))
+    if f_d is not None and f_d.raw.get("rd", {}).get("msl120") is False and in_aa:
+        print("  WARNING: the HUD does not show the AIM-120 selected: step the missile selection "
+              "(S in DCS, or click hotas.STICK_NWS_AR_DISC_MSL_STEP) and run fire again")
     print("  step: MASTER ARM")
     click(run, "mmc.MasterArmSw", defs, value=1.0, fn=fn)
     settle(run, 1.0, fn)

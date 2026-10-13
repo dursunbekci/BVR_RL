@@ -243,16 +243,21 @@ end
 -- What the displays draw says what the radar is doing (read from `ind` dumps in DCS, 13 October): the radar page
 -- (an MFD showing FCR_Antenna_Azimuth_Tics_Root) draws FCR_TrackedTgtPlaceholder once a target is designated, and
 -- its search cursor (Cursor_Root) and scan limits go when the radar changes to a single-target track.
+-- The HUD draws AA_Gun_Root (and the weapon's HUD_AA_* elements) in the A-A master mode and the text NAV in NAV.
 -- The HUD draws HUD_AA_TD_box on a designated target in view, HUD_TLL (target locator line) when it is out of view.
 local MARK = {fcr = "FCR_Antenna_Azimuth_Tics_Root", tracked = "FCR_TrackedTgtPlaceholder", cursor = "Cursor_Root",
               sam = "FCR_SAM_TargetCarest", limits = "Azimuth_Scan_Limits_Left", td = "HUD_AA_TD_box",
-              tll = "HUD_TLL", threat = "ThreatSymbol1"}
+              tll = "HUD_TLL", threat = "ThreatSymbol1",
+              aa = "AA_Gun_Root", msl120 = "HUD_AA_AIM120_Selected"}
 if type(CFG.markers) == "table" then for k, v in pairs(CFG.markers) do MARK[k] = v end end
 local function has(txt, key) return type(txt) == "string" and txt:find(key, 1, true) ~= nil end
 local function scan_displays()
   local rd = {}
   local ok, hud = pcall(list_indication, 1)
-  if ok then rd.td, rd.tll = has(hud, MARK.td), has(hud, MARK.tll) end
+  if ok then
+    rd.td, rd.tll = has(hud, MARK.td), has(hud, MARK.tll)
+    rd.aa, rd.msl120 = has(hud, MARK.aa), has(hud, MARK.msl120)
+  end
   for id = 2, 6 do                                           -- the MFDs: whichever shows the radar page
     local ok2, txt = pcall(list_indication, id)
     if ok2 and has(txt, MARK.fcr) then

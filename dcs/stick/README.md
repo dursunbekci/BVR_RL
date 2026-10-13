@@ -269,3 +269,11 @@ Marker names are in `MARK` in the module (override with `BVR_STICK_CFG = {marker
 no longer over the target (dropping a lock probably re-centres it; the target was at 57 km, 31 NM) or the 0.2 s press was too
 short. `cursor` slews the radar cursor out and back in range and prints, after each move, which lines of the radar page
 changed: the lines that follow the cursor are what an automatic lock can steer by.
+
+**HUD markers for the master mode (13 October, `inddiff` of a NAV save and an A-A save)**: in NAV the HUD draws the text `NAV`;
+in A-A it draws `AA_Gun_Root`, `4 MRM`, `HUD_AA_AIM120_Selected`, `HUD_AA_AIM120_Reticle` and `HUD_AA_AIM120_Diamond`. The module
+reports `aa` and `msl120` in `rd`; `lock` and `fire` press the ICP A-A button (a toggle) only when the HUD is not in A-A
+(`--aa` always, `--no-aa` never) and `fire` warns if the AIM-120 is not the selected weapon. The radar page was the same in
+both saves apart from the OSB labels and two numbers beside the cursor line (34 and 10, then 35 and 11), which look like the
+search altitude band at the cursor's range. In the latest screenshot the cursor mark sat nearer than the contact: target
+management up designates only a contact near the cursor, which fits a press that does nothing.

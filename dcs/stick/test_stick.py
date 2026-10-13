@@ -604,16 +604,37 @@ def test_cockpit():
     assert lk["locked"] and fr["fired"] and fr["payload"] == [4, 3], (lk, fr)
     assert "LOCKED" in out and "a missile left the aircraft" in out and "TGT-1" in out and "km" in out, out
     assert not link.cockpit.armed, "master arm must be back OFF after fire"
-    # without --aa the A-A button is not pressed (it toggles): a cockpit already in A-A mode stays in it
+    # the A-A button toggles: by default it is pressed only if the HUD is not in A-A
     link = FakeLink(cockpit_defs=defs)
     link.cockpit.aa = True
     run = stick_test.Run(link, None, "cp", lim)
     run.next()
+    for _ in range(25):
+        run.next()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         lk2 = cockpit.stage_lock(run, gains, defs)
-    assert lk2["locked"] and "assumed to be selected already" in buf.getvalue() and "ICP Master" not in buf.getvalue(), buf.getvalue()
+    assert lk2["locked"] and "the HUD shows it" in buf.getvalue() and "ICP A-A button" not in buf.getvalue(), buf.getvalue()
     assert link.cockpit.aa, "A-A mode was toggled off"
+    link = FakeLink(cockpit_defs=defs)                                  # NAV: the button is pressed by itself
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk3 = cockpit.stage_lock(run, gains, defs)
+    assert lk3["locked"] and "the HUD is not in A-A: pressing the ICP A-A button" in buf.getvalue(), buf.getvalue()
+    assert link.cockpit.aa
+    buf = io.StringIO()                                                  # and never when told not to
+    link = FakeLink(cockpit_defs=defs)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    with contextlib.redirect_stdout(buf):
+        lk4 = cockpit.stage_lock(run, gains, defs, aa=False)
+    assert not lk4["locked"] and not link.cockpit.aa, buf.getvalue()
     # the radar cursor has to be slewed first: lock fails without --scan, works with it
     r, lk, fr, out, link = flow(3, False)
     assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)

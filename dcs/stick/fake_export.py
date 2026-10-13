@@ -143,7 +143,8 @@ class FakeCockpit:
         out = {"obj": [tgt] + ([self.missile] if self.missile else []),
                "radar": {"targets": info if self.aa else {}, "locked": info if self.locked else {}},
                "rd": {"fcr": 4, "tracked": self.stage >= 1, "cursor": self.stage < 2, "sam": self.stage == 1,
-                      "limits": self.stage == 1, "td": self.stage == 1, "tll": self.stage == 2, "threat": self.aa},
+                      "limits": self.stage == 1, "td": self.stage == 1, "tll": self.stage == 2, "threat": self.aa,
+                      "aa": self.aa, "msl120": self.aa},
                "pay": {"CurrentStation": 7, "Stations": self.stores}}
         return out
 
