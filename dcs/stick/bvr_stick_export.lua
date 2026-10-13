@@ -71,7 +71,7 @@ local function enc(v, depth)
   local t = type(v)
   if t == "number" then
     if v ~= v or v == math.huge or v == -math.huge then return "null" end
-    return string.format("%.10g", v)
+    return string.format("%.15g", v)         -- 10 digits would cut an epoch time to whole seconds
   elseif t == "boolean" then return v and "true" or "false"
   elseif t == "string" then
     return '"' .. v:gsub('[%c"\\]', function(c)
@@ -149,27 +149,44 @@ local API = {"LoGetModelTime", "LoGetSelfData", "LoGetTrueAirSpeed", "LoGetIndic
 -- The axis command numbers: DCS's own table if it can be read, else 2001-2004.
 local CODES = {pitch = 2001, roll = 2002, rudder = 2003, throttle = 2004}
 local CODES_FROM = "default"
+local SEP = package.config and package.config:sub(1, 1) or "\\"
 local function resolve_codes()
   if CFG.codes then
     for k, v in pairs(CFG.codes) do CODES[k] = v end
     CODES_FROM = "config"; return
   end
-  local ok = pcall(function()
-    local f = loadfile(lfs.currentdir() .. "\\..\\Scripts\\command_defs.lua")
-    if not f then error("no command_defs.lua") end
+  local names = {pitch = "iCommandPlanePitch", roll = "iCommandPlaneRoll",
+                 rudder = "iCommandPlaneRudder", throttle = "iCommandPlaneThrustCommon"}
+  local tried = {}
+  local function from(path)
+    local f, lerr = loadfile(path)
+    if not f then error(tostring(lerr)) end
     local env = setmetatable({}, {__index = _G})
     setfenv(f, env)
     f()
-    local names = {pitch = "iCommandPlanePitch", roll = "iCommandPlaneRoll",
-                   rudder = "iCommandPlaneRudder", throttle = "iCommandPlaneThrustCommon"}
-    local found = 0
+    local found, got = 0, {}
     for k, n in pairs(names) do
       local v = rawget(env, n)
-      if type(v) == "number" then CODES[k] = v; found = found + 1 end
+      if type(v) == "number" then got[k] = v; found = found + 1 end
     end
-    if found == 4 then CODES_FROM = "command_defs.lua" else CODES_FROM = "default (" .. found .. "/4 found)" end
-  end)
-  if not ok then CODES_FROM = "default (command_defs.lua not readable)" end
+    return found, got
+  end
+  local base = nil
+  pcall(function() base = lfs.currentdir() end)
+  if base then
+    for _, rel in ipairs({"Scripts" .. SEP .. "command_defs.lua", ".." .. SEP .. "Scripts" .. SEP .. "command_defs.lua"}) do
+      local path = base .. SEP .. rel
+      local ok, found, got = pcall(from, path)
+      if ok and found == 4 then
+        for k, v in pairs(got) do CODES[k] = v end
+        CODES_FROM = "command_defs.lua"; return
+      end
+      tried[#tried + 1] = path .. ": " .. (ok and (found .. "/4 names found") or tostring(found)):sub(1, 90)
+    end
+  else
+    tried[1] = "lfs.currentdir() not available"
+  end
+  CODES_FROM = "default (" .. table.concat(tried, "; ") .. ")"
 end
 
 -- ── state ──────────────────────────────────────────────────────────────

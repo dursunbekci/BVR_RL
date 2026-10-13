@@ -352,6 +352,8 @@ def stage_rate(run, secs=10.0):
                        + ("" if real_hz >= 20 else " -- try the other source (see the comment in Export.lua)"))
     chk(out["dt_ms_p95"] < 2.5e3 / max(real_hz, 1), f"frame spacing p50 {out['dt_ms_p50']:.1f} ms, "
         f"p95 {out['dt_ms_p95']:.1f}, max {out['dt_ms_max']:.1f}; {out['gaps_over_150ms']} gaps over 150 ms")
+    chk(len(set(rt.tolist())) > 0.5 * n, f"real-time stamps distinct on {len(set(rt.tolist())) * 100 // n}% of frames "
+        f"(low means the stamp is quantised: the command-to-response delay can't be measured)")
     chk(abs(out["model_over_real"] - 1.0) < 0.05, f"model time runs {out['model_over_real']:.2f} x real time "
                                                   f"(1.00 = normal; pause or time acceleration breaks the controller)")
     miss = [k for k, v in cover.items() if v < 0.99]
@@ -374,6 +376,9 @@ def stage_rate(run, secs=10.0):
     if f.tas and all(isinstance(v.get(k), (int, float)) for k in ("x", "y", "z")):
         spd = math.sqrt(v["x"] ** 2 + v["y"] ** 2 + v["z"] ** 2)
         chk(abs(spd - f.tas) < 0.15 * f.tas + 15, f"|velocity vector| {spd:.0f} vs TAS {f.tas:.0f} m/s")
+    if f.mach is not None:
+        chk(0.6 < f.mach < 0.97, f"Mach {f.mach:.2f} at the end: fly the tests at Mach 0.8-0.95 "
+                                 f"(transonic changes the pitch response and the drag)")
     st = link.events.get("stats")
     if st:
         out["lua_stats"] = {k: st.get(k) for k in ("tel_hz", "frame_hz", "event_hz", "frame_dt_max", "event_dt_max", "missing")}

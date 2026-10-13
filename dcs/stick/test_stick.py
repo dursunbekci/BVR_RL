@@ -240,6 +240,44 @@ def test_lua_export():
           f"event at 60 fps; axes every frame, watchdog + RELEASE + PING + CMD, pause, callbacks chained)")
 
 
+def test_precision_and_command_defs():
+    """Epoch-sized times keep their decimals; the command numbers are read from command_defs.lua."""
+    m = Mock()
+    m.g.CLOCK = 1760351071.123456
+    m.g.LuaExportStart()
+    m.run(0.2)
+    raw = [d for p, d in m.sent() if json.loads(d)["ev"] == "tel"]
+    rts = [json.loads(d)["rt"] for d in raw]
+    assert len(set(rts)) > 5 and all(abs(b - a - 1 / 60) < 1e-4 for a, b in zip(rts, rts[1:])), rts[:6]
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "Scripts"))
+        with open(os.path.join(d, "Scripts", "command_defs.lua"), "w") as fh:
+            fh.write("iCommandPlanePitch = 2001\niCommandPlaneRoll = 2002\niCommandPlaneRudder = 2003\n"
+                     "iCommandPlaneThrustCommon = 2004\niCommandOther = 5\n")
+        m = Mock()
+        m.L.execute(f'lfs = {{currentdir = function() return [[{d}]] end}}')
+        # lfs must exist before the module is loaded: boot a second copy
+        m.L.execute(open(os.path.join(HERE, "bvr_stick_export.lua")).read())
+        m.g.LuaExportStart()
+        h = [x for x in m.lines() if x["ev"] == "hello"][-1]
+        assert h["codes_from"] == "command_defs.lua", h["codes_from"]
+        with open(os.path.join(d, "Scripts", "command_defs.lua"), "w") as fh:
+            fh.write("iCommandPlanePitch = 3001\niCommandPlaneRoll = 3002\niCommandPlaneRudder = 3003\n"
+                     "iCommandPlaneThrustCommon = 3004\n")
+        m.L.execute(open(os.path.join(HERE, "bvr_stick_export.lua")).read())
+        m.g.LuaExportStart()
+        h = [x for x in m.lines() if x["ev"] == "hello"][-1]
+        assert h["codes"] == {"pitch": 3001, "roll": 3002, "rudder": 3003, "throttle": 3004}, h
+    m = Mock()
+    m.L.execute('lfs = {currentdir = function() return "/nonexistent" end}')
+    m.L.execute(open(os.path.join(HERE, "bvr_stick_export.lua")).read())
+    m.g.LuaExportStart()
+    h = [x for x in m.lines() if x["ev"] == "hello"][-1]
+    assert h["codes_from"].startswith("default (") and "command_defs.lua" in h["codes_from"], h["codes_from"]
+    print("  precision, command_defs ..... OK  (epoch time keeps its decimals; codes read from command_defs.lua; "
+          "the reason is given when it can't be read)")
+
+
 def test_udp_link():
     import stick_test
     tel_port, cmd_port = 25401, 25402
@@ -378,7 +416,8 @@ if __name__ == "__main__":
         print("lupa is not installed (pip install lupa): skipped")
         sys.exit(0)
     test_lua_export()
+    test_precision_and_command_defs()
     test_udp_link()
     test_fake_end_to_end()
     test_install()
-    print("4/4 passed")
+    print("5/5 passed")
