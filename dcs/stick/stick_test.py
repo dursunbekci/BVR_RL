@@ -695,15 +695,29 @@ def _steps(fr, t_cmd, hdg0, delta, span=22.0):
             "peak_bank_deg": float(np.nanmax(bank) * DEG), "peak_nz": float(np.nanmax([f.nz for f in seg]))}
 
 
-def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0, alt_step=300.0):
+def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0, alt_step=300.0, speed=None):
     need = ("roll_sign", "pitch_sign", "thr_sign")
     if not all(k in gains for k in need) or not gains.get("roll_curve") or not gains.get("pitch_curve"):
         raise SystemExit("hold needs the stick gains and curves and the throttle sign: run `pulses`, `curve` and "
                          "`throttle` first (or `all`).")
     link = run.link
     f0 = run.next()
-    hdg0, alt0, v0 = f0.hdg, f0.alt, f0.tas
     h = Hold(gains, bank_max=math.radians(bank_deg), nz_max=nz_max)
+    if speed is not None and abs(f0.tas - speed) > 6.0:
+        # capture the speed first: the speed loop on the throttle, heading and altitude on the stick
+        print(f"\n  capturing {speed:.0f} m/s from {f0.tas:.0f} (heading and altitude held)")
+        hc, ac = f0.hdg, f0.alt
+        st = {"n": 0}
+
+        def settled(f):
+            st["n"] = st["n"] + 1 if abs(f.tas - speed) < 4.0 else 0
+            return st["n"] > 150                       # within 4 m/s for 3 s
+        fl = drive_until(run, 60.0, lambda f, tau: h.axes(f, hc, ac, v=speed), settled)
+        print(f"  speed {fl.tas:.0f} m/s (Mach {fl.mach:.2f}) after {fl.t - f0.t:.0f} s")
+        if abs(fl.tas - speed) > 10.0:
+            raise Abort(f"could not capture {speed:.0f} m/s in 60 s (at {fl.tas:.0f}): the speed loop does not work")
+        f0 = run.next()
+    hdg0, alt0, v0 = f0.hdg, f0.alt, f0.tas
     d = math.radians(turn)
     T1, T2, T3, T4, T5 = 8.0, 38.0, 68.0, 96.0, 120.0
     plan = [(0.0, hdg0, alt0, v0), (T1, hdg0 + d, alt0, v0), (T2, hdg0, alt0, v0),
@@ -790,6 +804,8 @@ def main(argv=None):
     ap.add_argument("--bank", type=float, default=60.0, help="hold: bank limit, deg (try 75 with --nz 6 once it works)")
     ap.add_argument("--nz", type=float, default=5.0, help="hold: load factor limit, g")
     ap.add_argument("--turn", type=float, default=60.0, help="hold: heading step, deg")
+    ap.add_argument("--speed", type=float, default=None,
+                    help="hold: capture this true airspeed (m/s) first; default: hold the speed you are at")
     ap.add_argument("--axes", default="pitch,roll", help="curve: which axes (default pitch,roll)")
     ap.add_argument("--max-nz", type=float, default=5.5, help="curve: stop a pitch pulse at this load factor change, g")
     ap.add_argument("--min-agl", type=float, default=1500.0, help="stop below this height above ground, m")
@@ -853,7 +869,7 @@ def main(argv=None):
                     save_gains(gains_path, gains)
                     summary["throttle"] = {k: gains[k] for k in ("thr_sign", "thr_u_trim", "thr_slope", "thr_map")}
                 else:
-                    summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn)
+                    summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn, speed=a.speed)
             finally:
                 run.close()
                 link.release()

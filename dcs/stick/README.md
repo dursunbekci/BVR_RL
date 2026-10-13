@@ -167,3 +167,9 @@ each for its own direction; averaging them under-read the pull.
    13 m, bank 0.2 deg, load factor 0.9 to 1.27 g.
 The acceleration column was meaningless (the sweep ran through the transonic drag rise); the speed law is
 now a PI on speed (position u = trim + 0.04 e + integral, code = sign * u), found by `hold`'s speed step.
+
+`throttle` after the fix (13 October, started at Mach 1.13): the sign was found (inverted), RPM 70, 86, 94,
+101, 102 and fuel flow 0.13, 0.48, 0.83, 1.19, 6.0 for u = -1 to +1 (afterburner only at the top), acceleration
+-4.1, -1.5, 0.0, +0.9, +4.2 m/s2 at about 300 m/s: monotonic, thrust-neutral at u = +0.02 (Mach 0.94).
+`hold --speed 280` first captures a speed with the PI loop (heading and altitude held on the stick), then runs
+the steps from there.

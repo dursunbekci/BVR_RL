@@ -326,11 +326,12 @@ def test_udp_link():
     print("  UDP link .................... OK  (frames and events in, AXES/RELEASE/CMD lines out, latency measured)")
 
 
-def _check_fake(roll_sign, pitch_sign, thr_inv=False):
+def _check_fake(roll_sign, pitch_sign, thr_inv=False, speed=None):
     import stick_test
     with tempfile.TemporaryDirectory() as d:
         s = stick_test.main(["all", "--fake", "--out", d, "--fake-roll-sign", str(roll_sign),
-                             "--fake-pitch-sign", str(pitch_sign)] + (["--fake-thr-inverted"] if thr_inv else []))
+                             "--fake-pitch-sign", str(pitch_sign)] + (["--fake-thr-inverted"] if thr_inv else [])
+                            + (["--speed", str(speed)] if speed else []))
         gains = json.load(open(os.path.join(d, "stick_gains.json")))
         files = os.listdir(d)
     assert "aborted" not in s, s
@@ -398,8 +399,8 @@ def test_fake_nonlinear():
 def test_fake_end_to_end():
     import stick_test
     from fake_export import FakeLink
-    for rs, ps, ti in ((1, 1, False), (-1, -1, True), (1, -1, True)):
-        gains, t1 = _check_fake(rs, ps, ti)
+    for rs, ps, ti, sp in ((1, 1, False, None), (-1, -1, True, 215), (1, -1, True, None)):
+        gains, t1 = _check_fake(rs, ps, ti, sp)
     # a limit stops it and releases the axes
     link = FakeLink()
     run = stick_test.Run(link, None, "limit", stick_test.Limits(min_agl=1e5))
