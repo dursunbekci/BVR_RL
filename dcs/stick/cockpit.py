@@ -524,6 +524,49 @@ def ind_text(run, link, ident):
     return _lines(link.ind_items.get(ident, ""))
 
 
+CURSOR_TRIES = [
+    ("A", "throttle cursor switch fwd, then aft (what the keys ; and . press)", [],
+     [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None)]),
+    ("B", "the same after display management LEFT", ["hotas.STICK_DISP_MANAGE_LEFT"],
+     [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None)]),
+    ("C", "the same after display management RIGHT", ["hotas.STICK_DISP_MANAGE_RIGHT"],
+     [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None)]),
+    ("D", "cursor axis Y (3046) to +1 then -1", [],
+     [("hotas.THROTTLE_RDR_CURSOR_Y_AXIS", 1.0, 0.0), ("hotas.THROTTLE_RDR_CURSOR_Y_AXIS", -1.0, 0.0)]),
+    ("E", "cursor axis X (3047) to +1 then -1", [],
+     [("hotas.THROTTLE_RDR_CURSOR_X_AXIS", 1.0, 0.0), ("hotas.THROTTLE_RDR_CURSOR_X_AXIS", -1.0, 0.0)]),
+    ("F", "cursor ENABLE pressed, then the switch fwd and aft", ["hotas.THROTTLE_ENABLE"],
+     [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None)]),
+]
+
+
+def stage_cursortry(run, gains, defs, hold=2.5, only=None, alt=None, match_alt=False):
+    """Try each way of moving the radar cursor in turn, announced, so the pilot can say which moved it.
+    The cursor is on the radar page; the result is read by eye (its position is not in the display text)."""
+    fn = hold_fn(run, gains, alt, match_alt) if gains else None
+    print("  Watch the radar page (A-A mode, radar page up). Each try is announced; note the letters where the\n"
+          "  cursor visibly moves. Hands off the keyboard and mouse.")
+    settle(run, 1.0, fn)
+    done = []
+    for tag, text, pre, moves in CURSOR_TRIES:
+        if only and tag not in only.upper():
+            continue
+        print(f"\n  try {tag}: {text}")
+        settle(run, 1.5, fn)
+        for spec in pre:
+            r = click(run, spec, defs, fn=fn)
+            if r is not None and not r.get("ok"):
+                break
+        for spec, down, up in moves:
+            r = click(run, spec, defs, value=down, hold=hold, fn=fn, release=up)
+            if r is not None and not r.get("ok"):
+                break
+            settle(run, 0.5, fn)
+        done.append(tag)
+    print("\n  Tell me the letters (A-F) where the cursor moved, or 'none'.")
+    return {"tried": done}
+
+
 def stage_cursorprobe(run, gains, defs, steps=8, hold=0.5, out_dir=None, alt=None, match_alt=False):
     """Slew the radar cursor out in range `steps` times and back, and print, after each move, which lines
     of the radar page changed: the ones that follow the cursor (its range, its altitude coverage) are

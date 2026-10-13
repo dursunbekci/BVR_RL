@@ -684,6 +684,15 @@ def test_cockpit():
         res = cockpit.stage_cursorprobe(run, gains, defs, steps=3, hold=0.2)
     text = buf.getvalue()
     assert res["steps"] == 6 and "+ 23" in text and "- 20" in text and "cursor back 3" in text and "+ 20" in text, text
+    # cursortry announces every way and sends the clicks
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_cursortry(run, gains, defs, hold=0.2)
+    assert res["tried"] == list("ABCDEF") and "try D" in buf.getvalue(), buf.getvalue()
     # the sensor of interest: with it on the weapons page, target management does nothing until display management left
     link = FakeLink(cockpit_defs=defs)
     link.cockpit.aa, link.cockpit.soi_left = True, False
