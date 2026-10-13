@@ -79,7 +79,7 @@ def settle(run, secs, fn=None):
     return drive(run, secs, fn)
 
 
-def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True, release=None):
+def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True, release=None, mode=None):
     """Press (and release after `hold` s) a control; `release` sets the value sent afterwards (for axes).
     Returns the module's answers."""
     dev, cmd, down, up = resolve(spec, defs, value)
@@ -87,10 +87,10 @@ def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True, release=
         up = float(release)
     link = run.link
     n0 = link.clicks_seen if hasattr(link, "clicks_seen") else 0
-    link.click(dev, cmd, down)
+    link.click(dev, cmd, down, mode) if mode else link.click(dev, cmd, down)
     settle(run, max(hold, 0.1), fn)
     if up is not None:
-        link.click(dev, cmd, up)
+        link.click(dev, cmd, up, mode) if mode else link.click(dev, cmd, up)
         settle(run, 0.1, fn)
     if verbose:
         r = link.events.get("click")
@@ -537,6 +537,13 @@ CURSOR_TRIES = [
      [("hotas.THROTTLE_RDR_CURSOR_X_AXIS", 1.0, 0.0), ("hotas.THROTTLE_RDR_CURSOR_X_AXIS", -1.0, 0.0)]),
     ("F", "cursor ENABLE pressed, then the switch fwd and aft", ["hotas.THROTTLE_ENABLE"],
      [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None)]),
+    ("G", "the switch fwd and aft through the device's SetCommand (how a key binding delivers it)", [],
+     [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None, "s"), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None, "s")]),
+    ("H", "the switch fwd and aft through the global command queue (LoSetCommand)", [],
+     [("hotas.THROTTLE_RDR_CURSOR_FWD", None, None, "l"), ("hotas.THROTTLE_RDR_CURSOR_AFT", None, None, "l")]),
+    ("I", "the cursor axes through the device's SetCommand: Y then X, +1 and -1", [],
+     [("hotas.THROTTLE_RDR_CURSOR_Y_AXIS", 1.0, 0.0, "s"), ("hotas.THROTTLE_RDR_CURSOR_Y_AXIS", -1.0, 0.0, "s"),
+      ("hotas.THROTTLE_RDR_CURSOR_X_AXIS", 1.0, 0.0, "s"), ("hotas.THROTTLE_RDR_CURSOR_X_AXIS", -1.0, 0.0, "s")]),
 ]
 
 
@@ -557,13 +564,14 @@ def stage_cursortry(run, gains, defs, hold=2.5, only=None, alt=None, match_alt=F
             r = click(run, spec, defs, fn=fn)
             if r is not None and not r.get("ok"):
                 break
-        for spec, down, up in moves:
-            r = click(run, spec, defs, value=down, hold=hold, fn=fn, release=up)
+        for mv in moves:
+            spec, down, up = mv[:3]
+            r = click(run, spec, defs, value=down, hold=hold, fn=fn, release=up, mode=mv[3] if len(mv) > 3 else None)
             if r is not None and not r.get("ok"):
                 break
             settle(run, 0.5, fn)
         done.append(tag)
-    print("\n  Tell me the letters (A-F) where the cursor moved, or 'none'.")
+    print("\n  Tell me the letters (A-I) where the cursor moved, or 'none'.")
     return {"tried": done}
 
 

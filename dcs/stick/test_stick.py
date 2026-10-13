@@ -692,7 +692,7 @@ def test_cockpit():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         res = cockpit.stage_cursortry(run, gains, defs, hold=0.2)
-    assert res["tried"] == list("ABCDEF") and "try D" in buf.getvalue(), buf.getvalue()
+    assert res["tried"] == list("ABCDEFGHI") and "try D" in buf.getvalue(), buf.getvalue()
     # the sensor of interest: with it on the weapons page, target management does nothing until display management left
     link = FakeLink(cockpit_defs=defs)
     link.cockpit.aa, link.cockpit.soi_left = True, False

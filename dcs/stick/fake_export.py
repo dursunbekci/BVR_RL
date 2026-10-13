@@ -217,7 +217,7 @@ class FakeLink:
                              + "Cursor_Range\n%d\n" % (20 + 3 * (self.cockpit.cursor if self.cockpit else 0)) + "-----------"}
         self.events["ind_end"] = {"ev": "ind_end", "count": 2}
 
-    def click(self, dev, cmd, value):
+    def click(self, dev, cmd, value, mode=None):
         ok = self.cockpit.press(dev, cmd, value) if self.cockpit else False
         self.events["click"] = {"ev": "click", "ok": True, "dev": dev, "cmd": cmd, "value": value, "known": ok}
 

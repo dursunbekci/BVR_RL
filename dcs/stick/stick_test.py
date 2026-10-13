@@ -20,7 +20,7 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
     python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
     python dcs/stick/stick_test.py ind --tag locked    the text of the cockpit displays (HUD, MFDs): run it with and without a lock
-    python dcs/stick/stick_test.py cursortry           try six ways of moving the radar cursor, announced; you say which moved it
+    python dcs/stick/stick_test.py cursortry           try nine ways of moving the radar cursor, announced; you say which moved it
     python dcs/stick/stick_test.py cursor              slew the radar cursor and print which lines of the radar page follow it
     python dcs/stick/stick_test.py lock                try to lock the target (needs make_mission --stick-test --target)
     python dcs/stick/stick_test.py fire                master arm, release a missile, watch it go
@@ -187,8 +187,8 @@ class UdpLink:
     def info(self):
         self._send("INFO")
 
-    def click(self, dev, cmd, value):
-        self._send(f"CLICK {int(dev)} {int(cmd)} {float(value):g}")
+    def click(self, dev, cmd, value, mode=None):
+        self._send(f"CLICK {int(dev)} {int(cmd)} {float(value):g}" + (f" {mode}" if mode else ""))
 
     def ind(self, first=0, last=49):
         self._send(f"IND {int(first)} {int(last)}")

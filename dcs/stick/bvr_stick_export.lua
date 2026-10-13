@@ -16,7 +16,7 @@
 --   INFO                                            sends ev = "hello" again
 --   IND [first [last]]                              the text of the cockpit displays (HUD, MFDs, DED), read-only:
 --                                                   one ev = "ind" per display (list_indication of each id), then ev = "ind_end"
---   CLICK <device> <command> <value>                a cockpit switch or HOTAS control, as the
+--   CLICK <device> <command> <value> [c|s|l]                a cockpit switch or HOTAS control, as the
 --                                                   module's own key bindings do (answered with
 --                                                   ev = "click"); numbers from f16c_defs.json
 -- If no AXES line arrives for CFG.watchdog seconds, pitch, roll and rudder go to 0
@@ -316,8 +316,15 @@ local function handle(line)
       if CLICK_DENY_DEVICE[dev] or CLICK_DENY[string.format("%d:%d", dev, c)] then
         send({ev = "click", ok = false, err = "refused", dev = dev, cmd = c, value = v, rt = now()})
       else
-        local ok, err = pcall(function() GetDevice(0):performClickableAction(dev, c, v) end)
-        send({ev = "click", ok = ok, err = (not ok) and tostring(err) or nil, dev = dev, cmd = c, value = v, rt = now()})
+        -- how the command reaches the cockpit: "c" (default) the clickable element, as a mouse click;
+        -- "s" the device's own SetCommand, as the module's key bindings deliver it; "l" the global command queue
+        local mode = w[5] or "c"
+        local ok, err = pcall(function()
+          if mode == "s" then GetDevice(dev):SetCommand(c, v)
+          elseif mode == "l" then LoSetCommand(c, v)
+          else GetDevice(0):performClickableAction(dev, c, v) end
+        end)
+        send({ev = "click", ok = ok, err = (not ok) and tostring(err) or nil, dev = dev, cmd = c, value = v, mode = mode, rt = now()})
       end
     end
   elseif cmd == "IND" then
