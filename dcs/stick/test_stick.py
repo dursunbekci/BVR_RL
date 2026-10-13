@@ -87,7 +87,11 @@ end
 function LoGetPayloadInfo() return {CurrentStation = 7, Stations = {{count = 1, CLSID = "{AIM-120C}"}}} end
 function LoSetCommand(c, v) CMDS[#CMDS + 1] = {c, v} end
 CLICKS = {}
+RD_TD, RD_TRACKED, RD_CURSOR = false, false, true
 function list_indication(id)
+  if id == 1 then return "HUD_glass\n" .. (RD_TD and "HUD_AA_TD_box\n" or "") end
+  if id == 4 then return "FCR_Antenna_Azimuth_Tics_Root\n" .. (RD_CURSOR and "Cursor_Root\n" or "") .. (RD_TRACKED and "FCR_TrackedTgtPlaceholder\n" or "") end
+  if id == 17 then return "CenterOrigin\nThreatSymbol1\n" end
   if id == 3 then return "-----------\nMODE\nCRM\n-----------" end
   if id == 5 then error("no such indicator") end
   if id == 7 then return "" end
@@ -302,9 +306,9 @@ def test_ind():
     m.send("IND 0 20")
     m.run(0.2)
     ev = [d for d in m.lines() if d["ev"] in ("ind", "ind_end")]
-    assert [d["id"] for d in ev if d["ev"] == "ind"] == [3, 9], ev        # nil, "" and an error are skipped
-    assert ev[-1]["ev"] == "ind_end" and ev[-1]["count"] == 2
-    assert "CRM" in ev[0]["text"] and "STT" in ev[1]["text"]
+    assert [d["id"] for d in ev if d["ev"] == "ind"] == [1, 3, 4, 9, 17], ev   # nil, "" and an error are skipped
+    assert ev[-1]["ev"] == "ind_end" and ev[-1]["count"] == 5
+    assert "CRM" in ev[1]["text"] and "STT" in ev[3]["text"]
     m.L.execute("function list_indication(id) if id == 1 then return string.rep('HUD_Element_Name_x\\n', 3000) end end")
     m.send("IND 0 3")
     m.run(0.1)
@@ -313,6 +317,33 @@ def test_ind():
     m.send("IND 0 100000")                                                 # the range is capped
     m.run(0.1)
     print("  IND ......................... OK  (a message per display, then ind_end; long displays kept to 30000 characters)")
+
+
+def test_radar_markers():
+    """The module reads the radar state from what the displays draw."""
+    import cockpit
+    from stick_test import Frame
+    m = Mock()
+    m.g.LuaExportStart()
+    states = []
+    for td, tracked, cursor in ((False, False, True), (True, True, True), (False, True, False)):
+        m.g.RD_TD, m.g.RD_TRACKED, m.g.RD_CURSOR = td, tracked, cursor
+        n0 = len(m.lines())
+        m.run(0.6)
+        rds = [d for d in m.lines()[n0:] if d["ev"] == "tel" and "rd" in d]
+        assert rds, "no rd in the telemetry"
+        states.append((cockpit.lock_state(Frame(rds[-1])), rds[-1]["rd"]))
+    assert [s[0] for s in states] == ["search", "designated", "stt"], states
+    assert states[0][1]["fcr"] == 4 and states[1][1]["td"] is True and states[2][1]["cursor"] is False
+    assert states[0][1]["threat"] is True
+    # no radar page up: no state to read
+    m.L.execute("function list_indication(id) if id == 1 then return 'HUD_glass' end end")
+    n0 = len(m.lines())
+    m.run(0.6)
+    last = [d for d in m.lines()[n0:] if d["ev"] == "tel" and "rd" in d][-1]
+    assert cockpit.lock_state(Frame(last)) == "no radar page", last["rd"]
+    print("  radar markers ............... OK  (search, designated and single-target track read from the radar page; "
+          "no page: no state)")
 
 
 def test_precision_and_command_defs():
@@ -701,6 +732,7 @@ if __name__ == "__main__":
     test_precision_and_command_defs()
     test_click()
     test_ind()
+    test_radar_markers()
     test_udp_link()
     test_fake_end_to_end()
     test_fake_nonlinear()
@@ -708,4 +740,4 @@ if __name__ == "__main__":
     test_cockpit()
     test_stall_message()
     test_install()
-    print("11/11 passed")
+    print("12/12 passed")

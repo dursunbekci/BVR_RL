@@ -121,6 +121,21 @@ def last_with(frames, key):
     return None
 
 
+def lock_state(f):
+    """What the radar is doing, from the display markers the module reads (`rd`): 'stt' (a single-target track),
+    'designated' (a target bugged, search display still up), 'search', 'no radar page', or None (no data)."""
+    rd = f.raw.get("rd") if f is not None else None
+    if rd is None:
+        return None
+    if not rd.get("fcr"):
+        return "no radar page"
+    if rd.get("tracked") and not rd.get("cursor"):
+        return "stt"
+    if rd.get("tracked"):
+        return "designated"
+    return "search"
+
+
 def radar_state(f):
     r = f.raw.get("radar") or {}
     return {"targets": _count(r.get("targets")), "locked": _count(r.get("locked")), "present": "radar" in f.raw}
@@ -174,11 +189,12 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
     """Print the nearest aircraft and the radar's target counts every second; keep samples of the raw
     tables for the first moments there were targets and a lock."""
     import datetime
-    print("\n  one line a second. If nothing is locked yet, lock the target yourself now "
-          "(radar page on the left MFD, cursor over the contact, TMS up) and see the counts change.\n")
+    print("\n  one line a second. The radar state comes from what the radar page draws: search, designated "
+          "(target bugged) or stt (single-target track). Designate the target yourself now (A-A mode, cursor over the "
+          "contact, target management up; again for stt) and watch it change.\n")
     f = run.next()
     t0, last = f.t, -1.0
-    st, fo = {"targets": 0, "locked": 0}, None
+    st, fo, ls = {"targets": 0, "locked": 0}, None, None
     samples = {"targets": None, "locked": None, "pay": None, "obj": None}
     prev_rng, prev_t = None, None
     rows = 0
@@ -191,6 +207,8 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
             st = radar_state(f)
         if "obj" in f.raw:
             fo = f
+        if "rd" in f.raw:
+            ls = lock_state(f)
         if st["targets"] and samples["targets"] is None:
             samples["targets"] = {"t": f.t, "radar": f.raw.get("radar")}
         if st["locked"] and samples["locked"] is None:
@@ -209,7 +227,7 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
                 near = f"{name} {rng / 1000:6.1f} km, {rel:+6.1f} deg off the nose, {dy:+6.0f} m{clo}"
             else:
                 near = "no other aircraft in the world objects"
-            print(f"  t {f.t - t0:5.1f}  radar targets {st['targets']}, locked {st['locked']}   {near}")
+            print(f"  t {f.t - t0:5.1f}  radar: {ls or 'no display data'}   {near}")
             rows += 1
         f = run.next()
     print()
@@ -233,11 +251,13 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
 
 def _observe(run, secs, fn, label):
     fr = settle(run, secs, fn)
-    fr_r, fr_o = last_with(fr, "radar"), last_with(fr, "obj")
+    fr_r, fr_o, fr_d = last_with(fr, "radar"), last_with(fr, "obj"), last_with(fr, "rd")
     st = radar_state(fr_r) if fr_r else {"targets": 0, "locked": 0, "present": False}
     nr = nearest(fr_o) if fr_o else None
     near = f"{nr[0]} {nr[1] / 1000:.1f} km, {nr[2]:+.0f} deg" if nr else "no target in the world objects"
-    print(f"    {label}: radar targets {st['targets']}, locked {st['locked']}   ({near})")
+    ls = lock_state(fr_d) if fr_d else None
+    st["state"] = ls
+    print(f"    {label}: radar {ls or 'no display data'}   ({near})")
     return st
 
 
@@ -256,30 +276,48 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False):
             print("  WARNING: outside the radar's gimbal (about 60 deg) or range (about 80 km): turn towards it first")
     print("  before:")
     st = _observe(run, 1.0, fn, "radar")
-    steps = [("A-A master mode (ICP)", "ufc.AA", None),
-             ("target management switch up (designate / lock)", "hotas.STICK_TGT_MANAGE_UP", None)]
+    if st["state"] is None:
+        print("  no display data from the module (rd): reinstall it (python dcs\\stick\\install_export.py), "
+              "restart the mission. Going on with the radar tables only, which are empty for this module.")
     log = []
-    for label, spec, val in steps:
-        print(f"  step: {label}")
-        click(run, spec, defs, value=val, fn=fn)
-        st = _observe(run, 2.0, fn, "after")
-        log.append((label, st["targets"], st["locked"]))
-        if st["locked"]:
+
+    def done(st):
+        return st.get("state") == "stt" or (st.get("state") is None and st["locked"])
+    steps = [("A-A master mode (ICP)", "ufc.AA"),
+             ("target management up: designate the target under the cursor", "hotas.STICK_TGT_MANAGE_UP"),
+             ("target management up again: single-target track", "hotas.STICK_TGT_MANAGE_UP")]
+    for label, spec in steps:
+        if done(st):
             break
-    if not st["locked"] and scan:
+        if spec == "hotas.STICK_TGT_MANAGE_UP" and st.get("state") in ("search", "no radar page") and log \
+                and log[-1][0].startswith("target management") and st.get("state") != "designated":
+            break                                # the first press designated nothing: more presses would not help
+        print(f"  step: {label}")
+        click(run, spec, defs, fn=fn)
+        st = _observe(run, 2.0, fn, "after")
+        log.append((label, st.get("state"), st["locked"]))
+    if st.get("state") not in ("designated", "stt") and scan:
         print("  scan: slewing the radar cursor in range and pressing target management up after each move")
         for i in range(10):
             click(run, "hotas.THROTTLE_RDR_CURSOR_FWD", defs, hold=0.4, fn=fn, verbose=False)
             click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn, verbose=False)
             st = _observe(run, 1.5, fn, f"scan {i + 1}")
-            if st["locked"]:
+            if st.get("state") in ("designated", "stt"):
                 break
-    if st["locked"]:
-        print("  LOCKED: the radar reports a locked target now")
+        if st.get("state") == "designated":
+            print("  step: target management up again: single-target track")
+            click(run, "hotas.STICK_TGT_MANAGE_UP", defs, fn=fn)
+            st = _observe(run, 2.0, fn, "after")
+    state = st.get("state")
+    if state == "stt":
+        print("  LOCKED: the radar page shows a single-target track")
+    elif state == "designated":
+        print("  DESIGNATED: the target is bugged (the search display is still up); press target management up once more "
+              "for a single-target track, or fire from here")
     else:
         print("  not locked. Look at the left MFD: which radar mode and page is it in, where is the cursor? "
-              "Lock the target by hand, run `radar`, and send me what it prints.")
-    return {"locked": bool(st["locked"]), "steps": log}
+              "Designate the target by hand, run `radar`, and tell me what it prints.")
+    return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state, "steps": log}
 
 
 def payload_count(f):
@@ -311,11 +349,15 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False):
     payload and the world objects for a missile; master arm back to OFF at the end."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
     fr0 = settle(run, 1.5, fn)
-    f_r, f_o, f_p = last_with(fr0, "radar"), last_with(fr0, "obj"), last_with(fr0, "pay")
+    f_r, f_o, f_p, f_d = last_with(fr0, "radar"), last_with(fr0, "obj"), last_with(fr0, "pay"), last_with(fr0, "rd")
     st = radar_state(f_r) if f_r else {"targets": 0, "locked": 0}
-    if not st["locked"] and not force:
-        print("  nothing is locked: run `lock` first (or lock by hand), or add --force to release anyway")
+    state = lock_state(f_d) if f_d else None
+    have = state in ("designated", "stt") or (state is None and st["locked"])
+    print(f"  radar: {state or 'no display data'}")
+    if not have and not force:
+        print("  no target is designated or locked: run `lock` first (or designate by hand), or add --force to release anyway")
         return {"fired": False, "why": "no lock"}
+    st["locked"] = 1 if have else 0
     pay0 = payload_count(f_p) if f_p else None
     objs0 = {o.get("id") for o in ((f_o.raw.get("obj") or []) if f_o else [])}
     sts0 = stations(f_p)

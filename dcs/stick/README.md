@@ -248,3 +248,13 @@ the radar page (FCR_Antenna tics), 5 an MFD showing the SMS A-A page, 6 UHF/VHF,
 RWR. The first dump was cut at 2500 characters; the module now sends each display whole in its own message (up to 30000
 characters) and `ind` ... `inddiff FILE_A FILE_B` lists the lines present in one save and not the other, to see what a
 designation or a lock adds to the HUD and the radar page.
+
+**What the displays say about the radar (13 October, `inddiff` of three saves: not designated, designated, second press)**:
+the first target management up adds `HUD_AA_TD_box` to the HUD and, on the radar page (the MFD that draws
+`FCR_Antenna_Azimuth_Tics_Root`), `FCR_TrackedTgtPlaceholder`, `FCR_trackedTargetSymbolPlaceholder`, `FCR_Symbol_Unknown`,
+`FCR_SAM_Target*` and `Azimuth_Scan_Limits_*`; the second drops `Cursor_Root`, the `FCR_SAM_*` pointers, the scan limits and
+`Max/Min_Search_Altitude` from the radar page (a single-target track), and the HUD swaps the box for `HUD_TLL` (target locator
+line, drawn when the target is out of view) and `HUD_TargetAngleReadout`; the RWR gets a threat symbol from the first press on
+(the target's radar). The module reads these markers every 20 frames (`rd` in the telemetry: fcr, tracked, cursor, sam, limits,
+td, tll, threat) and `cockpit.lock_state` turns them into search / designated / stt; `radar`, `lock` and `fire` use it.
+Marker names are in `MARK` in the module (override with `BVR_STICK_CFG = {markers = {...}}`).

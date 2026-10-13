@@ -43,6 +43,7 @@ local CFG = {
   watchdog = 0.5,        -- s without an AXES line before the axes are zeroed
   stats_every = 5.0,     -- s (real time) between ev = "stats" lines
   allow_raw = true,      -- accept CMD lines
+  ind_every = 20,        -- every Nth frame look for the radar and HUD markers below (0: never)
   allow_click = true,    -- accept CLICK lines (some devices and commands are always refused, below)
   codes = nil,           -- {pitch=, roll=, rudder=, throttle=} to force the command numbers
   version = 1,
@@ -239,6 +240,32 @@ local function hello()
         rt = now()})
 end
 
+-- What the displays draw says what the radar is doing (read from `ind` dumps in DCS, 13 October): the radar page
+-- (an MFD showing FCR_Antenna_Azimuth_Tics_Root) draws FCR_TrackedTgtPlaceholder once a target is designated, and
+-- its search cursor (Cursor_Root) and scan limits go when the radar changes to a single-target track.
+-- The HUD draws HUD_AA_TD_box on a designated target in view, HUD_TLL (target locator line) when it is out of view.
+local MARK = {fcr = "FCR_Antenna_Azimuth_Tics_Root", tracked = "FCR_TrackedTgtPlaceholder", cursor = "Cursor_Root",
+              sam = "FCR_SAM_TargetCarest", limits = "Azimuth_Scan_Limits_Left", td = "HUD_AA_TD_box",
+              tll = "HUD_TLL", threat = "ThreatSymbol1"}
+if type(CFG.markers) == "table" then for k, v in pairs(CFG.markers) do MARK[k] = v end end
+local function has(txt, key) return type(txt) == "string" and txt:find(key, 1, true) ~= nil end
+local function scan_displays()
+  local rd = {}
+  local ok, hud = pcall(list_indication, 1)
+  if ok then rd.td, rd.tll = has(hud, MARK.td), has(hud, MARK.tll) end
+  for id = 2, 6 do                                           -- the MFDs: whichever shows the radar page
+    local ok2, txt = pcall(list_indication, id)
+    if ok2 and has(txt, MARK.fcr) then
+      rd.fcr, rd.tracked, rd.cursor = id, has(txt, MARK.tracked), has(txt, MARK.cursor)
+      rd.sam, rd.limits = has(txt, MARK.sam), has(txt, MARK.limits)
+      break
+    end
+  end
+  local ok3, rwr = pcall(list_indication, 17)
+  if ok3 then rd.threat = has(rwr, MARK.threat) end
+  return rd
+end
+
 -- CLICK refuses whole devices and single commands whatever the script sends: the electrical,
 -- fuel, hydraulic, engine, gear and oxygen systems, the canopy and ejection (CPT_MECH), the flight
 -- control interface and the countermeasures dispenser, and the F-16C's stores jettison and
@@ -385,6 +412,10 @@ local function emit()
                locked = plain(try("LoGetLockedTargetInformation"))}
   end
   if S.n % CFG.payload_every == 1 then f.pay = plain(try("LoGetPayloadInfo")) end
+  if CFG.ind_every > 0 and S.n % CFG.ind_every == 0 then
+    local okd, rd = pcall(scan_displays)
+    if okd then f.rd = rd end
+  end
   send(f)
 end
 

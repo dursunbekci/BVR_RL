@@ -96,7 +96,8 @@ class FakeCockpit:
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
                      (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm"}
-        self.aa = self.locked = self.armed = False
+        self.aa = self.armed = False
+        self.stage = 0                     # 0 searching, 1 designated (bugged), 2 single-target track
         self.cursor, self.scan_needed = 0, scan_needed
         self.stores = {str(i): {"count": 1, "CLSID": "{AIM-120C}"} for i in (1, 2, 8, 9)}
         self.missile = None
@@ -111,7 +112,7 @@ class FakeCockpit:
         elif name == "cursor" and value == 1.0:
             self.cursor += 1
         elif name == "tms_up" and value == 1.0 and self.aa and self.cursor >= self.scan_needed:
-            self.locked = not self.locked if self.locked else True
+            self.stage = (self.stage + 1) % 3          # a third press drops the track
         elif name == "arm":
             self.armed = value == 1.0
         elif name == "release" and value == 1.0 and self.aa and self.armed and self.missile is None:   # no lock: a maddog shot
@@ -123,6 +124,14 @@ class FakeCockpit:
                             "x": self.ac0.x, "y": self.ac0.alt, "z": self.ac0.z}
         return name is not None
 
+    @property
+    def locked(self):
+        return self.stage >= 1
+
+    @locked.setter
+    def locked(self, v):
+        self.stage = 2 if v else 0
+
     def extras(self, ac):
         rng = math.hypot(self.tx - ac.x, self.tz - ac.z)
         tgt = {"id": 10, "name": "F-16C_50", "unit": "TGT-1", "coal": 1, "l1": 1, "l2": 1,
@@ -130,6 +139,8 @@ class FakeCockpit:
         info = {"1": {"ID": 1, "distance": rng}}
         out = {"obj": [tgt] + ([self.missile] if self.missile else []),
                "radar": {"targets": info if self.aa else {}, "locked": info if self.locked else {}},
+               "rd": {"fcr": 4, "tracked": self.stage >= 1, "cursor": self.stage < 2, "sam": self.stage == 1,
+                      "limits": self.stage == 1, "td": self.stage == 1, "tll": self.stage == 2, "threat": self.aa},
                "pay": {"CurrentStation": 7, "Stations": self.stores}}
         return out
 
@@ -188,9 +199,9 @@ class FakeLink:
         pass
 
     def ind(self, first=0, last=49):
-        locked = bool(self.cockpit and self.cockpit.locked)
-        self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if locked else "") + "-----------",
-                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if locked else "RWS\n") + "-----------"}
+        stage = self.cockpit.stage if self.cockpit else 0
+        self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "") + "-----------",
+                          4: "-----------\nFCR_Antenna_Azimuth_Tic_0\nFCR_Mode\n" + ("STT\n" if stage == 2 else "RWS\n") + "-----------"}
         self.events["ind_end"] = {"ev": "ind_end", "count": 2}
 
     def click(self, dev, cmd, value):
