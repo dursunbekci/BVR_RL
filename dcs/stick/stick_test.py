@@ -842,6 +842,9 @@ def main(argv=None):
                                         "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
     ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
+    ap.add_argument("--mode", choices=["c", "s", "l"], default=None,
+                    help="click: c = clickable element (mouse click), s = device SetCommand (key binding), l = LoSetCommand "
+                         "(default: s for HOTAS controls, c for the rest)")
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
@@ -936,7 +939,7 @@ def main(argv=None):
                         raise SystemExit("click NAME (e.g. hotas.STICK_TGT_MANAGE_UP, ufc.AA, left_osb.4) or click DEVICE COMMAND")
                     spec = a.args if len(a.args) == 2 and all(x.lstrip("-").isdigit() for x in a.args) else a.args[0]
                     try:
-                        cockpit.click(run, spec, defs, value=a.value, hold=a.hold, release=a.release)
+                        cockpit.click(run, spec, defs, value=a.value, hold=a.hold, release=a.release, mode=a.mode)
                     except ValueError as e:
                         raise SystemExit(str(e))
                 elif a.test == "cursortry":

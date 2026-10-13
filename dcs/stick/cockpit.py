@@ -86,11 +86,12 @@ def click(run, spec, defs, value=None, hold=0.2, fn=None, verbose=True, release=
     if release is not None:
         up = float(release)
     link = run.link
-    n0 = link.clicks_seen if hasattr(link, "clicks_seen") else 0
-    link.click(dev, cmd, down, mode) if mode else link.click(dev, cmd, down)
+    if mode is None and dev == defs["devices"].get("HOTAS"):
+        mode = "s"      # measured: the HOTAS cursor does not move when clicked like a mouse, only through SetCommand
+    link.click(dev, cmd, down, mode)
     settle(run, max(hold, 0.1), fn)
     if up is not None:
-        link.click(dev, cmd, up, mode) if mode else link.click(dev, cmd, up)
+        link.click(dev, cmd, up, mode)
         settle(run, 0.1, fn)
     if verbose:
         r = link.events.get("click")
