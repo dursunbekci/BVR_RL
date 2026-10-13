@@ -804,6 +804,19 @@ def test_cockpit():
     with contextlib.redirect_stdout(io.StringIO()):          # stt=True: target management up after the bug
         res = cockpit.stage_twslock(run, gains, defs, stt=True)
     assert res["locked"], res
+    # a target 30 deg off the nose is outside a scan centred on the nose: the cursor is moved to it first
+    link = FakeLink(cockpit_defs=defs, scan_needed=999)
+    c, ac = link.cockpit, link.ac
+    c.aa = True
+    a = ac.hdg + math.radians(30.0)
+    c.tx, c.tz = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_twslock(run, gains, defs)
+    assert res["designated"] and "cursor to the right edge" in buf.getvalue() and abs(c.cur_az - 30.0) < 5.0, \
+        (c.cur_az, buf.getvalue()[-800:])
     print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
           "end on a fake cockpit, with and without a cursor scan; the aimed lock off the nose and above; master arm ends OFF; refusals are shown)")
 

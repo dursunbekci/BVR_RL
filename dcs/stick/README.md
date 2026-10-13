@@ -377,3 +377,10 @@ management right and the held weapon release, a few seconds.
 TWS track (HUD 4 -> 3 MRM, `AIM_120C` in the world objects, closing on the target). The two offset runs after it set up on the
 missile, not the target (it was the nearest world object, lofting at 10 km, 17 km away): `nearest()` now takes aircraft only
 (level1 1), so a weapon in flight is never the target.
+
+**TWS off the nose (13 October)**: with the target 28 deg off the nose, 13 presses over 36 s bugged nothing: in TWS the page reads
+A2, a scan 25 deg either side of the cursor, and the cursor was in the middle. `lock --tws` now moves the cursor to the
+target's bearing first, without reading it back: held toward the target's side for 1.5 s it stops at the display's edge
+(60 deg), and a timed move back of (60 - |bearing|) / 100 deg/s leaves it near the target (100 deg/s from an aim run: 39 deg in
+0.37 s); 10 deg of error is still inside the scan. Once a track is bugged the scan follows the bug. (The fake now slews at 100
+deg/s and its target-under-cursor window is 5 deg either side.)

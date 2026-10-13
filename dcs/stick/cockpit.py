@@ -735,6 +735,23 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
     return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state}
 
 
+CURSOR_AZ_RATE = 100.0     # deg/s the radar cursor moves sideways while held (DCS, an aim run: 39 deg in 0.37 s)
+
+
+def center_cursor(run, defs, fn, az):
+    """Put the radar cursor near azimuth `az` (deg off the nose) without reading it back: held toward that side it
+    stops at the display's edge (60 deg), from where a timed move back leaves it at az. TWS scans 25 deg either side
+    of the cursor, so 10 deg off is still a hit."""
+    az = max(-58.0, min(58.0, az))
+    side = "RIGHT" if az >= 0 else "LEFT"
+    back = "LEFT" if az >= 0 else "RIGHT"
+    click(run, f"hotas.THROTTLE_RDR_CURSOR_{side}", defs, hold=1.5, fn=fn, verbose=False)
+    t = (60.0 - abs(az)) / CURSOR_AZ_RATE
+    if t > 0.03:
+        click(run, f"hotas.THROTTLE_RDR_CURSOR_{back}", defs, hold=t, fn=fn, verbose=False)
+    print(f"  cursor to the {side.lower()} edge, then {t:.2f} s back: about {az:+.0f} deg, where the target is")
+
+
 def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=False, max_secs=35.0):
     """Lock without the cursor: target management right held 1.5 s puts the radar in TWS (track while scan), where it
     builds track files by itself; a short target management right bugs a track once there is one (measured in DCS:
@@ -784,6 +801,9 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
             print("  the radar did not go to TWS with a short or a held press: tell me what the radar page shows after "
                   "target management right (Right Ctrl + Right) by hand, short and held")
             return {"locked": False, "designated": False, "state": st.get("state"), "why": "no TWS"}
+    nr = nearest(last_with(run.frames[-100:], "obj"))
+    if nr is not None and st.get("state") not in ("designated", "stt"):
+        center_cursor(run, defs, fn, nr[2])          # the scan is 25 deg either side of the cursor, not the nose
     # The track file takes a scan or two, and the bug shows on the page a moment after the press: in DCS a press
     # every 1.2 s, looked at 0.8 s later, bugged nothing in 25 s, while presses 1.5 s apart after 8 s of scanning
     # bugged it on the fifth. So: 4 s of scanning, then a press every 2 s, watching the page for 2 s after each

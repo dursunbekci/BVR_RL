@@ -124,8 +124,8 @@ class FakeCockpit:
         # their switch is held, at these rates; the radar page reads the cursor's place as a bearing and range from
         # a bullseye 485 km ahead of the start, in whole magnetic degrees and NM, as the F-16C's does
         self.cur_r, self.cur_az, self.el = 20.0, 0.0, 0.0
-        self.rate = {"cursor": ("cur_r", 6.0), "cursor_aft": ("cur_r", -6.0), "cursor_left": ("cur_az", -50.0),
-                     "cursor_right": ("cur_az", 50.0), "elev_up": ("el", 6.0), "elev_down": ("el", -6.0)}
+        self.rate = {"cursor": ("cur_r", 6.0), "cursor_aft": ("cur_r", -6.0), "cursor_left": ("cur_az", -100.0),
+                     "cursor_right": ("cur_az", 100.0), "elev_up": ("el", 6.0), "elev_down": ("el", -6.0)}
         self.held = {}
         self.bx = ac.x + 485000.0 * math.cos(ac.hdg)     # DCS's default bullseye was 262 NM away
         self.bz = ac.z + 485000.0 * math.sin(ac.hdg)
@@ -168,8 +168,8 @@ class FakeCockpit:
         elif name == "tms_right" and value == 1.0 and self.aa and self.soi_left:
             if self.mode == "RWS":
                 self.mode = "TWS"
-            elif self.stage == 0 and abs(self.target_polar()[1]) < 60.0:
-                self.stage = 1                     # bug the (only) track
+            elif self.stage == 0 and abs(self.target_polar()[1] - self.cur_az) <= 25.0:
+                self.stage = 1                     # bug the (only) track: TWS scans 25 deg either side of the cursor
         elif name == "tms_down" and value != 0.0:            # the keymap sends -1.0
             self.stage = 0
         elif name == "arm":
@@ -201,7 +201,7 @@ class FakeCockpit:
             return False
         tr, taz, talt = self.target_polar()
         hi, lo = self.coverage(tr)
-        return abs(self.cur_r - tr) < 1.5 and abs(self.cur_az - taz) < 3.0 and lo <= talt / 1000.0 <= hi
+        return abs(self.cur_r - tr) < 1.5 and abs(self.cur_az - taz) < 5.0 and lo <= talt / 1000.0 <= hi
 
     def fcr_page(self):
         ac = self.ac0
