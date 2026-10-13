@@ -330,8 +330,8 @@ class Hold:
     KP_V = 0.04            # throttle position per m/s of speed error
     KI_V = 0.002           # and per m/s of error and second
 
-    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0):
-        self.g, self.bank_max, self.nz_max = gains, bank_max, nz_max
+    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0, vs_max=30.0):
+        self.g, self.bank_max, self.nz_max, self.vs_max = gains, bank_max, nz_max, vs_max
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
@@ -355,7 +355,7 @@ class Hold:
         else:
             roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
         gam = math.asin(max(-0.9, min(0.9, vs / tas)))
-        vs_cmd = max(-30.0, min(30.0, 0.12 * (alt - f.alt)))
+        vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
         gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
         nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
         nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
@@ -855,6 +855,9 @@ def main(argv=None):
                          "to its altitude, then designate: works off the nose and off the level")
     ap.add_argument("--bull", type=float, nargs=2, metavar=("X", "Z"), default=None,
                     help="lock --aim: the bullseye in DCS metres (x north, z east); by default it is read off the radar page")
+    ap.add_argument("--ref", choices=["auto", "own", "bull"], default="auto",
+                    help="lock --aim: what the radar page's cursor readout is measured from (auto: switch it to our own "
+                         "aircraft through the DED if it reads from a bullseye)")
     ap.add_argument("--relock", action="store_true", help="lock --aim: drop an existing lock first (target management down)")
     ap.add_argument("--magvar", type=float, default=None,
                     help="lock --aim: magnetic variation, deg east (default: from the module's magnetic heading)")
@@ -975,7 +978,7 @@ def main(argv=None):
                     summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
                 elif a.test == "lock" and a.aim:
                     summary["lock"] = cockpit.stage_aimlock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
-                                                            bull=a.bull, magvar=a.magvar, relock=a.relock,
+                                                            bull=a.bull, magvar=a.magvar, relock=a.relock, ref=a.ref,
                                                             aa=True if a.aa else False if a.no_aa else None)
                 elif a.test == "lock":
                     summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,

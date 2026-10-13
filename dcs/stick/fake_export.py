@@ -102,6 +102,9 @@ class FakeCockpit:
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_RIGHT"]): "cursor_right",
                      (d["HOTAS"], h["THROTTLE_ANT_ELEV_UP"]): "elev_up",
                      (d["HOTAS"], h["THROTTLE_ANT_ELEV_DOWN"]): "elev_down",
+                     (d["UFC"], defs["commands"]["ufc"]["DIG8_FIX"]): "dig8",
+                     (d["UFC"], defs["commands"]["ufc"]["DIG0_M_SEL"]): "dig0",
+                     (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_19"]): "rng_up",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_LEFT"]): "dms_left",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
@@ -118,14 +121,16 @@ class FakeCockpit:
         self.ac0 = ac
         # the B-scope cursor (range NM, azimuth deg off the nose) and the antenna elevation (deg): they move while
         # their switch is held, at these rates; the radar page reads the cursor's place as a bearing and range from
-        # a bullseye 30 km ahead of the start, in whole magnetic degrees and NM, as the F-16C's does
+        # a bullseye 485 km ahead of the start, in whole magnetic degrees and NM, as the F-16C's does
         self.cur_r, self.cur_az, self.el = 20.0, 0.0, 0.0
         self.rate = {"cursor": ("cur_r", 6.0), "cursor_aft": ("cur_r", -6.0), "cursor_left": ("cur_az", -50.0),
                      "cursor_right": ("cur_az", 50.0), "elev_up": ("el", 6.0), "elev_down": ("el", -6.0)}
         self.held = {}
-        self.bx = ac.x + 30000.0 * math.cos(ac.hdg)
-        self.bz = ac.z + 30000.0 * math.sin(ac.hdg)
+        self.bx = ac.x + 485000.0 * math.cos(ac.hdg)     # DCS's default bullseye was 262 NM away
+        self.bz = ac.z + 485000.0 * math.sin(ac.hdg)
         self.scale = 40
+        self.bull_on = True                # the readout is from the bullseye until the DED's BULL page toggles it
+        self.last_key = None
 
     def press(self, dev, cmd, value):
         name = self.code.get((dev, cmd))
@@ -152,6 +157,12 @@ class FakeCockpit:
                 self.stage >= 1 or self.cursor >= self.scan_needed or self.under_cursor()):
             # scan_needed 999: only by aiming; a designated target goes to a track on the next press wherever the cursor is
             self.stage = (self.stage + 1) % 3          # a third press drops the track
+        elif name in ("dig8", "dig0") and value == 1.0:
+            if name == "dig0" and self.last_key == "dig8":       # M-SEL on the BULL page (LIST, 0, 8, 0)
+                self.bull_on = not self.bull_on
+            self.last_key = name
+        elif name == "rng_up" and value == 1.0:
+            self.scale = min(160, self.scale * 2)
         elif name == "tms_down" and value != 0.0:            # the keymap sends -1.0
             self.stage = 0
         elif name == "arm":
@@ -189,8 +200,9 @@ class FakeCockpit:
         ac = self.ac0
         a = ac.hdg + math.radians(self.cur_az)
         cx, cz = ac.x + self.cur_r * 1852.0 * math.cos(a), ac.z + self.cur_r * 1852.0 * math.sin(a)
-        brg = (math.degrees(math.atan2(cz - self.bz, cx - self.bx)) - MAGVAR) % 360
-        rng = math.hypot(cx - self.bx, cz - self.bz) / 1852.0
+        ox, oz = (self.bx, self.bz) if self.bull_on else (ac.x, ac.z)
+        brg = (math.degrees(math.atan2(cz - oz, cx - ox)) - MAGVAR) % 360
+        rng = math.hypot(cx - ox, cz - oz) / 1852.0
         hi, lo = self.coverage(self.cur_r)
         tuc = self.under_cursor() or (self.aa and self.scan_needed and self.cursor == self.scan_needed)
         return ("Range_Scale_Root\nchildren are {\nRange_Scale_Value\n%d\n}\nFCR_Bearing_range\n%d %d\n"

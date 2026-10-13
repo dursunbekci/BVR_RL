@@ -199,16 +199,17 @@ def hold_fn(run, gains, alt=None, match_alt=False):
             break
         f0 = run.next()
     off, dalt = HOLD_OPTS.get("offset"), HOLD_OPTS.get("dalt")
-    h = Hold(gains, bank_max=math.radians(45 if off is not None else 30))
+    h = Hold(gains, bank_max=math.radians(60 if off is not None else 30), vs_max=80.0 if dalt is not None else 30.0)
     hdg, v = f0.hdg, f0.tas
     if off is not None:
         nr = nearest(f0) if "obj" in f0.raw else None
         if nr is None:
+            off = None
             print("  --offset: no other aircraft in the world objects; keeping the heading")
         else:
             hdg = (f0.hdg + math.radians(nr[2] - off)) % (2 * math.pi)
-            print(f"  turning to put the target {off:+.0f} deg off the nose (it is {nr[2]:+.0f} now): heading "
-                  f"{math.degrees(hdg):.0f}")
+            print(f"  turning to keep the target {off:+.0f} deg off the nose (it is {nr[2]:+.0f} now), following it "
+                  f"as it moves")
     if (match_alt or dalt is not None) and alt is None:
         alt = target_altitude(run)
         if alt is not None and dalt is not None:
@@ -220,7 +221,18 @@ def hold_fn(run, gains, alt=None, match_alt=False):
         else:
             print(f"  flying {dalt:+.0f} m from the target's altitude: {alt:.0f} m (now {f0.alt:.0f})")
     alt = alt if alt is not None else f0.alt
-    return lambda f, tau: h.axes(f, hdg, alt, v=v)
+    if off is None:
+        return lambda f, tau: h.axes(f, hdg, alt, v=v)
+    state = {"hdg": hdg}
+
+    def follow(f, tau):
+        # the heading that puts the target `off` deg off the nose, from each new world-objects frame
+        if "obj" in f.raw and f.hdg is not None:
+            nr = nearest(f)
+            if nr is not None:
+                state["hdg"] = (f.hdg + math.radians(nr[2] - off)) % (2 * math.pi)
+        return h.axes(f, state["hdg"], alt, v=v)
+    return follow
 
 
 def stage_radar(run, secs=20.0, out_dir=None, fn=None):
@@ -289,8 +301,8 @@ def stage_radar(run, secs=20.0, out_dir=None, fn=None):
     return {"targets_seen": samples["targets"] is not None, "locked_seen": samples["locked"] is not None}
 
 
-def settle_setup(run, fn, max_secs=90.0):
-    """With --offset or --dalt: fly until the target sits where asked (within 3 deg, 150 m) or max_secs."""
+def settle_setup(run, fn, max_secs=75.0):
+    """With --offset or --dalt: fly until the target sits where asked (within 3 deg, 300 m) or max_secs."""
     off, dalt = HOLD_OPTS.get("offset"), HOLD_OPTS.get("dalt")
     if fn is None or (off is None and dalt is None):
         return
@@ -304,7 +316,7 @@ def settle_setup(run, fn, max_secs=90.0):
         if nr is None:
             return
         ok_az = off is None or abs(nr[2] - off) < 3.0
-        ok_alt = dalt is None or abs(-nr[3] - dalt) < 150.0
+        ok_alt = dalt is None or abs(-nr[3] - dalt) < 300.0
         print(f"    setting up: target {nr[1] / 1000:.1f} km, {nr[2]:+.0f} deg off the nose, we are {-nr[3]:+.0f} m "
               f"from its altitude")
         if (ok_az and ok_alt) or f.t - t0 > max_secs:
@@ -479,7 +491,7 @@ def _polar(f, x, z):
 
 
 def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar=None, max_iter=200, aa=None,
-                  relock=False):
+                  relock=False, ref="auto"):
     """Lock the nearest aircraft wherever it is within the radar's limits: put the radar cursor on the point where
     the radar should show it (its bearing and range from the world objects), steering by the cursor's bullseye
     bearing and range on the radar page; tilt the antenna until the target's altitude is inside the height
@@ -524,7 +536,38 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
 
     def true_brg(b):
         return math.radians(b + magvar)
-    if bull is None:
+    def own_like(info, f):
+        """Does the readout look like bearing and range from our own aircraft (inside the scale and the radar's
+        60 deg), rather than from a bullseye far away?"""
+        if info["br"] is None or f.hdg is None:
+            return False
+        b, r = info["br"]
+        rel = math.degrees((true_brg(b) - f.hdg + math.pi) % (2 * math.pi) - math.pi)
+        return r <= (info["scale"] or 160) + 1 and abs(rel) <= 62.0
+    if bull is not None:
+        ref = "bull"
+    if ref == "auto":
+        if own_like(info, run.frames[-1]):
+            ref = "own"
+        else:
+            # The F-16 shows the cursor's bearing and range from the bullseye while BULLSEYE is selected in the DED,
+            # from our own aircraft when it is not: whole degrees and NM from here are fine everywhere, and no edge of
+            # the display (where the radar changes its range scale) has to be visited to find a bullseye.
+            print("  the readout is from a bullseye: switching it to our own aircraft (ICP: LIST, 0 MISC, 8 BULL, "
+                  "0 M-SEL, RTN)")
+            for spec in ("ufc.LIST", "ufc.DIG0_M_SEL", "ufc.DIG8_FIX", "ufc.DIG0_M_SEL", "ufc.DCS_RTN"):
+                click(run, spec, defs, fn=fn, verbose=False)
+                settle(run, 0.35, fn)
+            settle(run, 0.5, fn)
+            info = page()
+            if own_like(info, run.frames[-1]):
+                ref = "own"
+                print(f"    now {info['br'][0]:03d}/{info['br'][1]}: from our own aircraft")
+            else:
+                ref = "bull"
+                print(f"    still {info['br'][0]:03d}/{info['br'][1]}: not switched; finding the bullseye instead "
+                      f"(slower). Turn BULLSEYE off by hand in the DED (LIST, 0, 8, M-SEL) and run again")
+    if ref == "bull" and bull is None:
         # the B-scope's bottom edge is range 0: with the cursor there, its bullseye bearing and range are the aircraft's
         print("  finding the bullseye: cursor to the bottom edge (it is then on our own aircraft)")
         prev = None
@@ -542,14 +585,36 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
         print(f"    the cursor reads {b:03d}/{r} at our position: the bullseye is {rb:.0f} NM away, {azb:+.0f} deg off "
               f"the nose" + ("   (far: whole degrees and NM make the aim coarse; the missions from make_mission.py put "
                               "it near the fight)" if rb > 60 else ""))
+
+    def cursor_at(info, fr):
+        """Where the readout puts the cursor, in DCS metres."""
+        b, r = info["br"]
+        ox, oz = (fr.x, fr.z) if ref == "own" else bull
+        return ox + r * NM * math.cos(true_brg(b)), oz + r * NM * math.sin(true_brg(b))
+    f = run.frames[-1]
+    tgt0 = _target_obj(last_with(run.frames[-100:], "obj"))
+    r0 = _polar(f, tgt0["x"], tgt0["z"])[0] if tgt0 else 30.0
+    # keep the target inside the range scale: at the top edge the radar steps the scale and the cursor jumps
+    for _ in range(3):
+        if not info["scale"] or r0 < 0.85 * info["scale"]:
+            break
+        s0 = info["scale"]
+        click(run, "left_osb.19", defs, fn=fn, verbose=False)
+        settle(run, 0.6, fn)
+        info = page()
+        print(f"    range scale {s0} -> {info['scale']} NM (target at {r0:.0f} NM)")
+        if info["scale"] is None or info["scale"] <= s0:
+            break
     rate = {"r": 6.0, "az": 40.0}                       # NM/s and deg/s while held, learnt as we go
     # The readout is whole degrees and NM from the bullseye: half a degree there is this far sideways at the cursor,
     # plus half a mile, twice (once placing the bullseye, once reading the cursor). Far from the bullseye that is
     # more than the target symbol is wide, so the tolerances and the search around the point grow with it.
-    rb_nm = math.hypot(f.x - bull[0], f.z - bull[1]) / NM
-    unc_nm = 2 * (rb_nm * math.tan(math.radians(0.5)) + 0.5)
-    tgt0 = _target_obj(last_with(run.frames[-100:], "obj"))
-    r0 = _polar(f, tgt0["x"], tgt0["z"])[0] if tgt0 else 30.0
+    if ref == "own":
+        rb_nm = 0.0
+        unc_nm = r0 * math.tan(math.radians(0.5)) + 0.5
+    else:
+        rb_nm = math.hypot(f.x - bull[0], f.z - bull[1]) / NM
+        unc_nm = 2 * (rb_nm * math.tan(math.radians(0.5)) + 0.5)
     unc_az = math.degrees(unc_nm / max(r0, 5.0))
     tol0 = {"range": 0.8, "azimuth": max(1.5, 0.6 * unc_az)}
     # First the cursor goes straight to the target's place. If nothing is under it there, rows are swept: from W deg
@@ -559,7 +624,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
     W = max(3.0, unc_az)
     n_rows = max(2, int(math.ceil(unc_nm)))
     offsets = [(0.0, 0.0)] + [(ro, -W) for i in range(n_rows + 1) for ro in ((0.0,) if i == 0 else (float(i), -float(i)))]
-    print(f"  the readout places the cursor to about {unc_nm:.1f} NM ({unc_az:.1f} deg at the target's range)"
+    print(f"  readout from {'our own aircraft' if ref == 'own' else 'the bullseye'}: it places the cursor to about {unc_nm:.1f} NM ({unc_az:.1f} deg at the target's range)"
           + ("" if rb_nm < 60 else f": coarse, because the bullseye is {rb_nm:.0f} NM away. Use the mission from "
                                    f"make_mission.py, which puts it near the fight"))
     k, elev_tries, found = 0, 0, False
@@ -576,7 +641,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
             print(f"  the target is {az_p:+.0f} deg off the nose: outside the radar's azimuth limits (60). Turn first.")
             break
         b, r = info["br"]
-        cx, cz = bull[0] + r * NM * math.cos(true_brg(b)), bull[1] + r * NM * math.sin(true_brg(b))
+        cx, cz = cursor_at(info, f)
         r_c, az_c = _polar(f, cx, cz)
         if info["tuc"]:
             print(f"  a target is under the cursor (altitude {info['tuc_alt']} kft; ours {talt:.0f} kft): target "
@@ -645,7 +710,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
         if info2["br"] is not None and what in ("range", "azimuth"):
             b2, r2 = info2["br"]
             f2 = run.frames[-1]
-            r_c2, az_c2 = _polar(f2, bull[0] + r2 * NM * math.cos(true_brg(b2)), bull[1] + r2 * NM * math.sin(true_brg(b2)))
+            r_c2, az_c2 = _polar(f2, *cursor_at(info2, f2))
             moved = abs(r_c2 - r_c) if what == "range" else abs(az_c2 - az_c)
             key, lo_hi = ("r", (0.5, 60.0)) if what == "range" else ("az", (5.0, 400.0))
             if moved > (1.0 if what == "range" else max(1.5, unc_az)):      # above the readout's rounding

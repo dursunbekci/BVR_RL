@@ -754,28 +754,31 @@ def test_cockpit():
                                       "soi": True}, cockpit.fcr_info(real)
     # the aimed lock: a target 30 deg right and 2 km above, which only aiming designates (scan_needed 999), is locked;
     # one 70 deg off the nose is refused
-    # a bullseye 485 km ahead (DCS's default one was 262 NM away) makes the readout coarse: rows are swept; --relock
-    # drops a lock that is already there
-    for az, dh, ok, bull_km, locked0 in ((30.0, 2000.0, True, 30, False), (70.0, 0.0, False, 30, False),
-                                         (-20.0, 3000.0, True, 485, False), (10.0, 0.0, True, 30, True)):
+    # the aimed lock: the readout is switched from the bullseye (485 km ahead, like DCS's default) to our own aircraft
+    # through the DED; with ref="bull" the bullseye is found at the bottom edge instead (slower, coarse); --relock
+    # drops a lock that is already there; a target 70 deg off the nose is refused
+    for az, dh, ok, ref, locked0 in ((30.0, 2000.0, True, "auto", False), (70.0, 0.0, False, "auto", False),
+                                     (-20.0, 3000.0, True, "bull", False), (10.0, 6000.0, True, "auto", True)):
         link = FakeLink(cockpit_defs=defs, scan_needed=999)
         c, ac = link.cockpit, link.ac
         c.aa = True
         c.stage = 2 if locked0 else 0
         a = ac.hdg + math.radians(az)
         c.tx, c.tz, c.ty = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a), ac.alt + dh
-        c.bx, c.bz = ac.x + bull_km * 1000 * math.cos(ac.hdg), ac.z + bull_km * 1000 * math.sin(ac.hdg)
         run = stick_test.Run(link, None, "cp", lim)
         run.next()
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            res = cockpit.stage_aimlock(run, gains, defs, relock=locked0)
+            res = cockpit.stage_aimlock(run, gains, defs, relock=locked0, ref=ref)
         out = buf.getvalue()
         assert res["locked"] == ok, out[-1500:]
         assert ok or "outside the radar's azimuth limits" in out, out[-800:]
         assert "magnetic variation +6.0" in out, out[:800]
-        assert ("coarse, because the bullseye is 261 NM away" in out) == (bull_km == 485), out[:1200]
+        assert ("readout from our own aircraft" in out) == (ref == "auto"), out[:1200]
+        assert (ref == "bull") == ("coarse, because the bullseye is 261 NM away" in out), out[:1200]
         assert not locked0 or ("drops the lock first" in out and "after: radar search" in out), out[:1200]
+        n_aim = out.count("    aim ")
+        assert ref == "bull" or not ok or n_aim <= 12, (n_aim, out[-1500:])     # straight there, no hunting
     print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
           "end on a fake cockpit, with and without a cursor scan; the aimed lock off the nose and above; master arm ends OFF; refusals are shown)")
 

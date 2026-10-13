@@ -335,3 +335,16 @@ target's place is rows swept left to right in 2-deg steps timed by the learnt sl
 small when the bullseye is far), at the target's range and then 1, 2, ... NM either side; slew rates are learnt only from
 moves bigger than the readout's error. On the fake, with the bullseye 261 NM away, it locks at 0, +30, -20 (+3 km) and
 +45 deg (-3 km); with it 15 NM away, in 7 to 11 steps without a sweep.
+
+**Aimed lock, second DCS runs (13 October)**: the cockpit still read from a bullseye 141-265 NM away (the mission's bullseye did
+not reach the Viper, or the old mission was flown), and finding it at the bottom edge made the radar step its range scale down
+(the cursor then moved under 1 NM per 0.6 s pulse) and back up near the top (the cursor jumped from about 30 NM back to 12, again
+and again: 150 steps in the 30 deg run). The `--offset` setup aimed at a heading fixed at the start, so the angle drifted past
+30 to 39-41 deg; the climb for `--dalt` was held to 30 m/s. Changes: (1) the readout is read from our own aircraft: with
+BULLSEYE off in the DED the F-16's radar page gives the cursor's bearing and range from ownship; `lock --aim` sees a bullseye
+readout (range beyond the scale or bearing outside 60 deg) and switches it with the ICP (LIST, 0 MISC, 8 BULL, 0 M-SEL, RTN),
+checks the readout again, and only falls back to the bottom-edge bullseye if the switch did not take (`--ref own|bull` forces
+one); no visit to an edge, 1 deg and 1 NM anywhere. (2) If the target is beyond 85% of the range scale the scale is stepped up
+with OSB 19 first. (3) Missions put the bullseye 450 km away on purpose, so a bullseye readout cannot look like an ownship one.
+(4) `--offset` follows the target's bearing (the heading is recomputed from every world-objects frame) with up to 60 deg of
+bank; `--dalt` climbs at up to 80 m/s; setup is done within 3 deg and 300 m. On the fake: locks in 2-6 steps after the switch.
