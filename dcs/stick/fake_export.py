@@ -25,7 +25,7 @@ def wrap_pi(a):
 
 class FakeAircraft:
     def __init__(self, roll_sign=1, pitch_sign=1, rudder_sign=1, roll_rate=2.6, nz_per_cmd=6.0,
-                 thr_trim=0.1, thr_slope=4.0, v0=250.0, alt0=7000.0, hdg0=1.0, noise=0.0, curve_pow=1.0):
+                 thr_trim=0.1, thr_slope=4.0, v0=250.0, alt0=7000.0, hdg0=1.0, noise=0.0, curve_pow=1.0, push_limit_g=None):
         self.roll_sign, self.pitch_sign, self.rudder_sign = roll_sign, pitch_sign, rudder_sign
         self.roll_rate, self.nz_per_cmd = roll_rate, nz_per_cmd
         self.thr_trim, self.thr_slope = thr_trim, thr_slope
@@ -34,6 +34,7 @@ class FakeAircraft:
         self.hdg, self.gamma, self.bank, self.p, self.nz = hdg0, 0.0, 0.0, 0.0, 1.0
         self.thr, self.thr_f, self.beta = thr_trim, thr_trim, 0.0
         self.noise = noise
+        self.push_limit_g = push_limit_g      # the push side stops here (DCS: about 2.7 g below 1 g)
         self.curve_pow = curve_pow        # > 1: small commands do little, as DCS's did at 0.1
 
     def step(self, ax, dt=DT):
@@ -46,6 +47,8 @@ class FakeAircraft:
         self.p += (self.roll_sign * self.roll_rate * roll - self.p) * dt / 0.12
         self.bank = wrap_pi(self.bank + self.p * dt)
         nz_t = 1.0 + self.pitch_sign * self.nz_per_cmd * pitch
+        if self.push_limit_g is not None:
+            nz_t = max(nz_t, 1.0 - self.push_limit_g)
         self.nz += (nz_t - self.nz) * dt / 0.10
         self.gamma += G * (self.nz * math.cos(self.bank) - math.cos(self.gamma)) / self.V * dt
         self.hdg = (self.hdg + (G * self.nz * math.sin(self.bank) / (self.V * max(math.cos(self.gamma), 0.2))

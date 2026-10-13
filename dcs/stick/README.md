@@ -150,3 +150,9 @@ Pitch is flat near the centre (0.15 g at 0.1, 0.63 at 0.2, 1.66 at 0.35, 2.70 at
 The stop is now 5.5 g up and -2 g down; a pitch pulse stopped at the limit is marked `*` and
 left out of the stored curve (it is only a lower bound). Re-measure only pitch with
 `stick_test.py curve --axes pitch` (`--max-nz` changes the limit).
+
+`curve --axes pitch` with the 5.5 g stop (13 October): pull side 0.13 g at 0.1, 0.64 at 0.2, 1.68 at
+0.35, 2.7 at 0.5, 4.3 at 0.75, 4.8 at 1.0 (1 s pulses, so about 5.8 g in all at Mach 0.9, 6.8 km: enough
+for a level turn at about 80 deg of bank). The push side stops at about -2.7 g of change whatever the
+command. Pull and push are now stored separately (`pitch_curve`, `pitch_push_curve`) and `hold` uses
+each for its own direction; averaging them under-read the pull.

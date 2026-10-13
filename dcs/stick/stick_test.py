@@ -311,7 +311,9 @@ class Hold:
         nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
         nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
         if g.get("pitch_curve"):
-            pitch = g["pitch_sign"] * inverse(g["pitch_curve"], nz_cmd - 1.0)
+            d = nz_cmd - 1.0                     # pull and push have their own curves
+            cmd = inverse(g["pitch_curve"], d) if d >= 0 else -inverse(g.get("pitch_push_curve") or g["pitch_curve"], -d)
+            pitch = g["pitch_sign"] * cmd
         else:
             pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
         if v is not None:
@@ -516,7 +518,7 @@ def stage_curve(run, gains, amps=CURVE_AMPS, axes=("pitch", "roll"), max_bank_ch
     print(f"\n  pulses of {', '.join(f'{a:g}' for a in amps)} each way, stopped early at 20 deg of bank, "
           f"{max_nz_change:g} g or {math.degrees(max_pitch_change):.0f} deg of pitch")
     for axis in axes:
-        rows = []
+        rows, push = [], {}
         for a in amps:
             peak, held, early = {}, {}, {}
             for sgn in (1, -1):
@@ -554,23 +556,31 @@ def stage_curve(run, gains, amps=CURVE_AMPS, axes=("pitch", "roll"), max_bank_ch
                                 lambda f: abs(f.pitch - gam0) < math.radians(1.5) and abs(f.nz - nz0) < 0.25)
             resp = (peak[1] - peak[-1]) / 2.0
             lim = early[1] or early[-1]
-            if axis == "pitch" and early[-1] and not early[1]:
-                resp, lim = peak[1], False        # the push side hit the -2 g floor: the pull side is the measurement
+            if axis == "pitch":
+                # pull and push are different: the F-16 pushes over to about -1.7 g and no further
+                ps = int(gains["pitch_sign"])
+                resp = abs(peak[ps])                      # the pull side: what a turn needs
+                lim = early[ps]
+                push[a] = abs(peak[-ps])
             rows.append((a, peak[1], peak[-1], resp, 0.5 * (held[1] + held[-1]), lim))
         k = DEG if axis == "roll" else 1.0
         unit = "deg/s" if axis == "roll" else "g"
-        print(f"\n  {axis}: {'rate' if axis == 'roll' else 'load factor change'} against command")
-        print(f"  {'cmd':>6}{'+ pulse':>12}{'- pulse':>12}{'response':>12}{'per unit':>12}{'held s':>9}")
+        print(f"\n  {axis}: {'rate' if axis == 'roll' else 'load factor change, pull side (push in the last column)'} "
+              f"against command")
+        print(f"  {'cmd':>6}{'+ pulse':>12}{'- pulse':>12}{'response':>12}{'per unit':>12}{'held s':>9}"
+              + (f"{'push':>8}" if axis == "pitch" else ""))
         for a, pp, pm, resp, held, er in rows:
             mark = " *" if er and axis == "pitch" else "  "
             print(f"  {a:>6.2f}{pp * k:>+12.2f}{pm * k:>+12.2f}{abs(resp) * k:>9.2f} {unit:<4}{abs(resp) * k / a:>8.2f}"
-                  f"{held:>9.2f}{mark}")
+                  f"{held:>9.2f}{mark}" + (f"{push[a]:>7.2f}g" if axis == "pitch" else ""))
         keep = [r for r in rows if not (axis == "pitch" and r[5])]
         if axis == "pitch" and len(keep) < len(rows):
             print(f"  * stopped early at the limit: at least this much; left out of the stored curve")
         if len(keep) < 3:
             keep = rows
         out[f"{axis}_curve"] = [[r[0], abs(r[3])] for r in keep]
+        if axis == "pitch":
+            out["pitch_push_curve"] = [[r[0], push[r[0]]] for r in rows]
         sgn_resp = [1 if r[3] >= 0 else -1 for r in rows]
         if len(set(sgn_resp)) > 1:
             print(f"  WARN: the {axis} response changes sign along the sweep")
@@ -782,7 +792,7 @@ def main(argv=None):
                     gains.update(stage_curve(run, gains, axes=tuple(a.axes.split(",")),
                                              max_nz_change=a.max_nz))
                     save_gains(gains_path, gains)
-                    summary["curve"] = {k: gains[k] for k in ("pitch_curve", "roll_curve") if k in gains}
+                    summary["curve"] = {k: gains[k] for k in ("pitch_curve", "pitch_push_curve", "roll_curve") if k in gains}
                 elif name == "throttle":
                     gains.update(stage_throttle(run, gains))
                     save_gains(gains_path, gains)

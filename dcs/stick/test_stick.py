@@ -379,6 +379,16 @@ def test_fake_nonlinear():
         stick_test.main(["curve", "--fake", "--axes", "pitch", "--out", d])
         after = json.load(open(os.path.join(d, "stick_gains.json")))
         assert "pitch_curve" in after and after["roll_sign"] == before["roll_sign"], after.keys()
+        # DCS pulls to +4.8 g but pushes only to -2.7 g: the curves must not be averaged
+        link = FakeLink(curve_pow=2.0, push_limit_g=2.7)
+        run = stick_test.Run(link, None, "c", stick_test.Limits(min_agl=0, min_alt=0))
+        out = stick_test.stage_curve(run, before, axes=("pitch",))
+        pull, push = dict(map(tuple, out["pitch_curve"])), dict(map(tuple, out["pitch_push_curve"]))
+        assert abs(pull[0.75] - 6 * 0.5625) < 0.15 and abs(push[0.75] - 2.7) < 0.15, (pull, push)
+        assert push[1.0] < 2.8 and pull[0.75] > push[0.75] + 0.4, (pull, push)
+        g2 = {**before, **out}
+        h = stick_test.Hold(g2)
+        assert stick_test.inverse(out["pitch_push_curve"], 2.0) < 1.0 and stick_test.inverse(out["pitch_curve"], 3.0) < 1.0
     print(f"  stick_test.py, non-linear ... OK  (response ~ command squared measured; hold through the inverse "
           f"turns {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank)")
 
