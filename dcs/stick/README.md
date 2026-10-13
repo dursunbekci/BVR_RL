@@ -372,3 +372,8 @@ scanning): the track file is what takes the time. Run again with the radar alrea
 press bugged it, 5 s after the start (4 of them the initial scan). In TWS the page reads A2 (25 deg either side of the cursor).
 For the policy this means: put the radar in TWS once, early in the fight, and leave it there; FIRE is then a press of target
 management right and the held weapon release, a few seconds.
+
+**Launch at a TWS bug (13 October)**: `lock --tws` from RWS bugged the target 13 s after entering TWS; `fire` launched at the bugged
+TWS track (HUD 4 -> 3 MRM, `AIM_120C` in the world objects, closing on the target). The two offset runs after it set up on the
+missile, not the target (it was the nearest world object, lofting at 10 km, 17 km away): `nearest()` now takes aircraft only
+(level1 1), so a weapon in flight is never the target.

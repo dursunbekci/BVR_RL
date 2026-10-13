@@ -154,13 +154,16 @@ def radar_state(f):
 
 
 def nearest(f):
-    """The nearest other aircraft in the world objects: (name, range m, relative bearing deg, altitude difference m)."""
+    """The nearest other aircraft in the world objects (weapons in flight left out): (name, range m, relative bearing
+    deg, altitude difference m)."""
     objs = f.raw.get("obj") or []
     if not objs or f.x is None:
         return None
     best = None
     for o in objs:
         if o.get("x") is None or o.get("z") is None:
+            continue
+        if o.get("l1") not in (None, 1):          # aircraft only: a missile in flight (level1 4) is not the target
             continue
         dx, dz = o["x"] - f.x, o["z"] - f.z
         dy = (o.get("y") or 0.0) - (f.alt or 0.0)

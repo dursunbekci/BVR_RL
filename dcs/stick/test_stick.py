@@ -745,6 +745,11 @@ def test_cockpit():
         cockpit.HOLD_OPTS.update(offset=None, dalt=None)
     nr = cockpit.nearest(cockpit.last_with(run.frames[-300:], "obj"))
     assert abs(nr[2] - 30.0) < 5.0 and abs(-nr[3] - 500.0) < 200.0 and res["steps"] > 0, (nr, buf.getvalue()[-800:])
+    # the nearest aircraft, not the AIM-120 just fired (DCS: the next runs set up on the missile, 17 km away and lofting)
+    fr = stick_test.Frame({"me": {"x": 0.0, "z": 0.0, "alt": 7000.0, "hdg": 0.0},
+                           "obj": [{"name": "AIM_120C", "l1": 4, "l2": 4, "x": 17000.0, "y": 10000.0, "z": 0.0},
+                                   {"unit": "TGT-1", "l1": 1, "l2": 1, "x": 40000.0, "y": 7000.0, "z": 0.0}]})
+    assert cockpit.nearest(fr)[0] == "TGT-1", cockpit.nearest(fr)
     # the radar page's text as DCS wrote it (13 October): the cursor's bullseye bearing and range, coverage, scale, SOI
     real = ["Range_Scale_Root", "children are {", "Range_Scale_Value_Outlined", "40", "Range_Scale_Value", "40", "}",
             "FCR_Bearing_range", "174 245", "DBG_AA_RadarContactsKeeper", "Cursor_Root", "children are {",
