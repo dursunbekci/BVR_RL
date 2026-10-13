@@ -76,7 +76,7 @@ function LoGetAltitudeAboveSeaLevel() return 7000.5 end
 function LoGetAltitudeAboveGroundLevel() return 6800.0 end
 function LoGetADIPitchBankYaw() return 0.02, -0.3, 1.25 end
 function LoGetVectorVelocity() return {x = 80.0, y = 1.5, z = 237.0} end
-function LoGetEngineInfo() return {RPM = {left = 88.0, right = 88.5}, fuel_internal = 2100.0} end
+function LoGetEngineInfo() return {RPM = {left = 88.0, right = 0}, FuelConsumption = {left = 1.2, right = 0}, fuel_internal = 2100.0} end
 function LoGetWorldObjects()
   return {[10] = {Name = "Su-27", UnitName = "Bandit-1", GroupName = "R", CoalitionID = 1, Type = {level1 = 1, level2 = 1},
                   LatLongAlt = {Lat = 42.5, Long = 41.9, Alt = 9000}, Heading = 3.0, Pitch = 0, Bank = 0,
@@ -158,7 +158,7 @@ def test_lua_export():
     assert not cmds(), "axes were touched before any command"
     f = Frame(tel[-1])
     assert abs(f.alt - 7000.5) < 1e-6 and abs(f.hdg - 1.25) < 1e-9 and abs(f.bank + 0.3) < 1e-9
-    assert abs(f.tas - 250.5) < 1e-9 and abs(f.nz - 1.2) < 1e-9 and abs(f.rpm - 88.25) < 1e-9 and f.agl == 6800.0
+    assert abs(f.tas - 250.5) < 1e-9 and abs(f.nz - 1.2) < 1e-9 and f.rpm == 88.0 and f.fuel_flow == 1.2 and f.agl == 6800.0
     assert f.t > 50 and f.rt > 1000
     objs = [d for d in tel if d.get("obj")]
     assert objs and len(objs[-1]["obj"]) == 1 and objs[-1]["obj"][0]["unit"] == "Bandit-1", "own aircraft not excluded"
@@ -326,18 +326,20 @@ def test_udp_link():
     print("  UDP link .................... OK  (frames and events in, AXES/RELEASE/CMD lines out, latency measured)")
 
 
-def _check_fake(roll_sign, pitch_sign):
+def _check_fake(roll_sign, pitch_sign, thr_inv=False):
     import stick_test
     with tempfile.TemporaryDirectory() as d:
         s = stick_test.main(["all", "--fake", "--out", d, "--fake-roll-sign", str(roll_sign),
-                             "--fake-pitch-sign", str(pitch_sign)])
+                             "--fake-pitch-sign", str(pitch_sign)] + (["--fake-thr-inverted"] if thr_inv else []))
         gains = json.load(open(os.path.join(d, "stick_gains.json")))
         files = os.listdir(d)
     assert "aborted" not in s, s
     assert gains["roll_sign"] == roll_sign and gains["pitch_sign"] == pitch_sign, gains
     assert abs(gains["roll_rate"] - 2.6) < 0.15, gains            # rad/s per unit
     assert abs(gains["nz_per_cmd"] - 6.0) < 0.4, gains            # g per unit
-    assert abs(gains["thr_trim"] - 0.1) < 0.12 and 3.0 < gains["thr_slope"] < 5.0, gains
+    assert gains["thr_sign"] == (-1 if thr_inv else 1), gains["thr_sign"]
+    assert abs(gains["thr_u_trim"] - 0.1) < 0.2 and 2.5 < gains["thr_slope"] < 5.5, gains
+    assert "thr_trim" not in gains and "rpm_by_code" not in gains
     assert s["rate"]["real_hz"] > 49 and not s["rate"]["checks_failed"], s["rate"]
     h = s["hold"]
     t1 = h["heading_steps"][0]
@@ -396,8 +398,8 @@ def test_fake_nonlinear():
 def test_fake_end_to_end():
     import stick_test
     from fake_export import FakeLink
-    for rs, ps in ((1, 1), (-1, -1), (1, -1)):
-        gains, t1 = _check_fake(rs, ps)
+    for rs, ps, ti in ((1, 1, False), (-1, -1, True), (1, -1, True)):
+        gains, t1 = _check_fake(rs, ps, ti)
     # a limit stops it and releases the axes
     link = FakeLink()
     run = stick_test.Run(link, None, "limit", stick_test.Limits(min_agl=1e5))

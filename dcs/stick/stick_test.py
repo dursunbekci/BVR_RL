@@ -72,15 +72,21 @@ def _first(*vals):
     return None
 
 
-def _rpm(eng):
+def _both(eng, key):
+    """A per-engine reading ({'left':, 'right':} or a number): the Viper has one engine and DCS
+    reports 0 for the other, so the largest value is the engine's."""
     if not isinstance(eng, dict):
         return None
-    r = eng.get("RPM")
+    r = eng.get(key)
     if isinstance(r, dict):
         vals = [_num(r.get(k)) for k in ("left", "right")]
         vals = [v for v in vals if v is not None]
-        return sum(vals) / len(vals) if vals else None
+        return max(vals) if vals else None
     return _num(r)
+
+
+def _rpm(eng):
+    return _both(eng, "RPM")
 
 
 class Frame:
@@ -100,6 +106,7 @@ class Frame:
         self.nz = _num(g.get("y"))
         self.aoa, self.beta, self.vs = _num(d.get("aoa")), _num(d.get("beta")), _num(d.get("vs"))
         self.rpm = _rpm(d.get("eng"))
+        self.fuel_flow = _both(d.get("eng"), "FuelConsumption")
         self.x, self.z = _num(me.get("x")), _num(me.get("z"))
         self.vel = d.get("vel") or {}
         self.ax = ax
@@ -288,9 +295,13 @@ class Hold:
     TAU_GAMMA = 3.0        # s to take out a flight-path error
     TAU_SPEED = 8.0        # s to take out a speed error
 
+    KP_V = 0.04            # throttle position per m/s of speed error
+    KI_V = 0.002           # and per m/s of error and second
+
     def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0):
         self.g, self.bank_max, self.nz_max = gains, bank_max, nz_max
         self.prev = None
+        self.integral, self.t_speed = 0.0, None
 
     def axes(self, f, hdg, alt, v=None, thr=None):
         g = self.g
@@ -317,7 +328,15 @@ class Hold:
         else:
             pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
         if v is not None:
-            thr = g.get("thr_trim", 0.0) + ((v - tas) / self.TAU_SPEED) / g.get("thr_slope", 6.0)
+            # speed -> throttle position u (+1 = most thrust) by PI; the axis code is sign * u
+            # (DCS's throttle code is inverted: -1 is afterburner, +1 idle)
+            err = v - (f.tas or tas)
+            dt = 0.0 if self.t_speed is None else max(0.0, min(0.2, f.t - self.t_speed))
+            self.t_speed = f.t
+            u = g.get("thr_u_trim", 0.0) + self.KP_V * err + self.integral
+            if abs(u) < 1.0 or err * u < 0:                 # no wind-up against the stop
+                self.integral = max(-0.8, min(0.8, self.integral + self.KI_V * err * dt))
+            thr = g.get("thr_sign", 1) * max(-1.0, min(1.0, u))
         out = {"pitch": max(-1.0, min(1.0, pitch)), "roll": max(-1.0, min(1.0, roll)), "rudder": 0.0}
         if thr is not None:
             out["throttle"] = max(-1.0, min(1.0, thr))
@@ -419,7 +438,7 @@ def stage_rate(run, secs=10.0):
         print(("  ok    " if ok else "  WARN  ") + text)
     out["checks_failed"] = [t for ok, t in checks if not ok]
     print(f"\n  now: {f.alt:.0f} m, {f.tas:.0f} m/s (Mach {f.mach:.2f}), heading {f.hdg * DEG:.0f} deg, "
-          f"bank {f.bank * DEG:+.1f}, nz {f.nz:.2f}, RPM {f.rpm}")
+          f"bank {f.bank * DEG:+.1f}, nz {f.nz:.2f}, RPM {f.rpm:.1f}, fuel flow {f.fuel_flow}")
     return out
 
 
@@ -589,42 +608,73 @@ def stage_curve(run, gains, amps=CURVE_AMPS, axes=("pitch", "roll"), max_bank_ch
     return out
 
 
-def stage_throttle(run, gains, hold_s=7.0, bank_max=math.radians(30)):
-    """Throttle code against RPM and acceleration, holding heading and altitude on the stick."""
-    link = run.link
-    need = ("roll_sign", "roll_rate", "pitch_sign", "nz_per_cmd")
-    if not all(k in gains for k in need):
-        raise SystemExit("throttle needs the stick gains: run `pulses` first (or `all`).")
+def stage_throttle(run, gains, hold_s=6.0, bank_max=math.radians(30)):
+    """Which way the throttle code goes, and RPM and fuel flow against it, holding heading and
+    altitude on the stick. DCS's code turned out inverted (-1 afterburner, +1 idle), so the
+    sign is found first, from two moderate codes, and the levels are then run in thrust order
+    u = -1 ... +1. A level ends early if the speed changes by 35 m/s during it, leaves the start speed by 120 m/s or passes Mach 1.15."""
+    need = ("roll_sign", "pitch_sign")
+    if not all(k in gains for k in need) or not (gains.get("roll_curve") or gains.get("roll_rate")):
+        raise SystemExit("throttle needs the stick gains: run `pulses` and `curve` first (or `all`).")
     f0 = run.next()
-    hdg, alt = f0.hdg, f0.alt
+    hdg, alt, tas0 = f0.hdg, f0.alt, f0.tas
     h = Hold(gains, bank_max=bank_max)
-    levels = [0.0, -1.0, -0.5, 0.0, 0.5, 1.0]
 
-    def law(thr):
-        return lambda f, tau: h.axes(f, hdg, alt, thr=thr)
-    print(f"\n  holding heading {hdg * DEG:.0f} deg and {alt:.0f} m on the stick; throttle code for {hold_s:.0f} s each")
+    def level(code, secs):
+        k0, st = len(run.frames), {}
+
+        def done(f):
+            st.setdefault("v0", f.tas)
+            return abs(f.tas - st["v0"]) > 35 or abs(f.tas - tas0) > 120 or (f.mach or 0) > 1.15
+        drive_until(run, secs, lambda f, tau: h.axes(f, hdg, alt, thr=code), done)
+        return run.frames[k0:]
+
+    def tail(fr, secs, attr):
+        t1 = fr[-1].t
+        v = [getattr(f, attr) for f in fr if f.t >= t1 - secs and getattr(f, attr) is not None]
+        return float(np.mean(v)) if v else float("nan")
+
+    print(f"\n  heading {hdg * DEG:.0f} deg, {alt:.0f} m, {tas0:.0f} m/s (Mach {f0.mach:.2f}) held on the stick")
+    a_fr, b_fr = level(0.5, 4.0), level(-0.5, 4.0)
+    ra, rb = tail(a_fr, 1.5, "rpm"), tail(b_fr, 1.5, "rpm")
+    fa, fb = tail(a_fr, 1.5, "fuel_flow"), tail(b_fr, 1.5, "fuel_flow")
+    more_at_minus = (rb > ra + 1.0) or (rb >= ra - 1.0 and fb > fa * 1.1)
+    more_at_plus = (ra > rb + 1.0) or (ra >= rb - 1.0 and fa > fb * 1.1)
+    sign = -1 if more_at_minus and not more_at_plus else 1 if more_at_plus and not more_at_minus else 0
+    print(f"  probe: code +0.5 -> RPM {ra:.1f}, fuel {fa:.2f};  code -0.5 -> RPM {rb:.1f}, fuel {fb:.2f}")
+    if sign == 0:
+        print("  WARN: the probe codes gave no clear difference: is the throttle axis overridden (physical "
+              "throttle assigned)? Assuming a positive code is more thrust.")
+        sign = 1
+    print(f"  throttle code is {'INVERTED: -1 is the most thrust' if sign < 0 else 'normal: +1 is the most thrust'}")
     rows = []
-    for thr in levels:
-        fr = drive(run, hold_s, law(thr))
-        tail = _window(fr, fr[0].t + hold_s - 5.0, fr[-1].t + 1e-6)
-        ts, tas = series(tail, "t"), series(tail, "tas")
-        acc = float(np.polyfit(ts - ts[0], tas, 1)[0]) if len(tail) > 5 else float("nan")
-        rpm = float(np.nanmean(series(_window(fr, fr[-1].t - 2.0, fr[-1].t + 1e-6), "rpm")))
-        rows.append((thr, rpm, acc, float(tail[-1].tas), float(tail[-1].alt - alt)))
-    print(f"\n  {'code':>6}{'RPM %':>9}{'accel m/s2':>12}{'TAS':>8}{'alt err':>9}")
-    for thr, rpm, acc, tas, da in rows[1:]:
-        print(f"  {thr:>+6.2f}{rpm:>9.1f}{acc:>+12.2f}{tas:>8.0f}{da:>+9.0f}")
-    xs, ys, rp = (np.array([r[i] for r in rows[1:]]) for i in (0, 2, 1))
-    slope, icpt = np.polyfit(xs, ys, 1)
-    out = {"thr_slope": float(slope), "thr_trim": float(np.clip(-icpt / slope, -1, 1)) if slope > 0 else 0.0,
-           "rpm_by_code": {f"{r[0]:+.2f}": r[1] for r in rows[1:]}}
-    if slope <= 0 or rp[-1] <= rp[0]:
-        print("  WARN: more throttle code did not give more RPM / acceleration: code 2004 may not be the throttle, "
-              "or a physical throttle is overriding it")
-    else:
-        print(f"\n  acceleration {slope:.2f} m/s2 per code unit; level flight at code {out['thr_trim']:+.2f} "
-              f"(RPM {np.interp(out['thr_trim'], xs, rp):.0f}%)")
-    drive(run, 3.0, lambda f, tau: h.axes(f, hdg, alt, thr=out["thr_trim"]))
+    for u in (-1.0, -0.5, 0.0, 0.5, 1.0):
+        fr = level(sign * u, hold_s)
+        dur = fr[-1].t - fr[0].t
+        tl = [f for f in fr if f.t >= fr[-1].t - 4.0]
+        acc = float(np.polyfit(series(tl, "t") - tl[0].t, series(tl, "tas"), 1)[0]) \
+            if dur >= 3.5 and len(tl) > 5 else float("nan")
+        rows.append((u, sign * u, tail(fr, 1.5, "rpm"), tail(fr, 1.5, "fuel_flow"), acc, fr[-1].tas, fr[-1].mach, dur))
+    print(f"\n  {'u':>5}{'code':>7}{'RPM':>8}{'fuel':>8}{'accel m/s2':>12}{'TAS':>7}{'Mach':>7}{'held s':>8}")
+    for u, c, rp, fu, acc, tas, m, dur in rows:
+        print(f"  {u:>+5.1f}{c:>+7.1f}{rp:>8.1f}{fu:>8.2f}{acc:>+12.2f}{tas:>7.0f}{m:>7.2f}{dur:>8.1f}")
+    ok = [(r[0], r[4]) for r in rows if not math.isnan(r[4])]
+    out = {"thr_sign": sign, "thr_map": [[r[0], r[2], r[3]] for r in rows], "thr_u_trim": 0.0, "thr_slope": float("nan")}
+    if len(ok) >= 3:
+        xs, ys = np.array([o[0] for o in ok]), np.array([o[1] for o in ok])
+        slope, icpt = np.polyfit(xs, ys, 1)
+        if slope > 0:
+            out["thr_slope"] = float(slope)
+            out["thr_u_trim"] = float(np.clip(-icpt / slope, -0.5, 0.5))
+        else:
+            print("  WARN: acceleration did not rise with thrust (drag changes through the transonic range?): "
+                  "the speed loop will find its own trim")
+    r = [x[2] for x in rows]
+    if not (r[-1] > r[0] + 5):
+        print("  WARN: RPM did not rise from u = -1 to +1: the throttle code may not be reaching the engine")
+    print(f"\n  thrust-neutral position (from the acceleration): u = {out['thr_u_trim']:+.2f}; "
+          f"afterburner is where the fuel flow jumps (u = +1 here: {rows[-1][3]:.1f} against {rows[-2][3]:.1f})")
+    level(sign * out["thr_u_trim"], 3.0)
     return out
 
 
@@ -646,9 +696,10 @@ def _steps(fr, t_cmd, hdg0, delta, span=22.0):
 
 
 def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0, alt_step=300.0):
-    need = ("roll_sign", "roll_rate", "pitch_sign", "nz_per_cmd")
-    if not all(k in gains for k in need):
-        raise SystemExit("hold needs the stick gains: run `pulses` first (or `all`).")
+    need = ("roll_sign", "pitch_sign", "thr_sign")
+    if not all(k in gains for k in need) or not gains.get("roll_curve") or not gains.get("pitch_curve"):
+        raise SystemExit("hold needs the stick gains and curves and the throttle sign: run `pulses`, `curve` and "
+                         "`throttle` first (or `all`).")
     link = run.link
     f0 = run.next()
     hdg0, alt0, v0 = f0.hdg, f0.alt, f0.tas
@@ -747,6 +798,7 @@ def main(argv=None):
     ap.add_argument("--fake", action="store_true", help="fly a synthetic aircraft instead of DCS")
     ap.add_argument("--fake-roll-sign", type=int, default=1)
     ap.add_argument("--fake-pitch-sign", type=int, default=1)
+    ap.add_argument("--fake-thr-inverted", action="store_true", help="fake aircraft: throttle code -1 is most thrust")
     ap.add_argument("--fake-curve", type=float, default=1.0, help="fake aircraft: response ~ command ** this")
     ap.add_argument("--port-tel", type=int, default=TEL_PORT)
     ap.add_argument("--port-cmd", type=int, default=CMD_PORT)
@@ -754,7 +806,8 @@ def main(argv=None):
 
     if a.fake:
         from fake_export import FakeLink
-        link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign, curve_pow=a.fake_curve)
+        link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign, curve_pow=a.fake_curve,
+                        thr_inverted=a.fake_thr_inverted)
     else:
         link = UdpLink(a.port_tel, a.port_cmd)
     gains_path = a.gains or os.path.join(a.out, "stick_gains.json")
@@ -795,8 +848,10 @@ def main(argv=None):
                     summary["curve"] = {k: gains[k] for k in ("pitch_curve", "pitch_push_curve", "roll_curve") if k in gains}
                 elif name == "throttle":
                     gains.update(stage_throttle(run, gains))
+                    for stale in ("thr_trim", "rpm_by_code"):
+                        gains.pop(stale, None)
                     save_gains(gains_path, gains)
-                    summary["throttle"] = {k: gains[k] for k in ("thr_slope", "thr_trim", "rpm_by_code")}
+                    summary["throttle"] = {k: gains[k] for k in ("thr_sign", "thr_u_trim", "thr_slope", "thr_map")}
                 else:
                     summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn)
             finally:

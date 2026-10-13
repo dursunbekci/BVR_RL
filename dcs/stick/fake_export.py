@@ -25,7 +25,7 @@ def wrap_pi(a):
 
 class FakeAircraft:
     def __init__(self, roll_sign=1, pitch_sign=1, rudder_sign=1, roll_rate=2.6, nz_per_cmd=6.0,
-                 thr_trim=0.1, thr_slope=4.0, v0=250.0, alt0=7000.0, hdg0=1.0, noise=0.0, curve_pow=1.0, push_limit_g=None):
+                 thr_trim=0.1, thr_slope=4.0, v0=250.0, alt0=7000.0, hdg0=1.0, noise=0.0, curve_pow=1.0, push_limit_g=None, thr_inverted=False):
         self.roll_sign, self.pitch_sign, self.rudder_sign = roll_sign, pitch_sign, rudder_sign
         self.roll_rate, self.nz_per_cmd = roll_rate, nz_per_cmd
         self.thr_trim, self.thr_slope = thr_trim, thr_slope
@@ -35,6 +35,7 @@ class FakeAircraft:
         self.thr, self.thr_f, self.beta = thr_trim, thr_trim, 0.0
         self.noise = noise
         self.push_limit_g = push_limit_g      # the push side stops here (DCS: about 2.7 g below 1 g)
+        self.thr_inverted = thr_inverted      # DCS: code -1 is the most thrust
         self.curve_pow = curve_pow        # > 1: small commands do little, as DCS's did at 0.1
 
     def step(self, ax, dt=DT):
@@ -43,7 +44,7 @@ class FakeAircraft:
         roll, pitch, rud = shape(ax.get("roll", 0.0)), shape(ax.get("pitch", 0.0)), ax.get("rudder", 0.0)
         thr = ax.get("throttle")
         if thr is not None:
-            self.thr = max(-1.0, min(1.0, thr))
+            self.thr = max(-1.0, min(1.0, -thr if self.thr_inverted else thr))
         self.p += (self.roll_sign * self.roll_rate * roll - self.p) * dt / 0.12
         self.bank = wrap_pi(self.bank + self.p * dt)
         nz_t = 1.0 + self.pitch_sign * self.nz_per_cmd * pitch
@@ -74,7 +75,8 @@ class FakeAircraft:
             "adi": {"pitch": self.gamma, "bank": self.bank, "yaw": self.hdg},
             "vel": {"x": self.V * math.cos(self.gamma) * math.cos(self.hdg), "y": vs,
                     "z": self.V * math.cos(self.gamma) * math.sin(self.hdg)},
-            "eng": {"RPM": {"left": 65.0 + 35.0 * (self.thr_f + 1) / 2, "right": 65.0 + 35.0 * (self.thr_f + 1) / 2}},
+            "eng": {"RPM": {"left": 68.0 + 34.0 * (self.thr_f + 1) / 2, "right": 0},        # one engine
+                    "FuelConsumption": {"left": 0.13 + 1.3 * (self.thr_f + 1) / 2, "right": 0}},
             "ax": {"pitch": ax["pitch"], "roll": ax["roll"], "rudder": ax["rudder"],
                    "throttle": ax.get("throttle"), "seq": ax["seq"], "on": controlling},
         }

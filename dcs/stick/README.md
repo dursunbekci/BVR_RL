@@ -156,3 +156,14 @@ left out of the stored curve (it is only a lower bound). Re-measure only pitch w
 for a level turn at about 80 deg of bank). The push side stops at about -2.7 g of change whatever the
 command. Pull and push are now stored separately (`pitch_curve`, `pitch_push_curve`) and `hold` uses
 each for its own direction; averaging them under-read the pull.
+
+`throttle` (13 October, started by accident at Mach 1.04): the raw frames showed three things.
+1. **The code is inverted**: -1 is the afterburner (fuel flow 6.8, RPM 102), +0.5 and +1 are lower and
+   idle (fuel 0.54 and 0.13, RPM 87 and 68), 0 is about mid (fuel 1.0), and the afterburner lights only
+   near -1. `stick_test.py` now finds the sign from RPM and fuel flow and stores `thr_sign`.
+2. **The RPM printed earlier was half the real one**: the Viper has one engine, DCS sends `right = 0`, and
+   the average halved it. The largest of left and right is used now (and `fuel_flow` is read too).
+3. **The stick loop held the aircraft well** while the speed went from Mach 1.07 to 0.90: altitude within
+   13 m, bank 0.2 deg, load factor 0.9 to 1.27 g.
+The acceleration column was meaningless (the sweep ran through the transonic drag rise); the speed law is
+now a PI on speed (position u = trim + 0.04 e + integral, code = sign * u), found by `hold`'s speed step.
