@@ -759,14 +759,17 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
           f"side of the cursor), {info['bars']} bars, range scale {info['scale']} NM")
     t0 = run.frames[-1].t
     if info["mode"] != "TWS" and st.get("state") not in ("designated", "stt"):
-        print("  step: target management right: RWS -> TWS")
-        click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, fn=fn, verbose=False)
-        settle(run, 1.5, fn)
-        info = page()
-        print(f"    mode now {info['mode']}")
+        for hold, how in ((0.2, "short"), (1.5, "held 1.5 s")):
+            print(f"  step: target management right ({how}): RWS -> TWS")
+            click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, hold=hold, fn=fn, verbose=False)
+            settle(run, 1.5, fn)
+            info = page()
+            print(f"    mode now {info['mode']}")
+            if info["mode"] == "TWS":
+                break
         if info["mode"] != "TWS":
-            print("  the radar did not go to TWS: tell me what the radar page shows after target management right "
-                  "(Right Ctrl + Right) by hand")
+            print("  the radar did not go to TWS with a short or a held press: tell me what the radar page shows after "
+                  "target management right (Right Ctrl + Right) by hand, short and held")
             return {"locked": False, "designated": False, "state": st.get("state"), "why": "no TWS"}
         settle(run, 2.0, fn)                         # a scan or two to build the track file
     for i in range(tries):
