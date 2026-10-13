@@ -848,6 +848,8 @@ def main(argv=None):
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
+    ap.add_argument("--release-hold", type=float, default=1.5,
+                    help="fire: seconds the weapon release button is held (default 1.5; the missile leaves only while it is held)")
     ap.add_argument("--watch", type=int, default=15,
                     help="fire: seconds to watch for the missile (default 15; 90 shows the target destroyed from 60 km)")
     ap.add_argument("--aa", action="store_true",
@@ -959,7 +961,7 @@ def main(argv=None):
                 else:
                     summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force, alt=a.alt,
                                                          match_alt=a.match_alt, aa=True if a.aa else False if a.no_aa else None,
-                                                         watch=a.watch)
+                                                         watch=a.watch, release_hold=a.release_hold)
             finally:
                 run.close()
                 link.release()

@@ -423,7 +423,7 @@ def _ids(f, key):
     return {o.get("id") for o in ((f.raw.get(key) or []) if f else []) if isinstance(o, dict)}
 
 
-def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None, watch=15):
+def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None, watch=15, release_hold=1.5):
     """Arm, release, watch: master arm on, the weapon release button, then `watch` seconds of looking for the
     missile: the HUD's AIM-120 count ('4 MRM'), the weapons in flight (the module's `ball`), new world objects and
     the payload; master arm back to OFF at the end."""
@@ -502,10 +502,11 @@ def stage_fire(run, gains, defs, force=False, alt=None, match_alt=False, aa=None
               "l": "global command queue", "g": "DCS's generic pickle command, 350 and 351"}[mode] + ")")
         if mode == "g":                      # iCommandPlanePickleOn / Off of command_defs.lua
             link.raw(350, 1.0)
-            settle(run, 0.4, fn)
+            settle(run, release_hold, fn)
             link.raw(351, 1.0)
         else:
-            click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=0.4, fn=fn, mode=mode)
+            # the button has to stay pressed until the missile leaves the rail (a 0.4 s press launched nothing by any route)
+            click(run, "hotas.STICK_WEAPON_RELEASE", defs, hold=release_hold, fn=fn, mode=mode)
         if look(4, f"route {mode}"):
             worked = mode
             print(f"  the release went through route {mode}")
