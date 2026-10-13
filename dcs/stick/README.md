@@ -235,3 +235,9 @@ its radar through those calls (they come from the Flaming Cliffs aircraft). The 
 and saves the text of the cockpit displays (`list_indication`, read-only), to be run with and without a lock to see how the
 lock shows on the HUD and the MFDs; `fire` presses A-A itself, says when it is a maddog shot (no lock) and prints which
 stations changed.
+
+**Target behaviour (13 October)**: in the first radar runs the closure rate was +270 to +780 m/s, not the +40 of a target
+flying away at 240 m/s: the target (a CAP flight) turned to intercept the Viper, even unarmed, and closed to 10 km in
+90 s. `make_mission.py --stick-test --target` now gives it task Nothing, ROE weapon hold and no reaction to threats: it
+flies its straight route. A manual lock in the first screenshots showed the HUD target designator box and steering
+circle, `ARM` and `4 MRM`, while the Export radar tables stayed empty: the lock has to be read from the display text (`ind`).

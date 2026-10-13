@@ -139,7 +139,8 @@ def missiles(typ, n=4):
 
 TARGET_BRIEFING = (
     "\n\nAn unarmed AI F-16C (TGT-1) flies the same way 60 km ahead of you at 240 m/s, for dcs/stick/stick_test.py "
-    "radar, lock and fire. It carries no weapons. You close on it at about 40 m/s.")
+    "radar, lock and fire. It carries no weapons, holds fire, ignores threats and flies straight on. "
+    "You close on it at about 40 m/s: watch the range and turn away well before 5 km.")
 
 STICK_BRIEFING = (
     "You fly a Viper, in the air at 7000 m over the sea, heading east at 280 m/s. Nobody else is here.\n\n"
@@ -209,11 +210,16 @@ def build(args):
     far = 4.0                                   # waypoints well past the other aircraft
     p_blue_wp = mapping.Point(cx + far * dx, cy + far * dy, m.terrain)
     p_red_wp = mapping.Point(cx - far * dx, cy - far * dy, m.terrain)
-    def flight(country, name, typ, pos, wp, alt, heading, speed, armed=True):
+    def flight(country, name, typ, pos, wp, alt, heading, speed, armed=True, passive=False):
         kmh = speed * 3.6
+        # a passive aircraft flies its route and ignores everything: no CAP (a CAP flight turns to intercept
+        # whatever it sees, even unarmed, and the first radar test had the target closing head-on at 500 m/s)
         fg = m.flight_group_inflight(country, name, typ, pos, altitude=alt, speed=kmh,
-                                     maintask=task.CAP)
+                                     maintask=task.Nothing if passive else task.CAP)
         fg.add_waypoint(wp, alt, kmh)
+        if passive:
+            fg.points[0].tasks.append(task.OptROE(task.OptROE.Values.WeaponHold))
+            fg.points[0].tasks.append(task.OptReactOnThreat(task.OptReactOnThreat.Values.NoReaction))
         u = fg.units[0]
         u.name = f"{name}-1"
         u.heading = heading
@@ -230,7 +236,8 @@ def build(args):
         me.units[0].skill = Skill.Player
         if args.target:                         # an unarmed AI aircraft ahead, flying the same way
             tgt = flight(red_c, "TGT", types["F-16C"], mapping.Point(cx - 40_000.0, cy, m.terrain),
-                         mapping.Point(cx + 400_000.0, cy, m.terrain), args.alt_blue, 90.0, 240.0, armed=False)
+                         mapping.Point(cx + 400_000.0, cy, m.terrain), args.alt_blue, 90.0, 240.0, armed=False,
+                         passive=True)
             tgt.units[0].skill = Skill.Excellent
         m.save(args.out)                        # no bridge: the Export.lua script does the work
         return me, None
