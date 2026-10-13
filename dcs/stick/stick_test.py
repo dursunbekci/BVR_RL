@@ -853,8 +853,8 @@ def main(argv=None):
     ap.add_argument("--no-aa", action="store_true", help="lock, fire: never press the ICP A-A button")
     ap.add_argument("--scan-steps", type=int, default=40, help="lock --scan: cursor steps (default 40)")
     ap.add_argument("--scan-hold", type=float, default=0.2, help="lock --scan: seconds of cursor slew per step (default 0.2)")
-    ap.add_argument("--soi", choices=["left", "right", "none"], default="left",
-                    help="lock: first make this MFD the sensor of interest (display management switch); default left")
+    ap.add_argument("--soi", choices=["left", "right", "none"], default="none",
+                    help="lock: first make this MFD the sensor of interest (display management switch); default none: the radar MFD is normally the SOI already; a display management press can switch the MFD to its menu page")
     ap.add_argument("--release", type=float, default=None,
                     help="click: the value to send after --hold (for axes such as hotas.THROTTLE_RDR_CURSOR_Y_AXIS --value 0.5 --release 0)")
     ap.add_argument("--match-alt", action="store_true",

@@ -706,7 +706,7 @@ def test_cockpit():
     assert not lk5["locked"], buf.getvalue()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        lk6 = cockpit.stage_lock(run, gains, defs)                         # default soi = left
+        lk6 = cockpit.stage_lock(run, gains, defs, soi="left")                       # soi asked for
     assert lk6["locked"] and "sensor of interest" in buf.getvalue(), buf.getvalue()
     # an axis control is pressed, held, then set back with --release
     buf = io.StringIO()
