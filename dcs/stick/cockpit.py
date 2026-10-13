@@ -732,10 +732,13 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
     return {"locked": state == "stt", "designated": state in ("designated", "stt"), "state": state}
 
 
-def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=True, tries=6):
-    """Lock without the cursor: target management right puts the radar in TWS (track while scan), where it builds
-    track files by itself; target management right again bugs a track (designated), and target management up then
-    gives a single-target track (stt=True). In a 1v1 the only track is the target."""
+def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=False, stt=False, max_secs=25.0):
+    """Lock without the cursor: target management right held 1.5 s puts the radar in TWS (track while scan), where it
+    builds track files by itself; a short target management right bugs a track once there is one (measured in DCS:
+    the fifth press, about 14 s after entering TWS with A6 and 4 bars; the page then draws the AIM-120 launch zone,
+    DLZ_AIM120_root). It is pressed about once a second until the bug shows. An AIM-120 can be fired at the bugged
+    track; stt=True also tries target management up for a single-target track (it stayed bugged in DCS).
+    In a 1v1 the only track is the target."""
     fn = hold_fn(run, gains, alt, match_alt) if gains else None
     settle_setup(run, fn)
     link = run.link
@@ -766,7 +769,7 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
           f"side of the cursor), {info['bars']} bars, range scale {info['scale']} NM")
     t0 = run.frames[-1].t
     if info["mode"] != "TWS" and st.get("state") not in ("designated", "stt"):
-        for hold, how in ((0.2, "short"), (1.5, "held 1.5 s")):
+        for hold, how in ((1.5, "held 1.5 s"), (2.5, "held 2.5 s")):
             print(f"  step: target management right ({how}): RWS -> TWS")
             click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, hold=hold, fn=fn, verbose=False)
             settle(run, 1.5, fn)
@@ -778,29 +781,18 @@ def stage_twslock(run, gains, defs, alt=None, match_alt=False, aa=None, relock=F
             print("  the radar did not go to TWS with a short or a held press: tell me what the radar page shows after "
                   "target management right (Right Ctrl + Right) by hand, short and held")
             return {"locked": False, "designated": False, "state": st.get("state"), "why": "no TWS"}
-    # a scan or two to build the track file; what TWS draws that RWS did not, to learn its track and bug symbols
-    prev = names()
-    print(f"    new on the page in TWS: {sorted(prev - base)[:20]}")
-    for k in range(4):
-        settle(run, 2.0, fn)
-        now = names()
-        if now != prev:
-            print(f"    +{2 * (k + 1)} s in TWS: new {sorted(now - prev)[:15]}, gone {sorted(prev - now)[:15]}")
-        prev = now
-
+    # the track file takes a scan or two: target management right about once a second until the bug shows (the
+    # page starts drawing the AIM-120 launch zone, or the display markers say designated)
     def bugged(nm):
-        return any("bug" in x.lower() for x in nm)
-    for i in range(tries):
-        if st.get("state") in ("designated", "stt"):
-            break
+        return any(x.startswith("DLZ_AIM120") or "bug" in x.lower() for x in nm)
+    t_tws = run.frames[-1].t
+    i = 0
+    while st.get("state") not in ("designated", "stt") and run.frames[-1].t - t_tws < max_secs:
+        i += 1
         click(run, "hotas.STICK_TGT_MANAGE_RIGHT", defs, fn=fn, verbose=False)
-        st = _observe(run, 1.5, fn, f"target management right {i + 1}")
-        now = names()
-        info = page()
-        print(f"      mode {info['mode']}; new on the page {sorted(now - prev)[:15]}, gone {sorted(prev - now)[:15]}")
-        prev = now
-        if st.get("state") not in ("designated", "stt") and bugged(now - base):
-            print("      a 'bug' symbol appeared: taking the track as bugged")
+        st = _observe(run, 0.8, fn, f"target management right {i} ({run.frames[-1].t - t_tws:.0f} s in TWS)")
+        if st.get("state") not in ("designated", "stt") and bugged(names() - base):
+            print("      the AIM-120 launch zone is drawn: the track is bugged")
             st["state"] = "designated"
     if st.get("state") == "designated" and stt:
         print("  step: target management up: single-target track")

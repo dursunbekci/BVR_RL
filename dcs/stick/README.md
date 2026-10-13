@@ -358,3 +358,11 @@ management right puts the radar in TWS, where it makes track files itself; targe
 (designated: an AIM-120 can be fired at it) and target management up gives the single-target track (`--no-stt` stops at the
 bug). The page's mode (RWS/TWS), azimuth (A1/A3/A6) and bars are read and printed. `lock --aim` prints the DED (display 6) after
 the ICP keys, to see where the key presses went, and its sweep pulses are at least 0.12 s.
+
+**TWS lock works (13 October)**: a short target management right did nothing in RWS; held 1.5 s it put the radar in TWS (the
+page then draws `TWS` and `AA_RadarTracksKeeper`). Short presses 1.5 s apart bugged the target on the fifth, about 14 s after
+entering TWS (A6, 4 bars: a scan or two to build the track file); with the bug the page draws the AIM-120 launch zone
+(`DLZ_AIM120_root`, `DLZ_Rmax1`, `DLZ_Rmin1`, ...) and the scan limits, and the display markers read designated. Target
+management up after that stayed designated (no single-target track), which is fine: an AIM-120 is fired at a bugged TWS
+track. `lock --tws` now holds the switch straight away and then presses it about once a second until the launch zone is drawn
+(or the markers say designated), and stops at the bug (`--stt` asks for the single-target track as well).

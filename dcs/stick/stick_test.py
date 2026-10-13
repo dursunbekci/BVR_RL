@@ -852,9 +852,9 @@ def main(argv=None):
     ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
     ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
     ap.add_argument("--tws", action="store_true",
-                    help="lock: no cursor: target management right to TWS, right again to bug the track, up for a "
-                         "single-target track (--no-stt stops at the bugged track)")
-    ap.add_argument("--no-stt", action="store_true", help="lock --tws: stop at the bugged TWS track")
+                    help="lock: no cursor: target management right held to TWS, right again until the track is bugged "
+                         "(an AIM-120 can be fired at it; --stt also asks for a single-target track)")
+    ap.add_argument("--stt", action="store_true", help="lock --tws: after the bug, target management up for a single-target track")
     ap.add_argument("--aim", action="store_true",
                     help="lock: put the cursor where the target is (bullseye readout) in range and azimuth, tilt the antenna "
                          "to its altitude, then designate: works off the nose and off the level")
@@ -984,7 +984,7 @@ def main(argv=None):
                 elif a.test == "lock" and a.tws:
                     summary["lock"] = cockpit.stage_twslock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
                                                             aa=True if a.aa else False if a.no_aa else None,
-                                                            relock=a.relock, stt=not a.no_stt)
+                                                            relock=a.relock, stt=a.stt)
                 elif a.test == "lock" and a.aim:
                     summary["lock"] = cockpit.stage_aimlock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
                                                             bull=a.bull, magvar=a.magvar, relock=a.relock, ref=a.ref,

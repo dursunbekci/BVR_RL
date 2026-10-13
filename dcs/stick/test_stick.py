@@ -794,7 +794,11 @@ def test_cockpit():
     with contextlib.redirect_stdout(buf):
         res = cockpit.stage_twslock(run, gains, defs)
     out = buf.getvalue()
-    assert res["locked"] and "RWS -> TWS" in out and "mode now TWS" in out and "radar page: RWS, A6" in out, out[-1200:]
+    assert res["designated"] and not res["locked"] and "RWS -> TWS" in out and "mode now TWS" in out \
+        and "radar page: RWS, A6" in out and "the TWS track is bugged" in out, out[-1200:]
+    with contextlib.redirect_stdout(io.StringIO()):          # stt=True: target management up after the bug
+        res = cockpit.stage_twslock(run, gains, defs, stt=True)
+    assert res["locked"], res
     print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
           "end on a fake cockpit, with and without a cursor scan; the aimed lock off the nose and above; master arm ends OFF; refusals are shown)")
 
