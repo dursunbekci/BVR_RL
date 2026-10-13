@@ -95,6 +95,7 @@ class FakeCockpit:
         d = defs["devices"]
         self.code = {(d["UFC"], defs["commands"]["ufc"]["AA"]): "aa",
                      (d["HOTAS"], h["STICK_TGT_MANAGE_UP"]): "tms_up",
+                     (d["HOTAS"], h["STICK_TGT_MANAGE_DOWN"]): "tms_down",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_FWD"]): "cursor",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_AFT"]): "cursor_aft",
                      (d["HOTAS"], h["THROTTLE_RDR_CURSOR_LEFT"]): "cursor_left",
@@ -148,8 +149,11 @@ class FakeCockpit:
         elif name == "cursor_aft" and value == 1.0 and self.soi_left:
             self.cursor -= 1
         elif name == "tms_up" and value == 1.0 and self.aa and self.soi_left and (
-                self.cursor >= self.scan_needed or self.under_cursor()):   # scan_needed 999: only by aiming
+                self.stage >= 1 or self.cursor >= self.scan_needed or self.under_cursor()):
+            # scan_needed 999: only by aiming; a designated target goes to a track on the next press wherever the cursor is
             self.stage = (self.stage + 1) % 3          # a third press drops the track
+        elif name == "tms_down" and value != 0.0:            # the keymap sends -1.0
+            self.stage = 0
         elif name == "arm":
             self.armed = value == 1.0
         elif name == "release" and value == 1.0 and self.aa and self.armed and self.missile is None:   # no lock: a maddog shot

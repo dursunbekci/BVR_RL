@@ -323,3 +323,15 @@ antenna elevation up or down; (4) at the point, if nothing is under the cursor, 
 (5) target under the cursor: target management up, and again for the single-target track. A target more than 58 deg off the
 nose is refused (turn first). On the fake (my guess at the slew rates and a four-bar coverage of 3.4 deg either side) it locks
 targets at 0, +30 deg (+2 km), +10 deg (+6 km, antenna up) and -45 deg (-3 km) in 7 to 11 steps.
+
+**Aimed lock, first DCS runs (13 October)**: the mission was the old one, with DCS's default bullseye 262 NM away, so a whole
+degree of the readout was 4.6 NM (8 deg at the target's range). Dead ahead: the cursor reached the target's range in 8 steps,
+then the azimuth hunted (small left pulses the readout could not see, about 80 of them) and the point search (2.5 deg) was
+smaller than the readout's error: not locked. 30 deg right: locked after 72 steps. The third run found run 2's lock still on
+(`--relock` now drops it first). `fire` launched at 55 km on a target flying away at 240 m/s: after 60 s the missile was still
+36 km short (closing at 0.13 km/s), a shot out of range, not a fault. Changes: the readout's uncertainty is computed from the
+bullseye's distance (2 x (half a degree at that distance + half a mile)) and widens the azimuth tolerance; the search around the
+target's place is rows swept left to right in 2-deg steps timed by the learnt slew rate (the readout cannot see steps that
+small when the bullseye is far), at the target's range and then 1, 2, ... NM either side; slew rates are learnt only from
+moves bigger than the readout's error. On the fake, with the bullseye 261 NM away, it locks at 0, +30, -20 (+3 km) and
++45 deg (-3 km); with it 15 NM away, in 7 to 11 steps without a sweep.

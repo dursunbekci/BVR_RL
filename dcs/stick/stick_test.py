@@ -855,6 +855,7 @@ def main(argv=None):
                          "to its altitude, then designate: works off the nose and off the level")
     ap.add_argument("--bull", type=float, nargs=2, metavar=("X", "Z"), default=None,
                     help="lock --aim: the bullseye in DCS metres (x north, z east); by default it is read off the radar page")
+    ap.add_argument("--relock", action="store_true", help="lock --aim: drop an existing lock first (target management down)")
     ap.add_argument("--magvar", type=float, default=None,
                     help="lock --aim: magnetic variation, deg east (default: from the module's magnetic heading)")
     ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
@@ -974,7 +975,7 @@ def main(argv=None):
                     summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
                 elif a.test == "lock" and a.aim:
                     summary["lock"] = cockpit.stage_aimlock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
-                                                            bull=a.bull, magvar=a.magvar,
+                                                            bull=a.bull, magvar=a.magvar, relock=a.relock,
                                                             aa=True if a.aa else False if a.no_aa else None)
                 elif a.test == "lock":
                     summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,

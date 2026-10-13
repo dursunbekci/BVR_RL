@@ -478,7 +478,8 @@ def _polar(f, x, z):
     return math.hypot(dx, dz) / NM, math.degrees((math.atan2(dz, dx) - f.hdg + math.pi) % (2 * math.pi) - math.pi)
 
 
-def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar=None, max_iter=120, aa=None):
+def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar=None, max_iter=200, aa=None,
+                  relock=False):
     """Lock the nearest aircraft wherever it is within the radar's limits: put the radar cursor on the point where
     the radar should show it (its bearing and range from the world objects), steering by the cursor's bullseye
     bearing and range on the radar page; tilt the antenna until the target's altitude is inside the height
@@ -490,8 +491,12 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
     fr0 = settle(run, 1.0, fn)
     fid = _fcr_id(run)
     st = _observe(run, 0.5, fn, "radar")
+    if relock and st.get("state") in ("designated", "stt"):
+        print("  --relock: target management down drops the lock first")
+        click(run, "hotas.STICK_TGT_MANAGE_DOWN", defs, fn=fn, verbose=False)
+        st = _observe(run, 1.5, fn, "after")
     if st.get("state") == "stt":
-        print("  already locked")
+        print("  already locked (--relock drops it first)")
         return {"locked": True, "designated": True, "state": "stt"}
     in_aa = master_mode(last_with(run.frames[-300:], "rd"))
     if aa or (aa is None and in_aa is False):
@@ -538,10 +543,27 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
               f"the nose" + ("   (far: whole degrees and NM make the aim coarse; the missions from make_mission.py put "
                               "it near the fight)" if rb > 60 else ""))
     rate = {"r": 6.0, "az": 40.0}                       # NM/s and deg/s while held, learnt as we go
-    offsets = [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 2.5), (0.0, -2.5), (1.5, 2.5), (1.5, -2.5),
-               (-1.5, 2.5), (-1.5, -2.5), (3.0, 0.0), (-3.0, 0.0), (0.0, 5.0), (0.0, -5.0)]
-    k, elev_tries = 0, 0
-    tol, last_dir = {"range": 0.8, "azimuth": 1.5}, {}       # a tolerance widens each time its axis overshoots
+    # The readout is whole degrees and NM from the bullseye: half a degree there is this far sideways at the cursor,
+    # plus half a mile, twice (once placing the bullseye, once reading the cursor). Far from the bullseye that is
+    # more than the target symbol is wide, so the tolerances and the search around the point grow with it.
+    rb_nm = math.hypot(f.x - bull[0], f.z - bull[1]) / NM
+    unc_nm = 2 * (rb_nm * math.tan(math.radians(0.5)) + 0.5)
+    tgt0 = _target_obj(last_with(run.frames[-100:], "obj"))
+    r0 = _polar(f, tgt0["x"], tgt0["z"])[0] if tgt0 else 30.0
+    unc_az = math.degrees(unc_nm / max(r0, 5.0))
+    tol0 = {"range": 0.8, "azimuth": max(1.5, 0.6 * unc_az)}
+    # First the cursor goes straight to the target's place. If nothing is under it there, rows are swept: from W deg
+    # left of the place to W right, in steps of about 2 deg timed by the azimuth slew rate seen so far (the readout
+    # cannot see steps that small when the bullseye is far), a row at the target's range and then 1, 2, ... NM nearer
+    # and further, out to the readout's uncertainty.
+    W = max(3.0, unc_az)
+    n_rows = max(2, int(math.ceil(unc_nm)))
+    offsets = [(0.0, 0.0)] + [(ro, -W) for i in range(n_rows + 1) for ro in ((0.0,) if i == 0 else (float(i), -float(i)))]
+    print(f"  the readout places the cursor to about {unc_nm:.1f} NM ({unc_az:.1f} deg at the target's range)"
+          + ("" if rb_nm < 60 else f": coarse, because the bullseye is {rb_nm:.0f} NM away. Use the mission from "
+                                   f"make_mission.py, which puts it near the fight"))
+    k, elev_tries, found = 0, 0, False
+    tol, last_dir = dict(tol0), {}                       # a tolerance widens each time its axis overshoots
     for it in range(max_iter):
         f = run.frames[-1]
         tgt = _target_obj(last_with(run.frames[-100:], "obj"))
@@ -580,13 +602,29 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
             spec, t, what = f"hotas.THROTTLE_ANT_ELEV_{out_cov.upper()}", 0.3, f"antenna {out_cov}"
             elev_tries += 1
         elif abs(dr) < tol["range"] and abs(daz) < tol["azimuth"]:
+            if k > 0:                                    # at the start of a row: sweep it
+                step = min(max(2.0 / rate["az"], 0.02), 0.3)
+                n = int(math.ceil(2 * W / 2.0))
+                print(f"    sweeping {2 * W:.0f} deg to the right at {offsets[k][0]:+.0f} NM from the target's range "
+                      f"({n} steps of {step:.2f} s)")
+                for _ in range(n):
+                    click(run, "hotas.THROTTLE_RDR_CURSOR_RIGHT", defs, hold=step, fn=fn, verbose=False)
+                    settle(run, 0.25, fn)
+                    info = page()
+                    if info["tuc"]:
+                        found = True
+                        break
+                if found:
+                    found = False
+                    continue
             if k + 1 >= len(offsets):
                 print("  searched around the target's place without a target under the cursor: the radar does not "
                       "see it (range, or its altitude outside the coverage)")
                 break
             k += 1
-            tol, last_dir = {"range": 0.8, "azimuth": 1.5}, {}
-            print(f"    nothing under the cursor here: trying {offsets[k][0]:+.1f} NM, {offsets[k][1]:+.1f} deg from it")
+            tol, last_dir = dict(tol0), {}
+            print(f"    nothing under the cursor: to the start of a row, {offsets[k][0]:+.1f} NM, {offsets[k][1]:+.1f} deg "
+                  f"from the target")
             info = page()
             continue
         else:
@@ -597,7 +635,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
                 spec = "hotas.THROTTLE_RDR_CURSOR_RIGHT" if daz > 0 else "hotas.THROTTLE_RDR_CURSOR_LEFT"
                 t, what, sgn = min(max(abs(daz) / rate["az"], 0.03), 0.6), "azimuth", daz > 0
             if last_dir.get(what) is not None and last_dir[what] != sgn:
-                tol[what] = min(tol[what] * 1.4, 2.0 if what == "range" else 4.0)
+                tol[what] = min(tol[what] * 1.4, 2.0 if what == "range" else max(4.0, unc_az))
             last_dir[what] = sgn
         print(f"    aim {it + 1}: cursor {r_c:5.1f} NM {az_c:+5.1f} deg | target {r_p:5.1f} NM {az_p:+5.1f} deg "
               f"{talt:4.1f} kft | coverage {info['lo']}..{info['hi']} kft | {spec.split('_', 3)[-1].lower()} {t:.2f} s")
@@ -610,7 +648,7 @@ def stage_aimlock(run, gains, defs, alt=None, match_alt=False, bull=None, magvar
             r_c2, az_c2 = _polar(f2, bull[0] + r2 * NM * math.cos(true_brg(b2)), bull[1] + r2 * NM * math.sin(true_brg(b2)))
             moved = abs(r_c2 - r_c) if what == "range" else abs(az_c2 - az_c)
             key, lo_hi = ("r", (0.5, 60.0)) if what == "range" else ("az", (5.0, 400.0))
-            if moved > (1.0 if what == "range" else 1.5):      # above the readout's rounding
+            if moved > (1.0 if what == "range" else max(1.5, unc_az)):      # above the readout's rounding
                 rate[key] = min(max(math.sqrt(rate[key] * moved / t), lo_hi[0]), lo_hi[1])
         info = info2 if info2["br"] is not None else info
     st = _observe(run, 0.5, fn, "radar")
