@@ -174,7 +174,10 @@ local function resolve_codes()
   local base = nil
   pcall(function() base = lfs.currentdir() end)
   if base then
-    for _, rel in ipairs({"Scripts" .. SEP .. "command_defs.lua", ".." .. SEP .. "Scripts" .. SEP .. "command_defs.lua"}) do
+    -- DCS's cockpit scripts load it from LockOn_Options.common_script_path (Scripts\Aircrafts\_Common\Cockpit)
+    for _, rel in ipairs({"Scripts" .. SEP .. "Aircrafts" .. SEP .. "_Common" .. SEP .. "Cockpit" .. SEP .. "command_defs.lua",
+                          "Scripts" .. SEP .. "command_defs.lua",
+                          ".." .. SEP .. "Scripts" .. SEP .. "command_defs.lua"}) do
       local path = base .. SEP .. rel
       local ok, found, got = pcall(from, path)
       if ok and found == 4 then
