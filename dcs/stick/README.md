@@ -189,3 +189,14 @@ within 50 to 100 ms, and needs about 0.4 s to stop, so a bank loop without lead 
 The roll loop now aims at the bank the roll rate would reach in 0.25 s (`Hold.T_LEAD`). The aircraft also
 unloads to about 0.4 g for 0.3 s in a fast roll (the pitch axis lags 228 ms); altitude moved by metres.
 Next: `hold --speed 280 --bank 70 --nz 5` (5 deg/s) and then `--bank 80 --nz 6` (the simulator's 8 deg/s).
+
+**`hold --speed 280 --bank 70 --nz 5` with the roll lead (13 October): the inner loop is done.**
+Peak bank 70.06 and 70.07 deg against the 70 deg limit (the 15 to 20 deg overshoot is gone). Turns of 60 deg:
+half way in 4.4 s, mean 8.3 and 7.9 deg/s while more than 30 deg were to go, peak 8.7 and 9.5 deg/s, peak
+4.0 and 4.3 g. The simulator's autopilot (F-16C-DCS, 80 deg bank limit, `dcs/turn_test.py --sim --speed 283`)
+gives 6.2 to 9.3 deg/s mean and 9.8 to 11.3 peak: the player-flown Viper, driven through Export.lua, is as
+agile as the simulator's model (route mode gave 1.6 deg/s). Altitude hold 7 m, speed hold 2 m/s, altitude step
+90% in 14 s, command to the frame that shows it 8 ms p50 and 16 ms p95. Slow: the approach to the last 10 deg
+(the proportional heading law, K = 2, as in the simulator) and the speed step (the afterburner spools slowly).
+Steps 1 and 2 of the plan are done. Open: radar lock and launch (step 3), the policy loop on this link, a
+speed range test (`hold --speed 400`), a model trained on F-16C-DCS at SIM_REV 15.
