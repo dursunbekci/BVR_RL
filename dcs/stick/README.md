@@ -143,3 +143,10 @@ defaults). Lag from command to response: 105 ms in roll, 228 ms in pitch.
 linear Viper stick would: the exported axes are **strongly non-linear** (or scaled). A
 linear gain would saturate far below the airframe's limits, so `curve` measures the
 response up to full stick and `hold` flies through the inverse of the measured curve.
+
+`curve` (13 October): roll is smooth, 61 deg/s per unit up to 0.2 and 186 deg/s at full stick.
+Pitch is flat near the centre (0.15 g at 0.1, 0.63 at 0.2, 1.66 at 0.35, 2.70 at 0.5) and the
+0.75 and 1.0 points were cut off by the 3.5 g early stop (the pulses reached 3.9 and 4.1 g).
+The stop is now 5.5 g up and -2 g down; a pitch pulse stopped at the limit is marked `*` and
+left out of the stored curve (it is only a lower bound). Re-measure only pitch with
+`stick_test.py curve --axes pitch` (`--max-nz` changes the limit).

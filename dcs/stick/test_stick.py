@@ -366,6 +366,19 @@ def test_fake_nonlinear():
     t1 = s["hold"]["heading_steps"][0]
     assert 50 < t1["peak_bank_deg"] < 64 and t1["half_s"] < 15 and t1["rate_bulk_dps"] > 3.0, t1
     assert s["hold"]["hold_error"]["alt_m"] < 15, s["hold"]["hold_error"]
+    # a pitch pulse that hits the limit is a lower bound and stays out of the curve; --axes keeps the rest
+    from fake_export import FakeLink
+    with tempfile.TemporaryDirectory() as d:
+        stick_test.main(["pulses", "--fake", "--out", d])
+        before = json.load(open(os.path.join(d, "stick_gains.json")))
+        link = FakeLink(curve_pow=1.0)                       # 6 g per unit: 1.0 would give 6 g > the 5.5 g stop
+        run = stick_test.Run(link, None, "c", stick_test.Limits(min_agl=0, min_alt=0))
+        out = stick_test.stage_curve(run, before, axes=("pitch",))
+        assert "roll_curve" not in out and 0.75 in [a for a, _ in out["pitch_curve"]], out
+        assert 1.0 not in [a for a, _ in out["pitch_curve"]], out["pitch_curve"]
+        stick_test.main(["curve", "--fake", "--axes", "pitch", "--out", d])
+        after = json.load(open(os.path.join(d, "stick_gains.json")))
+        assert "pitch_curve" in after and after["roll_sign"] == before["roll_sign"], after.keys()
     print(f"  stick_test.py, non-linear ... OK  (response ~ command squared measured; hold through the inverse "
           f"turns {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank)")
 

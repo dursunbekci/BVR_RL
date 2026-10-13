@@ -502,38 +502,43 @@ def drive_until(run, max_s, fn, done):
 CURVE_AMPS = (0.1, 0.2, 0.35, 0.5, 0.75, 1.0)
 
 
-def stage_curve(run, gains, amps=CURVE_AMPS, max_bank_change=math.radians(20), max_nz_change=3.5):
+def stage_curve(run, gains, amps=CURVE_AMPS, axes=("pitch", "roll"), max_bank_change=math.radians(20),
+                max_nz_change=5.5, max_pitch_change=math.radians(12)):
     """Response of the pitch and roll axes against the command, up to full stick. Each pulse
     stops early (and the aircraft is brought back by the known sign) when the bank has
-    changed by 20 deg, or the load factor by 3.5 g or the pitch by 8 deg."""
+    changed by 20 deg, or the load factor up by max_nz_change g (or down to -2 g) or the pitch by 12 deg. A pulse
+    stopped early on load factor or pitch only shows the response is *at least* that: such
+    pitch points are marked * and left out of the stored curve."""
     for k in ("roll_sign", "pitch_sign"):
         if k not in gains:
             raise SystemExit("curve needs the signs: run `pulses` first (or `all`).")
     out = {}
     print(f"\n  pulses of {', '.join(f'{a:g}' for a in amps)} each way, stopped early at 20 deg of bank, "
-          f"3.5 g or 8 deg of pitch")
-    for axis in ("pitch", "roll"):
+          f"{max_nz_change:g} g or {math.degrees(max_pitch_change):.0f} deg of pitch")
+    for axis in axes:
         rows = []
         for a in amps:
-            peak, held = {}, {}
+            peak, held, early = {}, {}, {}
             for sgn in (1, -1):
                 base = drive(run, 1.5, lambda f, tau: dict(ZERO))
                 f0 = base[-1]
                 bank0, gam0 = f0.bank, f0.pitch
                 nz0 = float(np.nanmean(series(base[-25:], "nz")))
                 rate0 = float(np.nanmean(deriv(series(base, "t"), series(base, "bank"), wrap=True)))
-                st = {"stop": None}
+                st = {"stop": None, "why": None}
                 on_max = 1.0 if axis == "pitch" else 0.7
 
                 def fn(f, tau):
                     if st["stop"] is None:
-                        if tau >= on_max or (axis == "roll" and abs(wrap_pi(f.bank - bank0)) > max_bank_change) \
-                                or (axis == "pitch" and (abs(f.nz - nz0) > max_nz_change
-                                                         or abs(f.pitch - gam0) > math.radians(8))):
-                            st["stop"] = tau
+                        hit = (axis == "roll" and abs(wrap_pi(f.bank - bank0)) > max_bank_change) \
+                            or (axis == "pitch" and (f.nz - nz0 > max_nz_change or f.nz < -2.0
+                                                     or abs(f.pitch - gam0) > max_pitch_change))
+                        if tau >= on_max or hit:
+                            st["stop"], st["why"] = tau, ("limit" if hit else "time")
                     return {**ZERO, axis: 0.0 if st["stop"] is not None else sgn * a}
                 fr = drive(run, on_max + 0.5, fn)
                 held[sgn] = st["stop"] if st["stop"] is not None else on_max
+                early[sgn] = st["why"] == "limit"
                 if axis == "roll":
                     r = deriv(series(fr, "t"), series(fr, "bank"), wrap=True) - rate0
                     peak[sgn] = float(r[np.nanargmax(np.abs(r))])
@@ -548,19 +553,29 @@ def stage_curve(run, gains, amps=CURVE_AMPS, max_bank_change=math.radians(20), m
                     drive_until(run, 10.0, lambda f, tau: {**ZERO, "pitch": gains["pitch_sign"] * max(-0.2, min(0.2, -2.0 * (f.pitch - gam0)))},
                                 lambda f: abs(f.pitch - gam0) < math.radians(1.5) and abs(f.nz - nz0) < 0.25)
             resp = (peak[1] - peak[-1]) / 2.0
-            rows.append((a, peak[1], peak[-1], resp, 0.5 * (held[1] + held[-1])))
+            lim = early[1] or early[-1]
+            if axis == "pitch" and early[-1] and not early[1]:
+                resp, lim = peak[1], False        # the push side hit the -2 g floor: the pull side is the measurement
+            rows.append((a, peak[1], peak[-1], resp, 0.5 * (held[1] + held[-1]), lim))
         k = DEG if axis == "roll" else 1.0
         unit = "deg/s" if axis == "roll" else "g"
         print(f"\n  {axis}: {'rate' if axis == 'roll' else 'load factor change'} against command")
         print(f"  {'cmd':>6}{'+ pulse':>12}{'- pulse':>12}{'response':>12}{'per unit':>12}{'held s':>9}")
-        for a, pp, pm, resp, held in rows:
-            print(f"  {a:>6.2f}{pp * k:>+12.2f}{pm * k:>+12.2f}{abs(resp) * k:>9.2f} {unit:<4}{abs(resp) * k / a:>8.2f}{held:>9.2f}")
-        out[f"{axis}_curve"] = [[a, abs(resp)] for a, _, _, resp, _ in rows]
-        sgn_resp = [1 if resp >= 0 else -1 for _, _, _, resp, _ in rows]
+        for a, pp, pm, resp, held, er in rows:
+            mark = " *" if er and axis == "pitch" else "  "
+            print(f"  {a:>6.2f}{pp * k:>+12.2f}{pm * k:>+12.2f}{abs(resp) * k:>9.2f} {unit:<4}{abs(resp) * k / a:>8.2f}"
+                  f"{held:>9.2f}{mark}")
+        keep = [r for r in rows if not (axis == "pitch" and r[5])]
+        if axis == "pitch" and len(keep) < len(rows):
+            print(f"  * stopped early at the limit: at least this much; left out of the stored curve")
+        if len(keep) < 3:
+            keep = rows
+        out[f"{axis}_curve"] = [[r[0], abs(r[3])] for r in keep]
+        sgn_resp = [1 if r[3] >= 0 else -1 for r in rows]
         if len(set(sgn_resp)) > 1:
             print(f"  WARN: the {axis} response changes sign along the sweep")
         top = rows[-1]
-        print(f"  at full command ({top[0]:g}): {abs(top[3]) * k:.1f} {unit}")
+        print(f"  at command {top[0]:g}: {abs(top[3]) * k:.1f} {unit}{' or more' if top[5] and axis == 'pitch' else ''}")
     return out
 
 
@@ -714,6 +729,8 @@ def main(argv=None):
     ap.add_argument("--bank", type=float, default=60.0, help="hold: bank limit, deg (try 75 with --nz 6 once it works)")
     ap.add_argument("--nz", type=float, default=5.0, help="hold: load factor limit, g")
     ap.add_argument("--turn", type=float, default=60.0, help="hold: heading step, deg")
+    ap.add_argument("--axes", default="pitch,roll", help="curve: which axes (default pitch,roll)")
+    ap.add_argument("--max-nz", type=float, default=5.5, help="curve: stop a pitch pulse at this load factor change, g")
     ap.add_argument("--min-agl", type=float, default=1500.0, help="stop below this height above ground, m")
     ap.add_argument("--out", default="dcs_runs")
     ap.add_argument("--gains", default=None, help="gains file (default <out>/stick_gains.json)")
@@ -762,9 +779,10 @@ def main(argv=None):
                     save_gains(gains_path, gains)
                     summary["pulses"] = {k: v for k, v in gains.items()}
                 elif name == "curve":
-                    gains.update(stage_curve(run, gains))
+                    gains.update(stage_curve(run, gains, axes=tuple(a.axes.split(",")),
+                                             max_nz_change=a.max_nz))
                     save_gains(gains_path, gains)
-                    summary["curve"] = {k: gains[k] for k in ("pitch_curve", "roll_curve")}
+                    summary["curve"] = {k: gains[k] for k in ("pitch_curve", "roll_curve") if k in gains}
                 elif name == "throttle":
                     gains.update(stage_throttle(run, gains))
                     save_gains(gains_path, gains)
