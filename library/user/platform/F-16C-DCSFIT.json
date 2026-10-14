@@ -22,8 +22,8 @@
     "CLIMB_FPA_HI": 10.0,
     "CLIMB_FPA_ALT_LO": 5000.0,
     "CLIMB_FPA_ALT_HI": 11000.0,
-    "LAUNCH_DELAY_MIN": 3.0,
-    "LAUNCH_DELAY_MAX": 7.0
+    "LAUNCH_DELAY_MIN": 7.0,
+    "LAUNCH_DELAY_MAX": 14.0
   },
   "sources": {
     "WPN_COUNT": "standard BVR loadout in this project",
@@ -35,8 +35,8 @@
     "CLIMB_FPA_HI": "as CLIMB_FPA_LO",
     "CLIMB_FPA_ALT_LO": "as CLIMB_FPA_LO",
     "CLIMB_FPA_ALT_HI": "as CLIMB_FPA_LO",
-    "LAUNCH_DELAY_MIN": "estimate (14 October) from the stick pilot's fire job in DCS: the cursor to the target's bearing, target management right until the TWS track is bugged (one press when the track file is built, 2 s apart), master arm, the weapon release held 1.5 s; to be replaced by the requested-to-launched times of dcs_live.py --stick runs",
-    "LAUNCH_DELAY_MAX": "as LAUNCH_DELAY_MIN"
+    "LAUNCH_DELAY_MIN": "measured 2026-10-14 from timed bugs and launches (and any live runs) (fire_delay_20261014_141533.json): the 10th and 90th percentiles, to 0.5 s",
+    "LAUNCH_DELAY_MAX": "measured 2026-10-14 from timed bugs and launches (and any live runs) (fire_delay_20261014_141533.json): the 10th and 90th percentiles, to 0.5 s"
   },
   "based_on": "F-16C-DCS"
 }
