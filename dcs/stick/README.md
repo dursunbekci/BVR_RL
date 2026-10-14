@@ -537,3 +537,13 @@ as a stick too strong, and the stick factor fell from 0.96 to 0.54 in 4 s; the n
 airframe's NZ_TAU_ON/OFF, else 0.9 / 2.0 s) and learns the factor only from what that does not explain, and only once the
 lag has caught up; `g_lag` uses only samples with the factor within 10% of 1. Both records then give the same lag: 0.93 /
 1.97 s (fifth) and 1.00 / 1.93 s (seventh).
+
+**Check flight, the fixed pilot against the corrected F-16C-DCSFIT (14 October, `manoeuvre_20261014_112025`)**: passes,
+with no fitting on this record: mismatch 2.73; turn rates 9.3 / 10.0 / 9.4 against 9.5 / 9.8 / 9.4 deg/s, peak g 6.57-6.72
+against 6.61-6.65, the climb in each turn 150 / 59 / 131 against 140 / 54 / 138 m; the return turn now matches (speed lost
+63 against 68 m/s; it was 50 against 66 with the wrongly learnt factor); acceleration 2.84 against 2.63, final speeds within 3
+m/s. Measured again: CL 1.27 (1.28 set), g lag 0.85 / 2.00 s (1.00 / 1.93 set). Left as it is: the simulator slows at idle
+about 20% faster (-3.30 against -2.75 m/s2). **F-16C-DCSFIT is the platform to train on.** The stick factor held 1.00 in the
+turns but learnt 0.69 in the pull-up into the climb at 300 m/s, and that one factor then under-pulled the last turn at 176
+m/s (4.05 g asked, 3.24 flown): it is now learnt per speed (150-450 m/s in 50 m/s bands, interpolated), so what is learnt at
+one speed stays there.

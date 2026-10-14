@@ -343,6 +343,20 @@ class Hold:
     NZ_GAIN_LIM = (0.5, 1.6)
     NZ_TAU = 0.5           # s, the filter on the measured g
     LAG_ON, LAG_OFF = 0.9, 2.0   # s, DCS's g response when the airframe does not give one
+    # The stick's g per unit depends on the speed: on 14 October the factor learnt 0.69 pulling up at 300 m/s, and that
+    # one factor then under-pulled a turn at 176 m/s (4.05 g asked, 3.24 flown). So it is learnt per speed, in these
+    # bands (m/s, linear between them, flat beyond the ends).
+    FACTOR_TAS = (150.0, 200.0, 250.0, 300.0, 350.0, 400.0, 450.0)
+
+    def _band(self, tas):
+        """(lower band index, weight of the upper one) for a speed."""
+        b = self.FACTOR_TAS
+        if tas <= b[0]:
+            return 0, 0.0
+        if tas >= b[-1]:
+            return len(b) - 2, 1.0
+        i = max(k for k in range(len(b) - 1) if b[k] <= tas)
+        return i, (tas - b[i]) / (b[i + 1] - b[i])
     NZ_LEAD = 0.4          # s: the g that holds the flight path is for the bank this far ahead (DCS's g needs about a
                            # second to unload: rolling out of 80 deg it still pulled 6 g at 50 and climbed 24 m/s)
     KP_V = 0.04            # throttle position per m/s of speed error
@@ -358,7 +372,8 @@ class Hold:
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
-        self.nz_gain, self.t_nz = 1.0, None    # the g correction: a factor on the pull the stick curve gives
+        self.nz_gain, self.t_nz = 1.0, None    # the g correction: a factor on the pull the stick curve gives, at this speed
+        self.nz_gains = [1.0] * len(self.FACTOR_TAS)   # learnt per speed (interpolated between these)
         self.nz_f = self.nz_cmd_f = None       # the measured g and the demand, through the same filter
         # DCS's g follows the stick with a lag (measured 14 October: about 0.9 s building up, 2.0 s coming off; the
         # airframe's NZ_TAU_ON/OFF when it has them). The factor learns only from what the lag does not explain: on
@@ -464,9 +479,13 @@ class Hold:
                       and abs(nz_cmd - self.nz_pred) < 0.5)     # the lag has caught up with the demand
             self.last.update(nz_cmd=nz_cmd, nz_f=self.nz_f, learning=bool(steady and not (sat > 0 and err > 0)
                                                                          and not (sat < 0 and err < 0)))
+            i, w = self._band(tas)
             if steady and not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
                 lo, hi = self.NZ_GAIN_LIM
-                self.nz_gain = max(lo, min(hi, self.nz_gain + self.KI_NZ * err / (self.nz_pred - 1.0) * dt))
+                step = self.KI_NZ * err / (self.nz_pred - 1.0) * dt
+                for j, wj in ((i, 1.0 - w), (i + 1, w)):
+                    self.nz_gains[j] = max(lo, min(hi, self.nz_gains[j] + step * wj))
+            self.nz_gain = self.nz_gains[i] * (1.0 - w) + self.nz_gains[i + 1] * w
         if g.get("pitch_curve"):
             d = nz_cmd - 1.0                     # pull and push have their own curves
             if d > 0:
