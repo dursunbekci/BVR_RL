@@ -586,9 +586,30 @@ def test_g_loop():
         h.axes(fr, math.radians(150), 6950.0, v=tas, dive=0.4, climb=0.3)
         lims[tas] = (h.last["nz_avail"], math.degrees(h.last["bank_lim"]))
     assert lims[312.0][1] == 80.0 and 65 < lims[200.0][1] < 78 and 50 < lims[150.0][1] < 66, lims
+    # a stick that is right and a g as slow as DCS's (1.5 s): the lag must not be learnt as a stick too strong (in DCS
+    # the factor fell to 0.54 rolling out of the 180 deg turn); it is, with no lag expected
+    facs = {}
+    for lag in (None, (0.01, 0.01)):
+        link = FakeLink(nz_per_cmd=6.0, nz_tau=1.5)
+        run = stick_test.Run(link, None, "g", stick_test.Limits(min_agl=0, min_alt=0))
+        f0 = run.next()
+        h = stick_test.Hold(gains, bank_max=math.radians(80), nz_max=8.0)
+        if lag:
+            h.lag = lag
+        tgt = f0.hdg + math.radians(170)
+        low = [1.0]
+
+        def fly(f, tau, h=h, tgt=tgt, alt=f0.alt, low=low):
+            a = h.axes(f, tgt, alt, v=None, dive=math.radians(25), climb=math.radians(15))
+            low[0] = min(low[0], h.nz_gain)
+            return a
+        stick_test.drive(run, 40.0, fly)
+        facs[lag] = low[0]
+    assert facs[None] > 0.85 and facs[(0.01, 0.01)] < facs[None] - 0.05, facs
     print(f"  g loop ...................... OK  (80 deg of bank, the stick 40% stronger than its curve and g 0.25 s "
           f"late: factor {hold.nz_gain:.2f} learnt (0.71), altitude within {climb:.0f} m through turn and roll-out; bank limit 80/{lims[200.0][1]:.0f}/"
-          f"{lims[150.0][1]:.0f} deg at 312/200/150 m/s)")
+          f"{lims[150.0][1]:.0f} deg at 312/200/150 m/s; a right stick with DCS's slow g: factor at least "
+          f"{facs[None]:.2f}, {facs[(0.01, 0.01)]:.2f} without the lag expected)")
 
 
 def test_manoeuvre():

@@ -526,3 +526,14 @@ time uploaded with the comparison) showed two causes, neither of them thrust or 
    from F-16C-DCS (`--fit-from`), also for a record flown with an earlier fit's limits, so factors do not compound.
 
 Next: fly the program again (the pilot now steers by the course), then `--fit` on that record.
+
+**Seventh try, steering by the course (14 October, `manoeuvre_20261014_104111`)**: the turns now line up. Before the fit,
+against the F-16C-DCSFIT of the fifth record: turn rate 9.3 / 9.9 / 8.3 against 9.2, speed lost in 180 deg 109 against
+107 m/s, mismatch 3.30 (3.76 before). The first `--fit` with the lag (1.40 / 1.85 s) took it to 2.40, and with it the
+simulator's turns climbed and pulled as DCS's (peak g 6.49-6.56 against 6.53-6.64, altitude 130 / 54 against 144 / 57 m).
+One thing was still the pilot's: rolling out of the 180 deg turn, the demand came down while DCS's g lagged, the lag read
+as a stick too strong, and the stick factor fell from 0.96 to 0.54 in 4 s; the next turn asked 7 g with the stick at 0.5-0.7
+(flew 4.9), which also made the g look 1.4 s slow to build. Two changes: `Hold` now passes its demand through DCS's lag (the
+airframe's NZ_TAU_ON/OFF, else 0.9 / 2.0 s) and learns the factor only from what that does not explain, and only once the
+lag has caught up; `g_lag` uses only samples with the factor within 10% of 1. Both records then give the same lag: 0.93 /
+1.97 s (fifth) and 1.00 / 1.93 s (seventh).

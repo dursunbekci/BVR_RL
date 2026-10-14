@@ -357,8 +357,10 @@ def g_lag(rec):
     lag that best turns the demand into the measured g, as f16_sim's NZ_TAU_ON and NZ_TAU_OFF. Returns (tau_on,
     tau_off, RMS error in g with that lag, without any, samples), or None for a record without the pilot's demand."""
     import numpy as np
+    # only while the pilot's stick factor was about 1: with another the stick asked for other than the demand (on
+    # 14 October a factor of 0.53, learnt wrongly, made the g build up as if 1.4 s late)
     ss = [s for s in rec["samples"] if s.get("nz") is not None and s.get("nz_cmd") is not None
-          and s.get("stick") is not None]
+          and s.get("stick") is not None and abs((s.get("nz_gain") or 1.0) - 1.0) <= 0.1]
     if len(ss) < 200:
         return None
     t = np.array([s["t"] for s in ss])
