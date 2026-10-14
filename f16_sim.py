@@ -124,6 +124,13 @@ class F16Cfg:
     K_V_INT    = 0.004       # throttle change per (m/s · s) of integrated error
     THROT_TC   = 2.5         # s engine lag time constant
 
+    # g response: the load factor follows the autopilot's demand with these
+    # first-order time constants, building up (away from 1 g) and coming off
+    # (back towards 1 g). 0 = at once, as before. The DCS F-16C flown by the
+    # stick pilot measured about 1 s and 1.8 s (dcs/stick/manoeuvre.py).
+    NZ_TAU_ON  = 0.0
+    NZ_TAU_OFF = 0.0
+
     # Mach-dependent curves (defined below the class)
     @staticmethod
     def thrust_mach_factor(mach): return _thrust_mach_factor(mach)
@@ -290,6 +297,12 @@ class F16Aircraft:
         nz_cmd    = ((math.cos(self.gamma) + self.cfg.K_GAM_NZ * gamma_err)
                      / max(math.cos(self.phi), 0.1))
         nz_cmd    = float(np.clip(nz_cmd, self.cfg.NZ_NEG_MAX, nz_avail))
+        tau_on, tau_off = getattr(self.cfg, "NZ_TAU_ON", 0.0), getattr(self.cfg, "NZ_TAU_OFF", 0.0)
+        if tau_on > 0.0 or tau_off > 0.0:
+            # the g lags the demand; building up is away from 1 g, coming off back towards it
+            tau = tau_on if (nz_cmd - self.nz) * (self.nz - 1.0) >= 0.0 else tau_off
+            nz = self.nz + (nz_cmd - self.nz) * (min(1.0, dt / tau) if tau > 0.0 else 1.0)
+            nz_cmd = float(np.clip(nz, self.cfg.NZ_NEG_MAX, nz_avail))
 
         # ── 6. aerodynamics ──────────────────────────────────────────
         CL   = float(np.clip(nz_cmd * W / max(q_dyn * self.cfg.S_REF, 1.0),

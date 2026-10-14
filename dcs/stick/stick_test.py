@@ -121,6 +121,12 @@ class Frame:
         self.fuel_flow = _both(d.get("eng"), "FuelConsumption")
         self.x, self.z = _num(me.get("x")), _num(me.get("z"))
         self.vel = d.get("vel") or {}
+        # the course: where the aircraft goes (the velocity vector; DCS x north, z east), not where the nose points.
+        # In a 6 g turn the nose is 15-22 deg inside the flight path (the angle of attack, banked); the simulator's
+        # heading, and the policy's, is the course.
+        vx, vz = _num(self.vel.get("x")), _num(self.vel.get("z"))
+        self.crs = (math.atan2(vz, vx) % (2 * math.pi) if vx is not None and vz is not None
+                    and math.hypot(vx, vz) > 30.0 else self.hdg)
         self.ax = ax
         self.ax_seq = ax.get("seq")
 
@@ -395,7 +401,9 @@ class Hold:
         margin = getattr(self.airframe, "BANK_NZ_MARGIN", 0.85) if self.airframe is not None else 0.85
         bank_lim = min(self.bank_max, math.acos(min(1.0, math.cos(gam0) / max(margin * nz_av, 1e-3))))
         self.last = {"nz_avail": nz_av, "bank_lim": bank_lim}
-        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
+        trk = getattr(f, "crs", None)
+        trk = f.hdg if trk is None else trk        # the course, as the simulator's autopilot (its chi)
+        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - trk)))
         if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
             inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
             self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s

@@ -113,7 +113,7 @@ def stage_manoeuvre(run, gains, out_dir="dcs_runs", platform_id="F-16C-DCS", pro
         print(f"  WARNING: platform {platform_id} not loaded ({e}): no g and bank limits from its airframe")
     hold = Hold(gains, bank_max=BANK_MAX_DEG * D2R, nz_max=NZ_MAX, vs_max=VS_MAX, airframe=airframe)
     f0 = run.next()
-    start = {"hdg": f0.hdg, "alt": f0.alt, "tas": f0.tas, "mach": f0.mach, "fuel": _fuel(f0)}
+    start = {"hdg": f0.crs, "alt": f0.alt, "tas": f0.tas, "mach": f0.mach, "fuel": _fuel(f0)}
     segs = targets(start, program)
     total = segs[-1][1]
     print(f"  start: heading {start['hdg'] / D2R:.0f}, {start['alt']:.0f} m, {start['tas']:.0f} m/s "
@@ -128,7 +128,8 @@ def stage_manoeuvre(run, gains, out_dir="dcs_runs", platform_id="F-16C-DCS", pro
         ax = hold.axes(f, s[3], s[4], v=s[5], dive=DIVE_FPA, climb=climb(f.alt))
         if tau - state["last"] >= 0.1 - 1e-6:
             state["last"] = tau
-            samples.append({"t": round(tau, 3), "hdg": f.hdg, "alt": f.alt, "tas": f.tas, "mach": f.mach,
+            # hdg is the course (the velocity vector's), as the simulator's; nose is where the nose points
+            samples.append({"t": round(tau, 3), "hdg": f.crs, "nose": f.hdg, "alt": f.alt, "tas": f.tas, "mach": f.mach,
                             "bank": f.bank, "nz": f.nz, "vs": f.vs, "pitch": f.pitch, "fuel": _fuel(f),
                             "thr": ax.get("throttle") if ax else None, "seg": s[2],
                             # the pilot's own state: the g it asked for, its stick factor, whether it was learning it
@@ -333,6 +334,48 @@ def wing_limit(rec, cfg):
     return float(np.percentile(out, 90)), float(np.median(out)), len(out)
 
 
+def _lag_model(t, cmd, nz, sat, tau_on, tau_off):
+    """The simulator's g response (f16_sim: first order, tau_on away from 1 g, tau_off back towards it) driven by the
+    pilot's demand; where the stick was at its stop the demand is not what the aircraft was asked for, so there the
+    model is put back on the measured g."""
+    import numpy as np
+    out = np.empty_like(nz)
+    y = nz[0]
+    for i in range(len(t)):
+        if sat[i]:
+            y = nz[i]
+        else:
+            dt = 0.0 if i == 0 else t[i] - t[i - 1]
+            tau = tau_on if (cmd[i] - y) * (y - 1.0) >= 0.0 else tau_off
+            y += (cmd[i] - y) * min(1.0, dt / tau)
+        out[i] = y
+    return out
+
+
+def g_lag(rec):
+    """How the DCS Viper's g follows the pilot's demand: the time constants (building up, coming off) of a first-order
+    lag that best turns the demand into the measured g, as f16_sim's NZ_TAU_ON and NZ_TAU_OFF. Returns (tau_on,
+    tau_off, RMS error in g with that lag, without any, samples), or None for a record without the pilot's demand."""
+    import numpy as np
+    ss = [s for s in rec["samples"] if s.get("nz") is not None and s.get("nz_cmd") is not None
+          and s.get("stick") is not None]
+    if len(ss) < 200:
+        return None
+    t = np.array([s["t"] for s in ss])
+    nz = np.array([s["nz"] for s in ss])
+    cmd = np.array([s["nz_cmd"] for s in ss])
+    sat = np.array([abs(s["stick"]) >= 0.98 for s in ss])
+    use = ~sat & ((np.abs(cmd - 1.0) > 0.3) | (np.abs(nz - 1.0) > 0.3))     # manoeuvring, not cruising
+    if use.sum() < 50:
+        return None
+    rms = lambda a, b: float(np.sqrt(np.mean((_lag_model(t, cmd, nz, sat, a, b) - nz)[use] ** 2)))
+    best = min((rms(a, b), a, b) for a in np.arange(0.1, 2.05, 0.1) for b in np.arange(0.1, 3.05, 0.1))
+    _, a0, b0 = best
+    best = min((rms(a, b), a, b) for a in np.arange(max(0.05, a0 - 0.1), a0 + 0.11, 0.025)
+               for b in np.arange(max(0.05, b0 - 0.1), b0 + 0.11, 0.025))
+    return float(best[1]), float(best[2]), best[0], rms(1e-3, 1e-3), int(use.sum())
+
+
 def mismatch(rec, sim):
     """How far the simulator's flight is from DCS's: speed (per 5 m/s), heading (per 5 deg) and altitude (per
     50 m) RMS over the whole program, the three summed."""
@@ -386,12 +429,16 @@ def nelder_mead(f, x0, lo, hi, step=0.15, iters=120, log=print):
     return pts[i], vals[i]
 
 
-def fit(rec, platform_id="F-16C-DCS", fuel_frac=None, iters=120, log=print, cl_max=None):
+def fit(rec, platform_id="F-16C-DCS", fuel_frac=None, iters=120, log=print, cl_max=None, lag=None):
     """Factors on the airframe's thrust, CD0, K_IND, CL_MAX and DRAG_RISE_PEAK that make the simulator fly
-    the recorded program closest to DCS. Returns (factors, mismatch before, after, fitted config)."""
+    the recorded program closest to DCS. cl_max and lag (tau_on, tau_off), measured, are set, not fitted.
+    Returns (factors, mismatch before, after, fitted config)."""
+    import copy
     import numpy as np
     from bvr_library import load_platform
-    base = load_platform(platform_id).airframe
+    base = copy.copy(load_platform(platform_id).airframe)
+    if lag is not None:
+        base.NZ_TAU_ON, base.NZ_TAU_OFF = lag
     lo = np.array([b[0] for *_, b in FIT_PARAMS])
     hi = np.array([b[1] for *_, b in FIT_PARAMS])
     x0 = np.ones(len(FIT_PARAMS))
@@ -405,7 +452,7 @@ def fit(rec, platform_id="F-16C-DCS", fuel_frac=None, iters=120, log=print, cl_m
     return x, m0, m1, _cfg_with(base, x)
 
 
-def save_fit(platform_id, x, new_id, note=""):
+def save_fit(platform_id, x, new_id, note="", lag=None):
     """The fitted airframe and a platform using it, as user library items (new ids)."""
     from bvr_library import get_item, save_item, load_platform
     base_pf = get_item("platform", platform_id)
@@ -416,9 +463,12 @@ def save_fit(platform_id, x, new_id, note=""):
     pr["T_AB_SL"] = round(float(pr["T_AB_SL"]) * x[0], 1)
     for i, k in ((1, "CD0"), (2, "K_IND"), (3, "CL_MAX"), (4, "DRAG_RISE_PEAK")):
         pr[k] = round(float(pr[k]) * x[i], 5)
+    if lag is not None:
+        pr["NZ_TAU_ON"], pr["NZ_TAU_OFF"] = round(float(lag[0]), 3), round(float(lag[1]), 3)
     af["params"] = pr
     af["description"] = (f"{base_af['id']} with thrust x{x[0]:.3f}, CD0 x{x[1]:.3f}, K_IND x{x[2]:.3f}, "
-                         f"CL_MAX x{x[3]:.3f}, DRAG_RISE_PEAK x{x[4]:.3f}, fitted by dcs/stick/manoeuvre.py to the "
+                         f"CL_MAX x{x[3]:.3f}, DRAG_RISE_PEAK x{x[4]:.3f}"
+                         f"{f', g lag {lag[0]:.2f} s building up and {lag[1]:.2f} s coming off' if lag else ''}, fitted by dcs/stick/manoeuvre.py to the "
                          f"player's F-16C in DCS flown by the stick pilot. {note}").strip()
     af.pop("builtin", None)
     save_item(af)
@@ -471,6 +521,10 @@ def main(argv=None):
                     help="fit the airframe's thrust, CD0, K_IND, CL_MAX and transonic drag to the record, compare again "
                          "with the fit, and write it to the library as --save-as (a new airframe and platform)")
     ap.add_argument("--save-as", default="F-16C-DCSFIT", help="--fit: id of the new airframe and platform")
+    ap.add_argument("--fit-from", default="F-16C-DCS",
+                    help="--fit: the platform whose airframe the factors apply to (default F-16C-DCS, also when the "
+                         "record was flown with the limits of an earlier fit)")
+    ap.add_argument("--no-lag", action="store_true", help="--fit: leave the g response instant (no NZ_TAU_ON/OFF)")
     ap.add_argument("--iters", type=int, default=150, help="--fit: optimiser iterations (default 150; about 5 minutes)")
     ap.add_argument("--fuel-frac", type=float, default=None,
                     help="the simulator's fuel at the start, a fraction of full (default: DCS's, else 0.6)")
@@ -490,6 +544,16 @@ def main(argv=None):
         cl_meas = wl[0]
         print(f"\n  wing limit in DCS (stick at its stop, above 2 g; {wl[2]} samples): CL {wl[0]:.2f} (90th percentile), "
               f"median {wl[1]:.2f}; the simulator's {pid} has CL_MAX {load_platform(pid).airframe.CL_MAX:.2f}")
+    lag = g_lag(rec)
+    if lag:
+        af = load_platform(pid).airframe
+        print(f"  g response in DCS (the pilot's demand to the measured g, stick off its stop; {lag[4]} samples): "
+              f"{lag[0]:.2f} s building up, {lag[1]:.2f} s coming off (error {lag[2]:.2f} g RMS; {lag[3]:.2f} with none); "
+              f"the simulator's {pid} has {getattr(af, 'NZ_TAU_ON', 0.0):.2f} and {getattr(af, 'NZ_TAU_OFF', 0.0):.2f}")
+    if not any("nose" in s for s in rec["samples"][:5]):
+        print("  NOTE: this record's heading is where the nose pointed (recorded before the course was): in a hard turn "
+              "the nose leads the flight path by up to 20 deg, and the pilot then steered by it, so heading and turn "
+              "figures compare unlike things")
     print(f"\n  mismatch (speed RMS / 5 m/s + heading RMS / 5 deg + altitude RMS / 50 m): {mismatch(rec, sim):.3f}")
     print("\n  what the differences point at:")
     for n in advice(rows):
@@ -498,20 +562,24 @@ def main(argv=None):
     plot(rec, sim, base + "_compare.png")
     out = {"platform": pid, "fuel_frac": ff, "rows": rows}
     if a.fit:
+        fpid = a.fit_from
+        fit_lag = None if (a.no_lag or not lag) else (lag[0], lag[1])
         if cl_meas is not None:
-            print(f"  --fit: CL_MAX set to the measured {cl_meas:.2f}; thrust and drag are fitted")
-        x, m0, m1, cfg = fit(rec, pid, a.fuel_frac, iters=a.iters, cl_max=cl_meas)
+            print(f"  --fit (on {fpid}'s airframe): CL_MAX set to the measured {cl_meas:.2f}"
+                  f"{f', the g lag to {fit_lag[0]:.2f} / {fit_lag[1]:.2f} s' if fit_lag else ''}; thrust and drag are fitted")
+        x, m0, m1, cfg = fit(rec, fpid, a.fuel_frac, iters=a.iters, cl_max=cl_meas, lag=fit_lag)
         print(f"\n  fitted: mismatch {m0:.3f} -> {m1:.3f}")
         for (name, what, _), v in zip(FIT_PARAMS, x):
             print(f"    {name:15s} x{v:.3f}   ({what})")
-        sim2, _ = simulate(rec, pid, a.fuel_frac, cfg=cfg)
+        sim2, _ = simulate(rec, fpid, a.fuel_frac, cfg=cfg)
         print("\n  with the fit:")
         rows2 = compare(rec, sim2)
         plot(rec, sim2, base + "_fit.png")
-        new = save_fit(pid, x, a.save_as, note=f"Record {os.path.basename(a.record)}; mismatch {m0:.3f} -> {m1:.3f}.")
+        new = save_fit(fpid, x, a.save_as, note=f"Record {os.path.basename(a.record)}; mismatch {m0:.3f} -> {m1:.3f}.",
+                       lag=fit_lag)
         print(f"\n  saved to the library: airframe and platform {new} (train with --platform {new})")
         out.update(fit={n: float(v) for (n, *_), v in zip(FIT_PARAMS, x)}, mismatch=[m0, m1], rows_fit=rows2,
-                   saved_as=new)
+                   saved_as=new, fit_from=fpid, g_lag=list(fit_lag) if fit_lag else None)
     with open(base + "_compare.json", "w") as fh:
         json.dump(out, fh, indent=1)
     print(f"\n  written: {base}_compare.png{', ' + base + '_fit.png' if a.fit else ''}, {base}_compare.json")

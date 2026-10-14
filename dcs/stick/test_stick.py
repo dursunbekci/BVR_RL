@@ -640,8 +640,77 @@ def test_manoeuvre():
     with contextlib.redirect_stdout(io.StringIO()):
         xc, *_ = M.fit(rec, "F-16C-DCS", 0.6, iters=3, cl_max=1.05)
     assert abs(xc[3] * base.CL_MAX - 1.05) < 1e-9, xc
+    # the g lag: a demand turned into g by the simulator's lag (0.8 s building up, 1.6 s coming off) gives them back
+    t = np.arange(0, 120, 0.1)
+    cmd = 1.0 + 4.5 * (np.sin(t / 3.0) > 0.3) - 1.5 * (np.sin(t / 5.0) < -0.8)
+    nz = M._lag_model(t, cmd, np.full_like(t, 1.0), np.zeros(len(t), bool), 0.8, 1.6)
+    lg = M.g_lag({"samples": [{"t": a, "nz": b, "nz_cmd": c, "stick": 0.5} for a, b, c in zip(t, nz, cmd)]})
+    assert lg and abs(lg[0] - 0.8) < 0.06 and abs(lg[1] - 1.6) < 0.06 and lg[2] < 0.05 < lg[3], lg
+    # and the fit keeps a measured lag in the airframe it fits
+    with contextlib.redirect_stdout(io.StringIO()):
+        *_, cfg_l = M.fit(rec, "F-16C-DCS", 0.6, iters=2, lag=(0.8, 1.6))
+    assert (cfg_l.NZ_TAU_ON, cfg_l.NZ_TAU_OFF) == (0.8, 1.6) and getattr(base, "NZ_TAU_ON", 0.0) == 0.0
     print(f"  manoeuvre compare and fit ... OK  (program flown and compared; the fit takes the mismatch from "
-          f"{m0:.2f} to {m1:.2f}, thrust x{x[0]:.2f}, CL_MAX x{x[3]:.2f} for x0.85, x0.90)")
+          f"{m0:.2f} to {m1:.2f}, thrust x{x[0]:.2f}, CL_MAX x{x[3]:.2f} for x0.85, x0.90; g lag "
+          f"{lg[0]:.2f} / {lg[1]:.2f} s measured for 0.8 / 1.6)")
+
+
+def test_sim_g_lag():
+    """f16_sim's g response: instant with NZ_TAU_ON/OFF 0 (every library airframe before 14 October), lagged with them."""
+    import copy
+    import math
+    import numpy as np
+    from f16_sim import F16Aircraft
+    from bvr_library import load_platform
+    base = load_platform("F-16C-DCS").airframe
+    out = {}
+    for taus in ((0.0, 0.0), (0.9, 2.0)):
+        c = copy.copy(base)
+        c.NZ_TAU_ON, c.NZ_TAU_OFF = taus
+        ac = F16Aircraft(np.random.default_rng(0), cfg=c)
+        ac.reset_state(0.0, 0.0, 7000.0, 0.0, 280.0, fuel_frac=0.6)
+        nz, alt = [], []
+        for i in range(1000):                       # 20 s: a hard turn to 90 deg, then level
+            ac.step(0.02, {"hdgCmd": math.pi / 2, "altTarget": 7000.0, "V": 280.0, "altFPA": 0.4, "climbFPA": 0.4})
+            nz.append(ac.nz)
+            alt.append(ac.z)
+        out[taus] = (nz, alt)
+    n0, n1 = out[(0.0, 0.0)][0], out[(0.9, 2.0)][0]
+    k = next(i for i, v in enumerate(n0) if v > 4.0)
+    assert n1[k] < n0[k] - 1.0, (k, n0[k], n1[k])            # when the instant g passes 4, the lagged one is building
+    sink0 = 7000.0 - min(out[(0.0, 0.0)][1])
+    sink1 = 7000.0 - min(out[(0.9, 2.0)][1])
+    assert sink1 > sink0 + 5.0, (sink0, sink1)               # the lag lets the nose drop at the roll-in, as in DCS
+    print(f"  simulator g lag ... OK  ({k * 0.02:.1f} s into the turn {n0[k]:.1f} g instant, {n1[k]:.1f} g lagged; "
+          f"altitude lost {sink0:.0f} against {sink1:.0f} m)")
+
+
+def test_course():
+    """The pilot steers by the course (the velocity vector), as the simulator's autopilot, not by the nose: in a hard
+    turn DCS's nose is 15-22 deg inside the flight path."""
+    import math
+    import stick_test
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "roll_curve": [[0.5, 1.3], [1.0, 2.6]],
+             "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    crs = math.radians(40.0)
+    d = {"t": 1.0, "asl": 7000.0, "tas": 250.0, "mach": 0.8, "g": {"y": 5.0}, "vs": 0.0,
+         "me": {"hdg": math.radians(60.0), "pitch": 0.1, "bank": math.radians(70.0)},
+         "vel": {"x": 250.0 * math.cos(crs), "y": 0.0, "z": 250.0 * math.sin(crs)}}
+    f = stick_test.Frame(d)
+    assert abs(f.crs - crs) < 1e-9 and abs(f.hdg - math.radians(60.0)) < 1e-9, (f.crs, f.hdg)
+    # aiming at 60: by the nose there is nothing left to turn (wings level asked), by the course 20 deg (40 of bank)
+    h = stick_test.Hold(gains, bank_max=math.radians(80.0), nz_max=8.0)
+    h.axes(f, math.radians(60.0), 7000.0)
+    assert h.last["bank_lim"] > math.radians(40.0)
+    f2 = stick_test.Frame(dict(d, vel={}))          # no velocity: the nose, as before
+    assert f2.crs == f2.hdg
+    roll_course = h.axes(f, math.radians(60.0), 7000.0)["roll"]
+    h2 = stick_test.Hold(gains, bank_max=math.radians(80.0), nz_max=8.0)
+    roll_nose = h2.axes(f2, math.radians(60.0), 7000.0)["roll"]
+    # banked 70: by the course (40 deg asked) it rolls out less hard than by the nose (0 asked)
+    assert roll_nose < roll_course < 0.0, (roll_nose, roll_course)
+    print(f"  pilot steers by the course ... OK  (nose 60, course 40, aiming 60: roll {roll_course:+.2f} by the "
+          f"course, {roll_nose:+.2f} by the nose)")
 
 
 def test_cockpit():
@@ -995,6 +1064,8 @@ if __name__ == "__main__":
     test_cockpit()
     test_g_loop()
     test_manoeuvre()
+    test_sim_g_lag()
+    test_course()
     test_stall_message()
     test_install()
-    print("14/14 passed")
+    print("16/16 passed")

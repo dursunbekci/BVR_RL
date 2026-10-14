@@ -96,6 +96,11 @@ SCHEMA = {
         P("FF_AB", "Fuel flow, afterburner", "kg/s", "Engine", 0, 30),
         P("THROT_TC", "Engine lag", "s", "Engine", 0.1, 20),
         P("NZ_POS_MAX", "Positive g limit", "g", "Limits", 1, 20),
+        P("NZ_TAU_ON", "g response, building up", "s", "Limits", 0.0, 5.0, advanced=True, default=0.0,
+          help="The load factor follows the autopilot's demand with this time constant when it "
+               "grows away from 1 g. 0: at once (items saved before this parameter existed)."),
+        P("NZ_TAU_OFF", "g response, coming off", "s", "Limits", 0.0, 5.0, advanced=True, default=0.0,
+          help="The same, when the load factor goes back towards 1 g (unloading out of a turn)."),
         P("NZ_NEG_MAX", "Negative g limit", "g", "Limits", -10, 0),
         P("V_STALL", "Stall speed", "m/s", "Limits", 15, 200),
         P("MACH_MAX", "Maximum Mach", "Mach", "Limits", 0.2, 3.5),

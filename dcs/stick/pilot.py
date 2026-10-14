@@ -110,7 +110,7 @@ class StickPilot(threading.Thread):
         if self.target is None:
             if f.hdg is None or f.alt is None:
                 return None
-            self.target = (f.hdg, f.alt, f.tas or 250.0, None, None)
+            self.target = (f.crs if f.crs is not None else f.hdg, f.alt, f.tas or 250.0, None, None)
         hdg, alt, v, dive, climb = self.target
         return self.hold.axes(f, hdg, alt, v=v, dive=dive, climb=climb)
 

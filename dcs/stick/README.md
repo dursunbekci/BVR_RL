@@ -502,3 +502,27 @@ deg/s against the simulator's 9.2 while the heading error is above 30 deg, and c
 speed still pulls 6.6-6.7 g for a moment (the simulator's level turn at 80 deg is 5.76 g). That is the pilot's roll-in, not
 the airframe, and the fit cannot (and should not) absorb it. Next: fly the program with the fitted limits
 (`stick_test.py manoeuvre --platform F-16C-DCSFIT`) and compare against F-16C-DCSFIT.
+
+**Sixth try, with F-16C-DCSFIT's limits (14 October, `manoeuvre_20261014_101605`)**: speed, climbs and descents matched
+again (speed lost in the 180 deg turn 108 against 112 m/s, acceleration 2.52 against 2.80, deceleration -3.05 against
+-2.74; the wing limit measured again 1.26 for the 1.28 set), mismatch 3.76. The turns did not: DCS's heading ran ahead
+(12-12.5 against 9.2 deg/s), then stopped for 8 s, 20 deg short, while the aircraft climbed 110-150 m. The record (this
+time uploaded with the comparison) showed two causes, neither of them thrust or drag:
+
+1. **The heading was the nose's.** `LoGetSelfData().Heading` is where the nose points; the simulator's heading, and the
+   policy's (`dcs_world.py` takes it from the velocity), is the course. In a 6 g turn the nose is inside the flight path by
+   the angle of attack: 15-22 deg in the raw frames of the third try (nose minus course against AoA: 15.2 at 15.5, 21.1
+   at 21.4 deg). The pilot steered by the nose, so it rolled out about 20 deg early; the "heading" then fell back to the
+   course as the g came off, which is the 8 s stop. Now `Frame.crs` is the course from `LoGetVectorVelocity` (x north,
+   z east; the nose when slower than 30 m/s or without it), `Hold` and `pilot.py` steer by it, and the manoeuvre record
+   keeps the course as `hdg` and the nose as `nose`. `manoeuvre.py` says when a record is from before.
+2. **The g lags.** The pilot's demand turns into DCS's g as a first-order lag of 0.9 s building up and 2.0 s coming off
+   (`g_lag`: fitted over the record wherever the stick was off its stop; the error is 0.42 g RMS with the lag, 1.18 g
+   without). The roll-in sank 30 m before the g came, the altitude law then asked for 6.6 g at 80 deg of bank, and on
+   the roll-out the g stayed: 4.5 g at 53 deg of bank, 35 m/s of climb. The simulator's g was instant. `f16_sim` now has
+   `NZ_TAU_ON` and `NZ_TAU_OFF` (airframe parameters, 0 by default: every existing platform and checkpoint flies exactly
+   as before; 52/52 of `test_sim.py`); `manoeuvre.py` prints the measured lag and `--fit` writes it into the fitted
+   airframe with the measured CL_MAX, and fits thrust and drag on top (`--no-lag` leaves it out). The fit now always starts
+   from F-16C-DCS (`--fit-from`), also for a record flown with an earlier fit's limits, so factors do not compound.
+
+Next: fly the program again (the pilot now steers by the course), then `--fit` on that record.
