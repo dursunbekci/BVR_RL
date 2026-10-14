@@ -333,7 +333,7 @@ class Hold:
     # unit grows with dynamic pressure, so the correction is a factor on the pull (an added g, learnt at 6 g,
     # was wrong at 1 g: out of a turn the aircraft sank). A fast one (1.5 g per g-second, added) made the stick
     # go from stop to stop in DCS (+3.4 to -1.5 g every 4 s: the g answers 0.23 s late and unloads in a second).
-    KI_NZ = 0.3            # per second, on the relative g error
+    KI_NZ = 0.5            # per second, on the relative g error
     NZ_GAIN_LIM = (0.5, 1.6)
     NZ_TAU = 0.5           # s, the filter on the measured g
     NZ_LEAD = 0.4          # s: the g that holds the flight path is for the bank this far ahead (DCS's g needs about a
@@ -435,7 +435,10 @@ class Hold:
             # stop, not when the wing's limit is what holds the g down
             steady = (abs(self.roll_rate) < math.radians(20) and abs(err) < 2.5 and nz_cmd < nz_av - 0.2
                       and nz_cmd > 2.0                  # a real pull: the factor is about the pull
-                      and abs(nz_cmd - self.nz_cmd_f) < 0.3)    # and a steady one (not rolling out)
+                      and abs(nz_cmd - self.nz_cmd_f) < 1.0)    # and a steady one (not rolling out; at 80 deg
+                                                                # of bank half a degree of flight path is 0.35 g)
+            self.last.update(nz_cmd=nz_cmd, nz_f=self.nz_f, learning=bool(steady and not (sat > 0 and err > 0)
+                                                                         and not (sat < 0 and err < 0)))
             if steady and not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
                 lo, hi = self.NZ_GAIN_LIM
                 self.nz_gain = max(lo, min(hi, self.nz_gain + self.KI_NZ * err / (self.nz_cmd_f - 1.0) * dt))
@@ -449,6 +452,7 @@ class Hold:
             d = nz_cmd - 1.0
             pitch = g["pitch_sign"] * (d * self.nz_gain if d > 0 else d) / g["nz_per_cmd"]
         self._pitch_sat = 1 if g["pitch_sign"] * pitch >= 1.0 else -1 if g["pitch_sign"] * pitch <= -1.0 else 0
+        self.last.update(nz_gain=self.nz_gain, pitch=pitch)
         if v is not None:
             # speed -> throttle position u (+1 = most thrust) by PI; the axis code is sign * u
             # (DCS's throttle code is inverted: -1 is afterburner, +1 idle)

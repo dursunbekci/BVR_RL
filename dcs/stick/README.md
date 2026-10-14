@@ -473,3 +473,11 @@ demand and measured g through the same 0.5 s filter, not at the wing's limit or 
 flight path is for the bank 0.4 s ahead when rolling out (`NZ_LEAD`), so the g comes off as the wings come level. The fake
 now has DCS's lag and a g rate limit (0.25 s, 6 g/s): with a stick 40% stronger than its curve, the factor learnt is 0.71
 (true 0.71) and the altitude stays within 21 m through turn and roll-out (65 m without the correction).
+
+**Fourth try (14 October, `manoeuvre_20261014_093818`)**: the whole program flew, the roll-outs smooth (no oscillation), and
+climbs, descents and speed changes compare as before (vertical speed 79 against 77 m/s; DCS accelerates 3.08 against 2.17
+m/s2 and slows -2.91 against -2.20: more thrust and more drag than the simulator's F-16C-DCS). The turns still pulled 6.7-6.9 g
+for 5.76 asked (turn rate 12 against 8.8 deg/s, 75-145 m of climb): the stick factor did not learn. Likely why: at 80 deg of
+bank the altitude law's demand swings with every half degree of flight path (0.35 g), and the steadiness gate (0.3 g) shut
+the learning out. The gate is now 1 g and the learning 0.5 per second; the manoeuvre record keeps the pilot's own state (g
+asked, stick factor, learning or not, stick position) and the comparison prints it for the hard part of each turn.

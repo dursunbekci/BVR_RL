@@ -130,7 +130,10 @@ def stage_manoeuvre(run, gains, out_dir="dcs_runs", platform_id="F-16C-DCS", pro
             state["last"] = tau
             samples.append({"t": round(tau, 3), "hdg": f.hdg, "alt": f.alt, "tas": f.tas, "mach": f.mach,
                             "bank": f.bank, "nz": f.nz, "vs": f.vs, "pitch": f.pitch, "fuel": _fuel(f),
-                            "thr": ax.get("throttle") if ax else None, "seg": s[2]})
+                            "thr": ax.get("throttle") if ax else None, "seg": s[2],
+                            # the pilot's own state: the g it asked for, its stick factor, whether it was learning it
+                            "nz_cmd": hold.last.get("nz_cmd"), "nz_gain": hold.last.get("nz_gain"),
+                            "learning": hold.last.get("learning"), "stick": hold.last.get("pitch")})
         return ax
     drive(run, total, fn)
     run.link.release()
@@ -239,6 +242,15 @@ def compare(rec, sim, out=print):
         if not md and not ms:
             continue
         out(f"  {seg[2]}")
+        hard = [s for s in rec["samples"] if seg[0] <= s["t"] < seg[1] and s.get("nz_cmd") is not None
+                and s.get("bank") is not None and abs(s["bank"]) > 70 * D2R]
+        if hard:                            # the DCS pilot in the hard part of a turn: asked against flown
+            asked = sum(s["nz_cmd"] for s in hard) / len(hard)
+            flown = sum(s["nz"] for s in hard if s["nz"] is not None) / len(hard)
+            learn = 100.0 * sum(1 for s in hard if s.get("learning")) / len(hard)
+            out(f"    (DCS pilot above 70 deg of bank: asked {asked:.2f} g, flew {flown:.2f}; stick factor "
+                f"{hard[0].get('nz_gain', 1):.2f} -> {hard[-1].get('nz_gain', 1):.2f}, learning {learn:.0f}% of the time, "
+                f"stick at its stop {100.0 * sum(1 for s in hard if (s.get('stick') or 0) >= 0.99) / len(hard):.0f}%)")
         for k in md.keys() | ms.keys():
             a, b = md.get(k), ms.get(k)
             r = (b / a) if (a not in (None, 0) and b is not None) else None
