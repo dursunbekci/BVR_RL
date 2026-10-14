@@ -491,3 +491,14 @@ aircraft, and it is measured directly, not fitted: `manoeuvre.py` takes every sa
 CL = g x weight / (dynamic pressure x S_REF), and prints the 90th percentile; `--fit` sets CL_MAX to it and fits thrust and
 drag only. The simulator and the stick pilot both take their g and bank limits from that CL_MAX (the pilot from the
 platform's airframe), so both cut the bank where the wing runs out.
+
+**The fit on the fifth record (14 October)**: the measured wing limit came out higher than the rough estimate: CL 1.28 (90th
+percentile of 102 samples at the stick's stop), median 1.15, against the simulator's 1.45; `--fit` fixed CL_MAX to 1.28 (x0.881)
+and fitted thrust x1.147, CD0 x1.867, K_IND x2.196, DRAG_RISE_PEAK x0.795: mismatch 6.34 -> 4.10. The energy now matches:
+acceleration 2.53 against DCS's 2.81 m/s2 (was 2.23), deceleration -3.05 against -2.74 (was -2.13), final speeds within 3 m/s,
+speed lost in the 90 and 180 deg turns 56 / 108 against 50 / 116 m/s (was 21 / 48); climbs and descents as before. Drag this
+high is this loadout's (four AIM-120 on pylons), not a clean F-16. What is left is the turns' first seconds: DCS turns 12-12.5
+deg/s against the simulator's 9.2 while the heading error is above 30 deg, and climbs 90-145 m, because the roll-in at full
+speed still pulls 6.6-6.7 g for a moment (the simulator's level turn at 80 deg is 5.76 g). That is the pilot's roll-in, not
+the airframe, and the fit cannot (and should not) absorb it. Next: fly the program with the fitted limits
+(`stick_test.py manoeuvre --platform F-16C-DCSFIT`) and compare against F-16C-DCSFIT.
