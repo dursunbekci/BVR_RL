@@ -1,0 +1,42 @@
+{
+  "id": "F-16C-DCSFIT",
+  "kind": "platform",
+  "name": "F-16C with 4 × AIM-120 (AIM-120C-DCS), airframe fitted to DCS",
+  "description": "F-16C-DCS with the F-16C-DCSFIT airframe (thrust, drag, lift limit and g lag fitted to the player's F-16C in DCS) and the launch delay of the stick pilot's cockpit work. The platform to train for dcs_live.py --stick.",
+  "params": {
+    "airframe": "F-16C-DCSFIT",
+    "radar": "APG-68",
+    "missile": "AIM-120C-DCS",
+    "WPN_COUNT": 4,
+    "RCS_M2": 1.2,
+    "SPEED_CMDS": [
+      220.0,
+      280.0,
+      340.0,
+      400.0,
+      460.0
+    ],
+    "ALT_MIN_OP": 1000.0,
+    "ALT_MAX_OP": 14000.0,
+    "CLIMB_FPA_LO": 20.0,
+    "CLIMB_FPA_HI": 10.0,
+    "CLIMB_FPA_ALT_LO": 5000.0,
+    "CLIMB_FPA_ALT_HI": 11000.0,
+    "LAUNCH_DELAY_MIN": 3.0,
+    "LAUNCH_DELAY_MAX": 7.0
+  },
+  "sources": {
+    "WPN_COUNT": "standard BVR loadout in this project",
+    "RCS_M2": "commonly cited open-source frontal estimate (≈ 1.2 m²)",
+    "SPEED_CMDS": "the action set existing checkpoints were trained with; 460 m/s added in SIM_REV 14 (Mach 1.5 at 9 km, the DCS AI's dash in combat)",
+    "ALT_MIN_OP": "as trained",
+    "ALT_MAX_OP": "as trained",
+    "CLIMB_FPA_LO": "holds speed on a 3 km climb (measured)",
+    "CLIMB_FPA_HI": "as CLIMB_FPA_LO",
+    "CLIMB_FPA_ALT_LO": "as CLIMB_FPA_LO",
+    "CLIMB_FPA_ALT_HI": "as CLIMB_FPA_LO",
+    "LAUNCH_DELAY_MIN": "estimate (14 October) from the stick pilot's fire job in DCS: the cursor to the target's bearing, target management right until the TWS track is bugged (one press when the track file is built, 2 s apart), master arm, the weapon release held 1.5 s; to be replaced by the requested-to-launched times of dcs_live.py --stick runs",
+    "LAUNCH_DELAY_MAX": "as LAUNCH_DELAY_MIN"
+  },
+  "based_on": "F-16C-DCS"
+}
