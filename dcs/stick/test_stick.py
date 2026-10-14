@@ -568,8 +568,20 @@ def test_g_loop():
     late = [f.nz for f in turning[len(turning) // 2:]]
     mean_late = sum(late) / len(late)
     assert len(turning) > 100 and abs(mean_late - 5.76) < 0.5 and climb < 30.0, (peak, mean_late, climb, len(turning))
+    # with the airframe, bank and g are limited as the simulator limits them: less bank as the wing gives less g
+    sys.path.insert(0, os.path.join(HERE, "..", ".."))
+    from bvr_library import load_platform
+    h = stick_test.Hold(gains, bank_max=math.radians(80), nz_max=8.0, airframe=load_platform("F-16C-DCS").airframe)
+    lims = {}
+    for tas in (312.0, 200.0, 150.0):
+        fr = stick_test.Frame({"me": {"alt": 6950.0, "hdg": 0.0, "bank": 0.0}, "tas": tas, "vs": 0.0, "t": 1.0,
+                               "g": {"y": 1.0}, "eng": {"fuel_internal": 0.86}})
+        h.axes(fr, math.radians(150), 6950.0, v=tas, dive=0.4, climb=0.3)
+        lims[tas] = (h.last["nz_avail"], math.degrees(h.last["bank_lim"]))
+    assert lims[312.0][1] == 80.0 and 65 < lims[200.0][1] < 78 and 50 < lims[150.0][1] < 66, lims
     print(f"  g loop ...................... OK  (80 deg of bank, the stick 40% stronger than its curve: {mean_late:.2f} g "
-          f"held (5.76 holds altitude), altitude within {climb:.0f} m)")
+          f"held (5.76 holds altitude), altitude within {climb:.0f} m; bank limit 80/{lims[200.0][1]:.0f}/"
+          f"{lims[150.0][1]:.0f} deg at 312/200/150 m/s)")
 
 
 def test_manoeuvre():

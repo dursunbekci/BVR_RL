@@ -105,7 +105,13 @@ def stage_manoeuvre(run, gains, out_dir="dcs_runs", platform_id="F-16C-DCS", pro
     from stick_test import Hold, drive
     from pilot import BANK_MAX_DEG, NZ_MAX, VS_MAX
     climb = climb_limit(platform_id)
-    hold = Hold(gains, bank_max=BANK_MAX_DEG * D2R, nz_max=NZ_MAX, vs_max=VS_MAX)
+    try:
+        from bvr_library import load_platform
+        airframe = load_platform(platform_id).airframe
+    except Exception as e:
+        airframe = None
+        print(f"  WARNING: platform {platform_id} not loaded ({e}): no g and bank limits from its airframe")
+    hold = Hold(gains, bank_max=BANK_MAX_DEG * D2R, nz_max=NZ_MAX, vs_max=VS_MAX, airframe=airframe)
     f0 = run.next()
     start = {"hdg": f0.hdg, "alt": f0.alt, "tas": f0.tas, "mach": f0.mach, "fuel": _fuel(f0)}
     segs = targets(start, program)

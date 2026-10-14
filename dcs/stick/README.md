@@ -453,3 +453,11 @@ accelerated faster (2.84 against 2.19 m/s2) and also slowed faster (-2.97 agains
 AIM-120s on pylons). Fix: `Hold` closes the loop on the measured g (an integrator, 1.5 g per g-second, up to 3 g, not while
 the stick is at its stop); on the fake with a stick 40% stronger than its curve it holds 5.6 g at 80 deg and the altitude
 within 6 m (63 m without the loop). The fit's bounds were widened (CD0 up to x3.5, K_IND to x2.5).
+
+**Second try (14 October)**: with the g loop the Viper held the g the altitude law asked for, 5.76 g at 80 deg of bank,
+which at 7 km it cannot sustain: from 312 m/s (Mach 1.0) it bled to 110 m/s in the 180 deg turn and the speed guard
+stopped the run. The simulator never gets there: its autopilot limits g to what the wing gives (dynamic pressure x S_REF x
+CL_MAX / weight, at most NZ_POS_MAX) and the bank to what leaves BANK_NZ_MARGIN (0.85) of that to hold the flight path. The
+stick pilot now does the same, from the policy's platform's airframe and DCS's fuel (`Hold(..., airframe=)`; `pilot.py`,
+`dcs_live.py --stick` and `stick_test.py manoeuvre --platform` pass it): at 7 km, 86% fuel, F-16C-DCS, 80 deg down to
+about 250 m/s, 73 at 200, 60 at 150, 38 at 120.

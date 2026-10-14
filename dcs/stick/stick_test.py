@@ -334,8 +334,13 @@ class Hold:
     KP_V = 0.04            # throttle position per m/s of speed error
     KI_V = 0.002           # and per m/s of error and second
 
-    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0, vs_max=30.0):
+    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0, vs_max=30.0, airframe=None):
+        """airframe: a library airframe config (bvr_library.airframe_config, or a platform's .airframe). Given,
+        the g the wing can give and the bank that leaves enough of it to hold altitude are limited as the
+        simulator's autopilot limits them (f16_sim.F16Aircraft.step: nz_avail, BANK_NZ_MARGIN)."""
         self.g, self.bank_max, self.nz_max, self.vs_max = gains, bank_max, nz_max, vs_max
+        self.airframe = airframe
+        self.last = {}
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
@@ -344,6 +349,27 @@ class Hold:
     # the simulator's altitude law (f16_sim.F16Cfg), used when the command carries its flight-path limits
     K_ALT_GAM = 0.0003     # rad of flight-path angle per m of altitude error
     K_GAM_NZ = 7.0         # g per rad of flight-path error
+
+    @staticmethod
+    def _rho(alt):
+        """ISA density, kg/m3 (as f16_sim.isa)."""
+        h = max(0.0, min(20000.0, alt))
+        if h <= 11000.0:
+            return 1.225 * (1.0 - 2.25577e-5 * h) ** 4.2559
+        return 0.36392 * math.exp(-(h - 11000.0) / 6341.62)
+
+    def nz_avail(self, f):
+        """The g the wing gives now: the simulator's nz_avail (dynamic pressure x wing area x CL_MAX / weight,
+        at most NZ_POS_MAX), from the airframe and DCS's fuel; without an airframe, nz_max."""
+        a = self.airframe
+        if a is None or f.tas is None or f.alt is None:
+            return self.nz_max
+        fuel = (f.raw.get("eng") or {}).get("fuel_internal") if hasattr(f, "raw") else None
+        frac = fuel if isinstance(fuel, (int, float)) and 0.0 <= fuel <= 1.0 else 0.6
+        w = (a.MASS_EMPTY + a.MASS_WPNS + frac * a.FUEL_FULL) * G
+        q = 0.5 * self._rho(f.alt) * f.tas ** 2
+        nz = a.NZ_POS_MAX if q <= 100.0 else min(a.NZ_POS_MAX, q * a.S_REF * a.CL_MAX / max(w, 1.0))
+        return min(self.nz_max, nz)
 
     def axes(self, f, hdg, alt, v=None, thr=None, dive=None, climb=None):
         """dive, climb (rad): the policy's flight-path limits (the simulator's altFPA and climbFPA). Given, the
@@ -354,7 +380,14 @@ class Hold:
             vs = 0.0 if self.prev is None or f.t <= self.prev[0] else (f.alt - self.prev[1]) / (f.t - self.prev[0])
         self.prev = (f.t, f.alt)
         tas = max(f.tas or 150.0, 80.0)
-        bank_cmd = max(-self.bank_max, min(self.bank_max, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
+        gam0 = math.asin(max(-0.9, min(0.9, vs / tas)))
+        nz_av = self.nz_avail(f)
+        # as the simulator: no more bank than leaves BANK_NZ_MARGIN of the available g to hold the flight path
+        # (at 7 km the Viper bled from 312 to 110 m/s in a turn held at 80 deg while the wing gave less and less)
+        margin = getattr(self.airframe, "BANK_NZ_MARGIN", 0.85) if self.airframe is not None else 0.85
+        bank_lim = min(self.bank_max, math.acos(min(1.0, math.cos(gam0) / max(margin * nz_av, 1e-3))))
+        self.last = {"nz_avail": nz_av, "bank_lim": bank_lim}
+        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
         if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
             inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
             self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s
@@ -373,7 +406,7 @@ class Hold:
             vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
             gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
             nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
-        nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
+        nz_cmd = max(-1.0, min(self.nz_max, nz_av, nz_cmd))
         # The curve gives the stick for a g, measured at one speed; at another the same stick gives another g (in
         # DCS, 7 g instead of 5.8 at 304 m/s and 80 deg of bank: the turn climbed and bled speed). The measured g
         # closes the loop: its error is integrated into the demand (not while the stick is at its stop).

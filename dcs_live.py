@@ -467,7 +467,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     pilot = None
     if getattr(args, "stick_link", None) is not None:
         from pilot import StickPilot
-        pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out)
+        from bvr_library import load_platform
+        pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out,
+                           airframe=load_platform(scen["platform"]).airframe)
         pilot.start()
         pilot.radar()
 
