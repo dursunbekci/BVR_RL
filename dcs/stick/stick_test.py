@@ -20,6 +20,7 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
     python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
     python dcs/stick/stick_test.py ind --tag locked    the text of the cockpit displays (HUD, MFDs): run it with and without a lock
+    python dcs/stick/stick_test.py manoeuvre           fly turns, climbs and speed changes to compare with the simulator (manoeuvre.py)
     python dcs/stick/stick_test.py cursormap           slew the radar cursor to each edge of the page and save the page (azimuth and range map)
     python dcs/stick/stick_test.py cursortry           try nine ways of moving the radar cursor, announced; you say which moved it
     python dcs/stick/stick_test.py cursor              slew the radar cursor and print which lines of the radar page follow it
@@ -337,7 +338,13 @@ class Hold:
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
 
-    def axes(self, f, hdg, alt, v=None, thr=None):
+    # the simulator's altitude law (f16_sim.F16Cfg), used when the command carries its flight-path limits
+    K_ALT_GAM = 0.0003     # rad of flight-path angle per m of altitude error
+    K_GAM_NZ = 7.0         # g per rad of flight-path error
+
+    def axes(self, f, hdg, alt, v=None, thr=None, dive=None, climb=None):
+        """dive, climb (rad): the policy's flight-path limits (the simulator's altFPA and climbFPA). Given, the
+        altitude is flown with the simulator's law; without, with the stick tests' climb-rate law."""
         g = self.g
         vs = f.vs
         if vs is None:
@@ -356,9 +363,13 @@ class Hold:
         else:
             roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
         gam = math.asin(max(-0.9, min(0.9, vs / tas)))
-        vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
-        gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
-        nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
+        if dive is not None and climb is not None:
+            gam_cmd = max(-abs(dive), min(abs(climb), self.K_ALT_GAM * (alt - f.alt)))
+            nz_cmd = (math.cos(gam) + self.K_GAM_NZ * (gam_cmd - gam)) / max(math.cos(f.bank), 0.1)
+        else:
+            vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
+            gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
+            nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
         nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
         if g.get("pitch_curve"):
             d = nz_cmd - 1.0                     # pull and push have their own curves
@@ -843,9 +854,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
-                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry", "cursormap"])
+                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry", "cursormap",
+                                        "manoeuvre"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
     ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
+    ap.add_argument("--platform", default="F-16C-DCS",
+                    help="manoeuvre: the library platform whose climb limits the program flies (default F-16C-DCS)")
     ap.add_argument("--mode", choices=["c", "s", "l"], default=None,
                     help="click: c = clickable element (mouse click), s = device SetCommand (key binding), l = LoSetCommand "
                          "(default: s for HOTAS controls, c for the rest)")
@@ -1026,6 +1040,11 @@ def main(argv=None):
                         gains.pop(stale, None)
                     save_gains(gains_path, gains)
                     summary["throttle"] = {k: gains[k] for k in ("thr_sign", "thr_u_trim", "thr_slope", "thr_map")}
+                elif name == "manoeuvre":
+                    import manoeuvre
+                    if not all(gains.get(k) for k in ("roll_curve", "pitch_curve", "thr_sign")):
+                        raise SystemExit("manoeuvre needs the measured gains: run stick_test.py all first")
+                    summary["manoeuvre"] = manoeuvre.stage_manoeuvre(run, gains, a.out, a.platform)
                 else:
                     summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn, speed=a.speed)
             finally:

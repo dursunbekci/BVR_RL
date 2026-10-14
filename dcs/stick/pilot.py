@@ -68,7 +68,7 @@ class StickPilot(threading.Thread):
         self.log = log
         self.r = Run(link, out_dir, "live", limits or live_limits())
         self.hold = Hold(self.gains, bank_max=math.radians(BANK_MAX_DEG), nz_max=NZ_MAX, vs_max=VS_MAX)
-        self.target = None            # (heading rad, altitude m, speed m/s) from the policy
+        self.target = None            # (heading rad, altitude m, speed m/s, dive rad, climb rad) from the policy
         self.jobs = queue.Queue()
         self.events = queue.Queue()   # ("fire", status, reason) / ("radar", status, text)
         self.busy = None              # the job running now ("radar", "fire") or None
@@ -78,8 +78,10 @@ class StickPilot(threading.Thread):
         self.center_az = None         # the bearing the cursor was last put on
 
     # ── what the main thread calls ──────────────────────────────────────
-    def command(self, hdg, alt, spd):
-        self.target = (float(hdg), float(alt), float(spd))
+    def command(self, hdg, alt, spd, dive=None, climb=None):
+        """The policy's command; dive and climb are its flight-path limits (the simulator's altFPA and climbFPA):
+        with them the altitude is flown with the simulator's law."""
+        self.target = (float(hdg), float(alt), float(spd), dive, climb)
 
     def radar(self):
         self.jobs.put("radar")
@@ -106,9 +108,9 @@ class StickPilot(threading.Thread):
         if self.target is None:
             if f.hdg is None or f.alt is None:
                 return None
-            self.target = (f.hdg, f.alt, f.tas or 250.0)
-        hdg, alt, v = self.target
-        return self.hold.axes(f, hdg, alt, v=v)
+            self.target = (f.hdg, f.alt, f.tas or 250.0, None, None)
+        hdg, alt, v, dive, climb = self.target
+        return self.hold.axes(f, hdg, alt, v=v, dive=dive, climb=climb)
 
     def run(self):
         try:

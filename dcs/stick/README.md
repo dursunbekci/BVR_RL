@@ -416,3 +416,28 @@ To fly it:
 
 Tested on the fakes (`test_sim.py`, "DCS live stick"): the policy's commands reach the pilot and no `CMD` reaches the bridge; a
 FIRE runs A-A, TWS, the bug, master arm and the held release on the fake cockpit, and its launch comes back as "fire launched".
+
+## Making the simulator fly like the DCS Viper (`stick_test.py manoeuvre`, `manoeuvre.py`)
+
+The policy only gives heading, altitude and speed targets; how fast the aircraft gets there is the airframe and its
+autopilot. For the policy to meet in DCS the aircraft it trained on, the simulator's F-16C must fly those targets as the
+stick pilot flies the DCS Viper. The stick pilot now uses the simulator's altitude law when the command carries the
+policy's flight-path limits (`Hold.axes(..., dive, climb)`: 0.0003 rad of flight path per metre of altitude error, limited
+to the platform's climb angle and 25 deg down, and 7 g per rad of flight-path error), as the simulator's autopilot does;
+`dcs_live.py --stick` passes `altFPA` and `climbFPA` on. Heading to bank (2.0, 80 deg) and speed to throttle (PI) were
+already alike. What is left to differ is the aircraft:
+
+1. `python dcs/stick/stick_test.py manoeuvre` (in DCS, stick-test mission, trimmed level at 7 km about Mach 0.9, hands off):
+   about 7 minutes of targets relative to the start: hold 10 s, turn right 90, turn left 180, back, climb 2000 m, descend
+   2000 m, accelerate 100 m/s (at most 460), decelerate to 80 below the start (at least 220), turn 170 at that speed.
+   Saved every 0.1 s: `dcs_runs/manoeuvre_<time>.json`.
+2. `python dcs/stick/manoeuvre.py dcs_runs/manoeuvre_<time>.json` (no DCS): the simulator's F-16C-DCS flies the same targets
+   from the same start; per segment turn rate, time to 90%, peak bank and g, speed lost in turns, vertical speed, overshoot,
+   acceleration, final Mach, DCS against the simulator; a plot of both (`_compare.png`) and what the differences point at.
+3. `... --fit`: a Nelder-Mead over factors on the airframe's thrust (T_MIL_SL and T_AB_SL together), CD0, K_IND, CL_MAX and
+   DRAG_RISE_PEAK, minimising speed RMS / 5 m/s + heading RMS / 5 deg + altitude RMS / 50 m over the whole program (about
+   1.4 s a simulation, 5 minutes); the result is compared again (`_fit.png`) and saved to the library as a new airframe and
+   platform, `F-16C-DCSFIT` (`--save-as`), to train with. Missile envelopes are keyed to the missile, so none need
+   recalculating. Checked on a record the simulator made with thrust x0.85, CD0 x1.3, CL_MAX x0.9: the fit took the
+   mismatch from 2.19 to 0.17 and found CL_MAX x0.90 exactly, thrust x0.885 and CD0 x1.20 (thrust and drag trade against
+   each other in one record; the flight is what has to match).

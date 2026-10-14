@@ -548,6 +548,46 @@ def test_roll_lead():
           f"{peaks[0.25]:.0f} with, for a 60 deg limit)")
 
 
+def test_manoeuvre():
+    """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
+    fit recovers a known change of the airframe from a record the simulator itself made."""
+    import io
+    import contextlib
+    import numpy as np
+    import manoeuvre as M
+    import stick_test
+    from fake_export import FakeLink
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    short = [("hold", 3.0, {}), ("turn right 90", 20.0, {"dhdg": 90.0}), ("climb 2000 m", 30.0, {"dalt": 2000.0}),
+             ("accelerate", 25.0, {"spd": "hi"})]
+    with tempfile.TemporaryDirectory() as d:
+        link = FakeLink()
+        run = stick_test.Run(link, None, "m", stick_test.Limits(min_agl=0, min_alt=0))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = M.stage_manoeuvre(run, gains, d, program=short)
+            rec = json.load(open(res["path"]))
+            sim, _ = M.simulate(rec)
+            rows = M.compare(rec, sim)
+        assert res["samples"] > 700 and not link.controlling, (res, buf.getvalue()[-500:])
+        meas = {(r["segment"], r["measure"]) for r in rows}
+        assert ("turn right 90", "turn rate deg/s") in meas and ("climb 2000 m", "vertical speed m/s") in meas \
+            and ("accelerate", "acceleration m/s2") in meas, meas
+    # the fit: a record made by the simulator with thrust x0.85 and CL_MAX x0.9; a few iterations already halve
+    # the mismatch and move both the right way
+    from bvr_library import load_platform
+    base = load_platform("F-16C-DCS").airframe
+    rec = {"start": {"hdg": 1.0, "alt": 7000.0, "tas": 280.0, "mach": 0.9, "fuel": None}, "platform": "F-16C-DCS",
+           "program": short}
+    rec["samples"], _ = M.simulate(rec, "F-16C-DCS", 0.6, cfg=M._cfg_with(base, np.array([0.85, 1.0, 1.0, 0.9, 1.0])))
+    with contextlib.redirect_stdout(io.StringIO()):
+        x, m0, m1, _ = M.fit(rec, "F-16C-DCS", 0.6, iters=25)
+    assert m1 < 0.5 * m0 and x[0] < 1.0 and x[3] < 1.0, (x, m0, m1)
+    print(f"  manoeuvre compare and fit ... OK  (program flown and compared; the fit takes the mismatch from "
+          f"{m0:.2f} to {m1:.2f}, thrust x{x[0]:.2f}, CL_MAX x{x[3]:.2f} for x0.85, x0.90)")
+
+
 def test_cockpit():
     import io
     import contextlib
@@ -897,6 +937,7 @@ if __name__ == "__main__":
     test_fake_nonlinear()
     test_roll_lead()
     test_cockpit()
+    test_manoeuvre()
     test_stall_message()
     test_install()
-    print("12/12 passed")
+    print("13/13 passed")
