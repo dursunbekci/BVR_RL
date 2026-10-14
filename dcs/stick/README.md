@@ -481,3 +481,13 @@ for 5.76 asked (turn rate 12 against 8.8 deg/s, 75-145 m of climb): the stick fa
 bank the altitude law's demand swings with every half degree of flight path (0.35 g), and the steadiness gate (0.3 g) shut
 the learning out. The gate is now 1 g and the learning 0.5 per second; the manoeuvre record keeps the pilot's own state (g
 asked, stick factor, learning or not, stick position) and the comparison prints it for the hard part of each turn.
+
+**Fifth try (14 October, `manoeuvre_20261014_095036`)**: the pilot's own state answered it. Above 70 deg of bank it asked
+5.71 / 5.78 / 5.32 g and flew 5.31 / 4.99 / 5.35, with the stick at its stop 65 / 50 / 58% of the time (so the factor could
+not learn: never against the stop): the DCS Viper does not give the g the simulator's wing does. Only the roll-in, at full
+speed, overshot (6.6-6.7 g). In lift coefficient: 6.7 g at 300 m/s is CL about 1.0, 5 g at 250 m/s about 1.1, where the
+simulator's F-16C has CL_MAX 1.45 (DCS's flight control limits the angle of attack; four AIM-120 on the rails). That is the
+aircraft, and it is measured directly, not fitted: `manoeuvre.py` takes every sample with the stick at its stop above 2 g,
+CL = g x weight / (dynamic pressure x S_REF), and prints the 90th percentile; `--fit` sets CL_MAX to it and fits thrust and
+drag only. The simulator and the stick pilot both take their g and bank limits from that CL_MAX (the pilot from the
+platform's airframe), so both cut the bank where the wing runs out.

@@ -627,6 +627,19 @@ def test_manoeuvre():
     with contextlib.redirect_stdout(io.StringIO()):
         x, m0, m1, _ = M.fit(rec, "F-16C-DCS", 0.6, iters=25)
     assert m1 < 0.5 * m0 and x[0] < 1.0 and x[3] < 1.0, (x, m0, m1)
+    # the wing limit: samples at the stick's stop pulling CL 1.05 give back CL 1.05, and the fit then keeps it
+    from f16_sim import isa
+    w = (base.MASS_EMPTY + base.MASS_WPNS + 0.6 * base.FUEL_FULL) * 9.80665
+    smp = []
+    for i in range(40):
+        tas, alt = 300.0 - 2 * i, 6700.0
+        nz = 1.05 * 0.5 * isa(alt)[0] * tas ** 2 * base.S_REF / w
+        smp.append({"t": i * 0.1, "stick": 1.0, "nz": nz, "tas": tas, "alt": alt, "fuel": 0.6})
+    wl = M.wing_limit({"start": {"fuel": 0.6}, "samples": smp}, base)
+    assert wl and abs(wl[0] - 1.05) < 0.01 and abs(wl[1] - 1.05) < 0.01 and wl[2] == 40, wl
+    with contextlib.redirect_stdout(io.StringIO()):
+        xc, *_ = M.fit(rec, "F-16C-DCS", 0.6, iters=3, cl_max=1.05)
+    assert abs(xc[3] * base.CL_MAX - 1.05) < 1e-9, xc
     print(f"  manoeuvre compare and fit ... OK  (program flown and compared; the fit takes the mismatch from "
           f"{m0:.2f} to {m1:.2f}, thrust x{x[0]:.2f}, CL_MAX x{x[3]:.2f} for x0.85, x0.90)")
 

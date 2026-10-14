@@ -312,6 +312,27 @@ def _cfg_with(base, x):
     return c
 
 
+def wing_limit(rec, cfg):
+    """The lift coefficient the DCS Viper reached with the stick at its stop, pulling (above 2 g): what its flight
+    control system lets the wing give, CL = g x weight / (dynamic pressure x wing area). Returns (CL at the 90th
+    percentile, median, samples), or None for a record without the pilot's stick (before 14 October)."""
+    import numpy as np
+    from f16_sim import isa
+    st = rec["start"]
+    fu = st.get("fuel")
+    out = []
+    for s in rec["samples"]:
+        if s.get("stick") is None or s["stick"] < 0.99 or s.get("nz") is None or s["nz"] < 2.0 or not s.get("tas"):
+            continue
+        frac = s.get("fuel") if isinstance(s.get("fuel"), (int, float)) and s["fuel"] <= 1.0 else (fu if fu and fu <= 1.0 else 0.6)
+        w = (cfg.MASS_EMPTY + cfg.MASS_WPNS + frac * cfg.FUEL_FULL) * 9.80665
+        q = 0.5 * isa(s["alt"])[0] * s["tas"] ** 2
+        out.append(s["nz"] * w / (q * cfg.S_REF))
+    if len(out) < 20:
+        return None
+    return float(np.percentile(out, 90)), float(np.median(out)), len(out)
+
+
 def mismatch(rec, sim):
     """How far the simulator's flight is from DCS's: speed (per 5 m/s), heading (per 5 deg) and altitude (per
     50 m) RMS over the whole program, the three summed."""
@@ -365,7 +386,7 @@ def nelder_mead(f, x0, lo, hi, step=0.15, iters=120, log=print):
     return pts[i], vals[i]
 
 
-def fit(rec, platform_id="F-16C-DCS", fuel_frac=None, iters=120, log=print):
+def fit(rec, platform_id="F-16C-DCS", fuel_frac=None, iters=120, log=print, cl_max=None):
     """Factors on the airframe's thrust, CD0, K_IND, CL_MAX and DRAG_RISE_PEAK that make the simulator fly
     the recorded program closest to DCS. Returns (factors, mismatch before, after, fitted config)."""
     import numpy as np
@@ -373,9 +394,11 @@ def fit(rec, platform_id="F-16C-DCS", fuel_frac=None, iters=120, log=print):
     base = load_platform(platform_id).airframe
     lo = np.array([b[0] for *_, b in FIT_PARAMS])
     hi = np.array([b[1] for *_, b in FIT_PARAMS])
-    f = lambda x: mismatch(rec, simulate(rec, platform_id, fuel_frac, cfg=_cfg_with(base, x))[0])
     x0 = np.ones(len(FIT_PARAMS))
-    m0 = f(x0)
+    if cl_max is not None:              # measured: the wing limit is not left to the optimiser
+        x0[3] = lo[3] = hi[3] = cl_max / base.CL_MAX
+    f = lambda x: mismatch(rec, simulate(rec, platform_id, fuel_frac, cfg=_cfg_with(base, x))[0])
+    m0 = f(np.ones(len(FIT_PARAMS)))
     log(f"  fitting {', '.join(n for n, *_ in FIT_PARAMS)} of {platform_id}'s airframe ({base.id}); "
         f"mismatch now {m0:.3f}")
     x, m1 = nelder_mead(f, x0, lo, hi, iters=iters, log=log)
@@ -460,6 +483,13 @@ def main(argv=None):
     print(f"  start: heading {st['hdg'] / D2R:.0f}, {st['alt']:.0f} m, {st['tas']:.0f} m/s; DCS fuel "
           f"{st.get('fuel')}, simulator fuel {ff:.2f} of full; platform {pid}")
     rows = compare(rec, sim)
+    from bvr_library import load_platform
+    wl = wing_limit(rec, load_platform(pid).airframe)
+    cl_meas = None
+    if wl:
+        cl_meas = wl[0]
+        print(f"\n  wing limit in DCS (stick at its stop, above 2 g; {wl[2]} samples): CL {wl[0]:.2f} (90th percentile), "
+              f"median {wl[1]:.2f}; the simulator's {pid} has CL_MAX {load_platform(pid).airframe.CL_MAX:.2f}")
     print(f"\n  mismatch (speed RMS / 5 m/s + heading RMS / 5 deg + altitude RMS / 50 m): {mismatch(rec, sim):.3f}")
     print("\n  what the differences point at:")
     for n in advice(rows):
@@ -468,7 +498,9 @@ def main(argv=None):
     plot(rec, sim, base + "_compare.png")
     out = {"platform": pid, "fuel_frac": ff, "rows": rows}
     if a.fit:
-        x, m0, m1, cfg = fit(rec, pid, a.fuel_frac, iters=a.iters)
+        if cl_meas is not None:
+            print(f"  --fit: CL_MAX set to the measured {cl_meas:.2f}; thrust and drag are fitted")
+        x, m0, m1, cfg = fit(rec, pid, a.fuel_frac, iters=a.iters, cl_max=cl_meas)
         print(f"\n  fitted: mismatch {m0:.3f} -> {m1:.3f}")
         for (name, what, _), v in zip(FIT_PARAMS, x):
             print(f"    {name:15s} x{v:.3f}   ({what})")
