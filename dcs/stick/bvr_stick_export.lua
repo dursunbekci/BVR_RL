@@ -14,6 +14,11 @@
 --   PING <id>                                       answered with ev = "pong"
 --   CMD <code> <value>                              one raw LoSetCommand (experiments)
 --   INFO                                            sends ev = "hello" again
+--   IND [first [last]]                              the text of the cockpit displays (HUD, MFDs, DED), read-only:
+--                                                   one ev = "ind" per display (list_indication of each id), then ev = "ind_end"
+--   CLICK <device> <command> <value> [c|s|l]                a cockpit switch or HOTAS control, as the
+--                                                   module's own key bindings do (answered with
+--                                                   ev = "click"); numbers from f16c_defs.json
 -- If no AXES line arrives for CFG.watchdog seconds, pitch, roll and rudder go to 0
 -- and control switches off (the F-16's flight control holds 1 g and the bank).
 --
@@ -38,6 +43,8 @@ local CFG = {
   watchdog = 0.5,        -- s without an AXES line before the axes are zeroed
   stats_every = 5.0,     -- s (real time) between ev = "stats" lines
   allow_raw = true,      -- accept CMD lines
+  ind_every = 20,        -- every Nth frame look for the radar and HUD markers below (0: never)
+  allow_click = true,    -- accept CLICK lines (some devices and commands are always refused, below)
   codes = nil,           -- {pitch=, roll=, rudder=, throttle=} to force the command numbers
   version = 1,
 }
@@ -71,7 +78,7 @@ local function enc(v, depth)
   local t = type(v)
   if t == "number" then
     if v ~= v or v == math.huge or v == -math.huge then return "null" end
-    return string.format("%.10g", v)
+    return string.format("%.15g", v)         -- 10 digits would cut an epoch time to whole seconds
   elseif t == "boolean" then return v and "true" or "false"
   elseif t == "string" then
     return '"' .. v:gsub('[%c"\\]', function(c)
@@ -144,32 +151,52 @@ local API = {"LoGetModelTime", "LoGetSelfData", "LoGetTrueAirSpeed", "LoGetIndic
   "LoGetVerticalVelocity", "LoGetAltitudeAboveSeaLevel", "LoGetAltitudeAboveGroundLevel",
   "LoGetADIPitchBankYaw", "LoGetVectorVelocity", "LoGetAngularVelocity", "LoGetEngineInfo",
   "LoGetWorldObjects", "LoGetTargetInformation", "LoGetLockedTargetInformation",
-  "LoGetPayloadInfo", "LoSetCommand"}
+  "LoGetPayloadInfo", "LoSetCommand", "LoGetMagneticYaw"}
 
 -- The axis command numbers: DCS's own table if it can be read, else 2001-2004.
 local CODES = {pitch = 2001, roll = 2002, rudder = 2003, throttle = 2004}
 local CODES_FROM = "default"
+local SEP = package.config and package.config:sub(1, 1) or "\\"
 local function resolve_codes()
   if CFG.codes then
     for k, v in pairs(CFG.codes) do CODES[k] = v end
     CODES_FROM = "config"; return
   end
-  local ok = pcall(function()
-    local f = loadfile(lfs.currentdir() .. "\\..\\Scripts\\command_defs.lua")
-    if not f then error("no command_defs.lua") end
+  local names = {pitch = "iCommandPlanePitch", roll = "iCommandPlaneRoll",
+                 rudder = "iCommandPlaneRudder", throttle = "iCommandPlaneThrustCommon"}
+  local tried = {}
+  local function from(path)
+    local f, lerr = loadfile(path)
+    if not f then error(tostring(lerr)) end
     local env = setmetatable({}, {__index = _G})
     setfenv(f, env)
     f()
-    local names = {pitch = "iCommandPlanePitch", roll = "iCommandPlaneRoll",
-                   rudder = "iCommandPlaneRudder", throttle = "iCommandPlaneThrustCommon"}
-    local found = 0
+    local found, got = 0, {}
     for k, n in pairs(names) do
       local v = rawget(env, n)
-      if type(v) == "number" then CODES[k] = v; found = found + 1 end
+      if type(v) == "number" then got[k] = v; found = found + 1 end
     end
-    if found == 4 then CODES_FROM = "command_defs.lua" else CODES_FROM = "default (" .. found .. "/4 found)" end
-  end)
-  if not ok then CODES_FROM = "default (command_defs.lua not readable)" end
+    return found, got
+  end
+  local base = nil
+  pcall(function() base = lfs.currentdir() end)
+  if base then
+    -- DCS's cockpit scripts load it from LockOn_Options.common_script_path (Scripts\Aircrafts\_Common\Cockpit)
+    for _, rel in ipairs({"Scripts" .. SEP .. "Aircrafts" .. SEP .. "_Common" .. SEP .. "Cockpit" .. SEP .. "command_defs.lua",
+                          "Scripts" .. SEP .. "command_defs.lua",
+                          ".." .. SEP .. "Scripts" .. SEP .. "command_defs.lua"}) do
+      local path = base .. SEP .. rel
+      local ok, found, got = pcall(from, path)
+      if ok and found == 4 then
+        for k, v in pairs(got) do CODES[k] = v end
+        CODES_FROM = "command_defs.lua"; return
+      end
+      tried[#tried + 1] = path .. ": " .. (ok and (found .. "/4 names found") or tostring(found)):sub(1, 90)
+    end
+  else
+    tried[1] = "lfs.currentdir() not available"
+  end
+  CODES_FROM = "default (" .. table.concat(tried, "; ") .. ")"
 end
 
 -- ── state ──────────────────────────────────────────────────────────────
@@ -213,6 +240,46 @@ local function hello()
         rt = now()})
 end
 
+-- What the displays draw says what the radar is doing (read from `ind` dumps in DCS, 13 October): the radar page
+-- (an MFD showing FCR_Antenna_Azimuth_Tics_Root) draws FCR_TrackedTgtPlaceholder once a target is designated, and
+-- its search cursor (Cursor_Root) and scan limits go when the radar changes to a single-target track.
+-- The HUD draws AA_Gun_Root (and the weapon's HUD_AA_* elements) in the A-A master mode and the text NAV in NAV.
+-- The HUD draws HUD_AA_TD_box on a designated target in view, HUD_TLL (target locator line) when it is out of view.
+local MARK = {fcr = "FCR_Antenna_Azimuth_Tics_Root", tracked = "FCR_TrackedTgtPlaceholder", cursor = "Cursor_Root",
+              sam = "FCR_SAM_TargetCarest", limits = "Azimuth_Scan_Limits_Left", td = "HUD_AA_TD_box",
+              tll = "HUD_TLL", threat = "ThreatSymbol1",
+              aa = "AA_Gun_Root", msl120 = "HUD_AA_AIM120_Selected"}
+if type(CFG.markers) == "table" then for k, v in pairs(CFG.markers) do MARK[k] = v end end
+local function has(txt, key) return type(txt) == "string" and txt:find(key, 1, true) ~= nil end
+local function scan_displays()
+  local rd = {}
+  local ok, hud = pcall(list_indication, 1)
+  if ok then
+    rd.td, rd.tll = has(hud, MARK.td), has(hud, MARK.tll)
+    rd.aa, rd.msl120 = has(hud, MARK.aa), has(hud, MARK.msl120)
+  end
+  for id = 2, 6 do                                           -- the MFDs: whichever shows the radar page
+    local ok2, txt = pcall(list_indication, id)
+    if ok2 and has(txt, MARK.fcr) then
+      rd.fcr, rd.tracked, rd.cursor = id, has(txt, MARK.tracked), has(txt, MARK.cursor)
+      rd.sam, rd.limits = has(txt, MARK.sam), has(txt, MARK.limits)
+      break
+    end
+  end
+  local ok3, rwr = pcall(list_indication, 17)
+  if ok3 then rd.threat = has(rwr, MARK.threat) end
+  return rd
+end
+
+-- CLICK refuses whole devices and single commands whatever the script sends: the electrical,
+-- fuel, hydraulic, engine, gear and oxygen systems, the canopy and ejection (CPT_MECH), the flight
+-- control interface and the countermeasures dispenser, and the F-16C's stores jettison and
+-- alternate release (MMC 3003 emergency jettison, 3004 and 3018 ground jettison, 3005 ALT REL).
+-- Device ids and command numbers are the F-16C module's own (dcs/stick/f16c_defs.json).
+local CLICK_DENY_DEVICE = {[2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
+                           [8] = true, [10] = true, [32] = true}
+local CLICK_DENY = {["19:3003"] = true, ["19:3004"] = true, ["19:3005"] = true, ["19:3018"] = true}
+
 -- ── input ──────────────────────────────────────────────────────────────
 local function num(s, lo, hi)
   local v = tonumber(s)
@@ -243,6 +310,36 @@ local function handle(line)
   elseif cmd == "CMD" and CFG.allow_raw then
     local code, v = num(w[2]), num(w[3])
     if code and v then send({ev = "raw", code = code, value = v, ok = setcmd(code, v), rt = now()}) end
+  elseif cmd == "CLICK" and CFG.allow_click then
+    local dev, c, v = num(w[2]), num(w[3]), num(w[4])
+    if dev and c and v then
+      if CLICK_DENY_DEVICE[dev] or CLICK_DENY[string.format("%d:%d", dev, c)] then
+        send({ev = "click", ok = false, err = "refused", dev = dev, cmd = c, value = v, rt = now()})
+      else
+        -- how the command reaches the cockpit: "c" (default) the clickable element, as a mouse click;
+        -- "s" the device's own SetCommand, as the module's key bindings deliver it; "l" the global command queue
+        local mode = w[5] or "c"
+        local ok, err = pcall(function()
+          if mode == "s" then GetDevice(dev):SetCommand(c, v)
+          elseif mode == "l" then LoSetCommand(c, v)
+          else GetDevice(0):performClickableAction(dev, c, v) end
+        end)
+        send({ev = "click", ok = ok, err = (not ok) and tostring(err) or nil, dev = dev, cmd = c, value = v, mode = mode, rt = now()})
+      end
+    end
+  elseif cmd == "IND" then
+    -- one message per display (the HUD and the MFD pages are several KB each), then ev = "ind_end"
+    local lo = math.floor(num(w[2], 0, 500) or 0)
+    local hi = math.floor(math.min(num(w[3], 0, 500) or 49, lo + 99))
+    local count = 0
+    for id = lo, hi do
+      local ok, txt = pcall(list_indication, id)
+      if ok and type(txt) == "string" and #txt > 0 then
+        count = count + 1
+        send({ev = "ind", id = id, len = #txt, text = txt:sub(1, 30000)})
+      end
+    end
+    send({ev = "ind_end", count = count, rt = now(), t = try("LoGetModelTime")})
   elseif cmd == "INFO" then
     hello()
   end
@@ -265,8 +362,10 @@ local function vec(v)
   return {x = v.x, y = v.y, z = v.z}
 end
 
-local function objects(me)
-  local all = try("LoGetWorldObjects")
+local function objects(me, kind)
+  -- kind "ballistic": the weapons in flight (missiles, bombs), which the default list does not hold
+  local all
+  if kind then all = try("LoGetWorldObjects", kind) else all = try("LoGetWorldObjects") end
   if type(all) ~= "table" then return nil end
   local list = {}
   local px, pz = 0, 0
@@ -292,7 +391,13 @@ end
 
 local function emit()
   local r, mt = now(), try("LoGetModelTime")
-  if mt and S.last_emit_mt and mt <= S.last_emit_mt + 1e-6 then return end     -- paused
+  if mt and S.last_emit_mt and mt <= S.last_emit_mt + 1e-6 then                -- paused
+    if not S.last_idle or r - S.last_idle >= 1.0 then                         -- say so, once a second
+      S.last_idle = r
+      send({ev = "idle", rt = r, t = mt, why = "model time is not advancing (paused)"})
+    end
+    return
+  end
   if CFG.source == "frame" and S.last_emit_rt and r - S.last_emit_rt < 0.8 / CFG.max_rate then return end
   S.last_emit_mt, S.last_emit_rt = mt, r
   S.n, S.stat_tel = S.n + 1, S.stat_tel + 1
@@ -304,6 +409,7 @@ local function emit()
             lat = lla.Lat, lon = lla.Long, alt = lla.Alt, hdg = me.Heading, pitch = me.Pitch,
             bank = me.Bank, x = pos.x, y = pos.y, z = pos.z}
   end
+  f.myaw = try("LoGetMagneticYaw")       -- the cockpit's bearings are magnetic: true heading - myaw is the variation
   f.tas, f.ias, f.mach = try("LoGetTrueAirSpeed"), try("LoGetIndicatedAirSpeed"), try("LoGetMachNumber")
   f.aoa, f.beta = try("LoGetAngleOfAttack"), try("LoGetAngleOfSideSlip")
   f.g = vec(try("LoGetAccelerationUnits"))
@@ -317,10 +423,15 @@ local function emit()
           seq = S.ax.seq, on = S.controlling}
   if S.n % CFG.objects_every == 0 then
     f.obj = objects(type(me) == "table" and me or nil)
+    f.ball = objects(type(me) == "table" and me or nil, "ballistic")
     f.radar = {targets = plain(try("LoGetTargetInformation")),
                locked = plain(try("LoGetLockedTargetInformation"))}
   end
   if S.n % CFG.payload_every == 1 then f.pay = plain(try("LoGetPayloadInfo")) end
+  if CFG.ind_every > 0 and S.n % CFG.ind_every == 0 then
+    local okd, rd = pcall(scan_displays)
+    if okd then f.rd = rd end
+  end
   send(f)
 end
 

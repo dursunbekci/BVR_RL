@@ -1068,6 +1068,67 @@ def test_dcs_live_link():
           f"{row['shots']} shots, {row['outcome']}; speed short {row['speed_short_pct']:.0f}% of the time)")
 
 
+def test_dcs_live_stick():
+    """dcs_live.py --stick: the policy's commands go to a StickPilot flying the player's aircraft through the
+    Export link (dcs/stick/fake_export.py here), and FIRE runs the cockpit job (A-A, TWS, bug, master arm,
+    weapon release held) whose launch comes back into the fire bookkeeping. The bridge (dcs/fake_dcs.py) gets
+    no CMD line, so it never takes BLUE-1."""
+    import os, sys, tempfile, threading, time as _time
+    from types import SimpleNamespace
+    from gymnasium import spaces
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, "dcs"))
+    sys.path.insert(0, os.path.join(here, "dcs", "stick"))
+    import dcs_live
+    import cockpit
+    from fake_dcs import FakeDcs
+    from fake_export import FakeLink
+    from bvr_env import OBS_DIM, PRIV_DIM, HDG_OFFSETS_DEG
+
+    class Scripted:          # 30 deg right, top speed, fire whenever allowed
+        observation_space = spaces.Dict({"obs": spaces.Box(-1, 1, (OBS_DIM,)),
+                                         "priv": spaces.Box(-1, 1, (PRIV_DIM,))})
+        def predict(self, obs, deterministic=True, action_masks=None):
+            return np.array([list(HDG_OFFSETS_DEG).index(0), 2, 3, int(action_masks[-1])]), None
+
+    class SlowLink(FakeLink):
+        """About ten times real time, so the pilot thread leaves the policy some CPU; the fake cockpit's target
+        is kept 40 km ahead of the aircraft (the aircraft flies headings from the fake bridge's fight, where the
+        cockpit's own target is not)."""
+        def next(self, timeout=1.0):
+            _time.sleep(0.002)
+            c, ac = self.cockpit, self.ac
+            if c.missile is None:
+                c.tx, c.tz = ac.x + 40000.0 * math.cos(ac.hdg), ac.z + 40000.0 * math.sin(ac.hdg)
+            return super().next(timeout)
+    defs = cockpit.load_defs()
+    stick = SlowLink(cockpit_defs=defs, scan_needed=999)
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=200.0, lockstep=True)
+    th = threading.Thread(target=fake.run, daemon=True)
+    link = dcs_live.UdpLink()
+    th.start()
+    logs = []
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=200, doctrine="AGGRESSIVE",
+                                   stick_link=stick, stick_gains=gains)
+            rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
+            row, _ = dcs_live.run_episode(link, Scripted(), args, {"platform": "F-16C", "opponent_platform": "F-16C"},
+                                          rec, agent, red, 1, log=logs.append)
+    finally:
+        th.join(timeout=120)
+        link.close(); fake.close()
+    assert not fake.commands, f"{len(fake.commands)} CMD lines reached the bridge"
+    assert row["mode"] == "stick" and row["fire_requests"] >= 1, (row, logs[-10:])
+    launched = [m for m in logs if "fire launched" in m]
+    assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
+    assert not stick.controlling, "the axes were not released at the end"
+    print(f"  DCS live stick .............. OK  ({row['fire_requests']} fire requests, first launch "
+          f"{launched[0].strip()}; the bridge got no command)")
+
+
 def test_dcs_support_rule():
     """dcs_live.py removes the policy's missile 3 s after its guidance stops
     (before the seeker takes over), and leaves a live opponent's missiles alone."""
@@ -1508,6 +1569,29 @@ def test_selfplay_mix():
     print(f"  self-play mix ............... OK  (scripted {scripted:.1%}, newest {newest:.1%})")
 
 
+def test_selfplay_heading_history():
+    """A self-play snapshot records its heading choices, so its "previous
+    heading" inputs read its last choice (they always read 0 before)."""
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG, OBS_LABELS, HDG_OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_selfplay import PolicyOpponent
+    k = HDG_OFFSETS_DEG.index(40.0)
+    class Model:
+        def predict(self, obs, action_masks=None, deterministic=False):
+            return np.array([k, 2, 3, 0]), None
+    e = BvrEnv(opponent_type=T.SELF_PLAY, seed=3, privileged_critic=False)
+    e._opponent_factory = lambda env: PolicyOpponent(env, Model(), False, "test")
+    e.reset()
+    for _ in range(3):
+        e.step(np.array([0, 2, 3, 0]))
+    o = e._opponent._obs
+    assert o._prev_hdg_off == 40.0, o._prev_hdg_off
+    obs = o._build_obs()
+    i = OBS_LABELS.index(HDG_OBS_LABELS[1])                   # sin of the previous choice
+    assert obs[i] != 0.0, obs[i]
+    print("  self-play heading history ... OK")
+
+
 def test_fire_off_boresight():
     """The fire action is masked for a target more than 60 deg off the nose."""
     import math
@@ -1781,11 +1865,13 @@ if __name__ == "__main__":
         ("eval_2v1 statistics",     test_eval_2v1_stats),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
+        ("DCS live stick",          test_dcs_live_stick),
         ("DCS support rule",        test_dcs_support_rule),
         ("DCS speed boost",         test_dcs_speed_boost),
         ("DCS red support",         test_dcs_red_support),
         ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
+        ("self-play heading history", test_selfplay_heading_history),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),

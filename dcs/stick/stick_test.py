@@ -13,9 +13,20 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py info                see what Export.lua found
     python dcs/stick/stick_test.py rate                telemetry rate and fields (no control)
     python dcs/stick/stick_test.py pulses              small stick pulses: signs, gains, lag
+    python dcs/stick/stick_test.py curve               pulses up to full stick: response against command
     python dcs/stick/stick_test.py throttle            throttle code against RPM and acceleration
     python dcs/stick/stick_test.py hold                heading/altitude/speed steps, closed loop
-    python dcs/stick/stick_test.py all                 rate, pulses, throttle, hold
+    python dcs/stick/stick_test.py all                 rate, pulses, curve, throttle, hold
+    python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
+    python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
+    python dcs/stick/stick_test.py ind --tag locked    the text of the cockpit displays (HUD, MFDs): run it with and without a lock
+    python dcs/stick/stick_test.py cursormap           slew the radar cursor to each edge of the page and save the page (azimuth and range map)
+    python dcs/stick/stick_test.py cursortry           try nine ways of moving the radar cursor, announced; you say which moved it
+    python dcs/stick/stick_test.py cursor              slew the radar cursor and print which lines of the radar page follow it
+    python dcs/stick/stick_test.py lock                try to lock the target (needs make_mission --stick-test --target)
+    python dcs/stick/stick_test.py lock --tws          no cursor: TWS, bug the track, single-target track
+    python dcs/stick/stick_test.py lock --aim          aim the cursor at the target (any azimuth within 60 deg, any altitude) and lock
+    python dcs/stick/stick_test.py fire                master arm, release a missile, watch it go
     python dcs/stick/stick_test.py release             panic: axes to 0 (the F-16 holds 1 g, the bank)
     python dcs/stick/stick_test.py raw 2004 0.5        one LoSetCommand(2004, 0.5)
 
@@ -71,15 +82,21 @@ def _first(*vals):
     return None
 
 
-def _rpm(eng):
+def _both(eng, key):
+    """A per-engine reading ({'left':, 'right':} or a number): the Viper has one engine and DCS
+    reports 0 for the other, so the largest value is the engine's."""
     if not isinstance(eng, dict):
         return None
-    r = eng.get("RPM")
+    r = eng.get(key)
     if isinstance(r, dict):
         vals = [_num(r.get(k)) for k in ("left", "right")]
         vals = [v for v in vals if v is not None]
-        return sum(vals) / len(vals) if vals else None
+        return max(vals) if vals else None
     return _num(r)
+
+
+def _rpm(eng):
+    return _both(eng, "RPM")
 
 
 class Frame:
@@ -94,11 +111,13 @@ class Frame:
         self.agl = _num(d.get("agl"))
         self.tas, self.ias, self.mach = _num(d.get("tas")), _num(d.get("ias")), _num(d.get("mach"))
         self.hdg = _first(me.get("hdg"), adi.get("yaw"))
+        self.myaw = _num(d.get("myaw"))                 # magnetic heading, rad
         self.pitch = _first(me.get("pitch"), adi.get("pitch"))
         self.bank = _first(me.get("bank"), adi.get("bank"))
         self.nz = _num(g.get("y"))
         self.aoa, self.beta, self.vs = _num(d.get("aoa")), _num(d.get("beta")), _num(d.get("vs"))
         self.rpm = _rpm(d.get("eng"))
+        self.fuel_flow = _both(d.get("eng"), "FuelConsumption")
         self.x, self.z = _num(me.get("x")), _num(me.get("z"))
         self.vel = d.get("vel") or {}
         self.ax = ax
@@ -116,6 +135,8 @@ class UdpLink:
         self.addr = (host, cmd_port)
         self.events, self.sent, self.latencies = {}, {}, []
         self.seq = self.commands_sent = 0
+        self.last_tel_wall = self.last_event_wall = 0.0
+        self.ind_items = {}
 
     def wall(self):
         return time.time()
@@ -136,11 +157,15 @@ class UdpLink:
             except ValueError:
                 continue
             if d.get("ev") == "tel":
+                self.last_tel_wall = time.time()
                 f = Frame(d)
                 if f.ax_seq in self.sent and f.rt is not None:
                     self.latencies.append(f.rt - self.sent.pop(f.ax_seq))
                 return f
+            if d.get("ev") == "ind":
+                self.ind_items[d.get("id")] = d.get("text", "")
             self.events[d.get("ev")] = d
+            self.last_event_wall = time.time()
 
     def _send(self, text):
         self.tx.sendto(text.encode(), self.addr)
@@ -165,6 +190,12 @@ class UdpLink:
 
     def info(self):
         self._send("INFO")
+
+    def click(self, dev, cmd, value, mode=None):
+        self._send(f"CLICK {int(dev)} {int(cmd)} {float(value):g}" + (f" {mode}" if mode else ""))
+
+    def ind(self, first=0, last=49):
+        self._send(f"IND {int(first)} {int(last)}")
 
     def close(self):
         self.rx.close()
@@ -193,7 +224,15 @@ class Run:
     def next(self):
         f = self.link.next(timeout=3.0)
         if f is None:
-            raise Abort("no telemetry for 3 s (sim paused? DCS closed? Export.lua not loaded?)")
+            last = self.frames[-1] if self.frames else None
+            where = (f"; last frame: model time {last.t:.1f} s, {last.alt:.0f} m, {last.tas:.0f} m/s "
+                     f"(Mach {last.mach:.2f}), bank {last.bank * DEG:+.0f} deg") if last else ""
+            alive = getattr(self.link, "last_event_wall", 0.0) > getattr(self.link, "last_tel_wall", 0.0)
+            if alive:
+                raise Abort("telemetry stopped but DCS is still running its frames: the sim is PAUSED (Esc menu? "
+                            "Pause key? a dialog over DCS?)" + where)
+            raise Abort("nothing at all from DCS for 3 s: DCS frozen, loading, minimised or closed?" + where
+                        + ". If it came back, the mission may have stalled: look at dcs.log")
         self.frames.append(f)
         if self.fh:
             self.fh.write(json.dumps(f.raw, separators=(",", ":")) + "\n")
@@ -262,6 +301,22 @@ def pct(a, p):
 
 # ── the control law: the simulator's autopilot, on stick axes ───────────
 
+def inverse(curve, y):
+    """Command (-1..1, odd symmetric) that gives the response y, from the measured curve
+    [[command, response], ...] (responses positive for positive commands); beyond the last
+    point the last slope is extended, and the command is capped at 1."""
+    pts = sorted((float(a), float(r)) for a, r in curve if a > 0)
+    xs, ys = [0.0] + [a for a, _ in pts], [0.0] + [r for _, r in pts]
+    ys = list(np.maximum.accumulate(np.array(ys) + np.arange(len(ys)) * 1e-9))
+    mag = abs(y)
+    if mag >= ys[-1]:
+        slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) if len(xs) > 1 and ys[-1] > ys[-2] else 1e-3
+        x = xs[-1] + (mag - ys[-1]) / max(slope, 1e-6)
+    else:
+        x = float(np.interp(mag, ys, xs))
+    return math.copysign(min(1.0, x), y)
+
+
 class Hold:
     """Heading, altitude and speed hold: heading -> bank -> roll rate -> roll axis; altitude ->
     flight-path angle -> load factor -> pitch axis; speed -> acceleration -> throttle axis.
@@ -271,9 +326,16 @@ class Hold:
     TAU_GAMMA = 3.0        # s to take out a flight-path error
     TAU_SPEED = 8.0        # s to take out a speed error
 
-    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0):
-        self.g, self.bank_max, self.nz_max = gains, bank_max, nz_max
+    T_LEAD = 0.25          # s: the bank error is taken against the bank the roll rate will reach in this time
+                           # (DCS rolls 140 deg/s at a 0.6 command and needs about 0.4 s to stop)
+    KP_V = 0.04            # throttle position per m/s of speed error
+    KI_V = 0.002           # and per m/s of error and second
+
+    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0, vs_max=30.0):
+        self.g, self.bank_max, self.nz_max, self.vs_max = gains, bank_max, nz_max, vs_max
         self.prev = None
+        self.integral, self.t_speed = 0.0, None
+        self.prev_bank, self.roll_rate = None, 0.0
 
     def axes(self, f, hdg, alt, v=None, thr=None):
         g = self.g
@@ -283,16 +345,37 @@ class Hold:
         self.prev = (f.t, f.alt)
         tas = max(f.tas or 150.0, 80.0)
         bank_cmd = max(-self.bank_max, min(self.bank_max, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
-        rate_cmd = max(-3.0, min(3.0, self.K_BANK_RATE * (bank_cmd - f.bank)))
-        roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
+        if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
+            inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
+            self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s
+        self.prev_bank = (f.t, f.bank)
+        bank_pred = f.bank + self.T_LEAD * self.roll_rate
+        rate_cmd = max(-3.0, min(3.0, self.K_BANK_RATE * (bank_cmd - bank_pred)))
+        if g.get("roll_curve"):
+            roll = g["roll_sign"] * inverse(g["roll_curve"], rate_cmd)
+        else:
+            roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
         gam = math.asin(max(-0.9, min(0.9, vs / tas)))
-        vs_cmd = max(-30.0, min(30.0, 0.12 * (alt - f.alt)))
+        vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
         gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
         nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
         nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
-        pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
+        if g.get("pitch_curve"):
+            d = nz_cmd - 1.0                     # pull and push have their own curves
+            cmd = inverse(g["pitch_curve"], d) if d >= 0 else -inverse(g.get("pitch_push_curve") or g["pitch_curve"], -d)
+            pitch = g["pitch_sign"] * cmd
+        else:
+            pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
         if v is not None:
-            thr = g.get("thr_trim", 0.0) + ((v - tas) / self.TAU_SPEED) / g.get("thr_slope", 6.0)
+            # speed -> throttle position u (+1 = most thrust) by PI; the axis code is sign * u
+            # (DCS's throttle code is inverted: -1 is afterburner, +1 idle)
+            err = v - (f.tas or tas)
+            dt = 0.0 if self.t_speed is None else max(0.0, min(0.2, f.t - self.t_speed))
+            self.t_speed = f.t
+            u = g.get("thr_u_trim", 0.0) + self.KP_V * err + self.integral
+            if abs(u) < 1.0 or err * u < 0:                 # no wind-up against the stop
+                self.integral = max(-0.8, min(0.8, self.integral + self.KI_V * err * dt))
+            thr = g.get("thr_sign", 1) * max(-1.0, min(1.0, u))
         out = {"pitch": max(-1.0, min(1.0, pitch)), "roll": max(-1.0, min(1.0, roll)), "rudder": 0.0}
         if thr is not None:
             out["throttle"] = max(-1.0, min(1.0, thr))
@@ -352,6 +435,8 @@ def stage_rate(run, secs=10.0):
                        + ("" if real_hz >= 20 else " -- try the other source (see the comment in Export.lua)"))
     chk(out["dt_ms_p95"] < 2.5e3 / max(real_hz, 1), f"frame spacing p50 {out['dt_ms_p50']:.1f} ms, "
         f"p95 {out['dt_ms_p95']:.1f}, max {out['dt_ms_max']:.1f}; {out['gaps_over_150ms']} gaps over 150 ms")
+    chk(len(set(rt.tolist())) > 0.5 * n, f"real-time stamps distinct on {len(set(rt.tolist())) * 100 // n}% of frames "
+        f"(low means the stamp is quantised: the command-to-response delay can't be measured)")
     chk(abs(out["model_over_real"] - 1.0) < 0.05, f"model time runs {out['model_over_real']:.2f} x real time "
                                                   f"(1.00 = normal; pause or time acceleration breaks the controller)")
     miss = [k for k, v in cover.items() if v < 0.99]
@@ -374,6 +459,9 @@ def stage_rate(run, secs=10.0):
     if f.tas and all(isinstance(v.get(k), (int, float)) for k in ("x", "y", "z")):
         spd = math.sqrt(v["x"] ** 2 + v["y"] ** 2 + v["z"] ** 2)
         chk(abs(spd - f.tas) < 0.15 * f.tas + 15, f"|velocity vector| {spd:.0f} vs TAS {f.tas:.0f} m/s")
+    if f.mach is not None:
+        chk(0.6 < f.mach < 0.97, f"Mach {f.mach:.2f} at the end: fly the tests at Mach 0.8-0.95 "
+                                 f"(transonic changes the pitch response and the drag)")
     st = link.events.get("stats")
     if st:
         out["lua_stats"] = {k: st.get(k) for k in ("tel_hz", "frame_hz", "event_hz", "frame_dt_max", "event_dt_max", "missing")}
@@ -389,7 +477,7 @@ def stage_rate(run, secs=10.0):
         print(("  ok    " if ok else "  WARN  ") + text)
     out["checks_failed"] = [t for ok, t in checks if not ok]
     print(f"\n  now: {f.alt:.0f} m, {f.tas:.0f} m/s (Mach {f.mach:.2f}), heading {f.hdg * DEG:.0f} deg, "
-          f"bank {f.bank * DEG:+.1f}, nz {f.nz:.2f}, RPM {f.rpm}")
+          f"bank {f.bank * DEG:+.1f}, nz {f.nz:.2f}, RPM {f.rpm:.1f}, fuel flow {f.fuel_flow}")
     return out
 
 
@@ -462,42 +550,170 @@ def stage_pulses(run, size=0.1, on=0.5):
     return g
 
 
-def stage_throttle(run, gains, hold_s=7.0, bank_max=math.radians(30)):
-    """Throttle code against RPM and acceleration, holding heading and altitude on the stick."""
-    link = run.link
-    need = ("roll_sign", "roll_rate", "pitch_sign", "nz_per_cmd")
-    if not all(k in gains for k in need):
-        raise SystemExit("throttle needs the stick gains: run `pulses` first (or `all`).")
-    f0 = run.next()
-    hdg, alt = f0.hdg, f0.alt
-    h = Hold(gains, bank_max=bank_max)
-    levels = [0.0, -1.0, -0.5, 0.0, 0.5, 1.0]
+def drive_until(run, max_s, fn, done):
+    f = run.next()
+    t0 = f.t
+    while f.t - t0 < max_s and not done(f):
+        run.link.axes(**fn(f, f.t - t0))
+        f = run.next()
+    return f
 
-    def law(thr):
-        return lambda f, tau: h.axes(f, hdg, alt, thr=thr)
-    print(f"\n  holding heading {hdg * DEG:.0f} deg and {alt:.0f} m on the stick; throttle code for {hold_s:.0f} s each")
+
+CURVE_AMPS = (0.1, 0.2, 0.35, 0.5, 0.75, 1.0)
+
+
+def stage_curve(run, gains, amps=CURVE_AMPS, axes=("pitch", "roll"), max_bank_change=math.radians(20),
+                max_nz_change=5.5, max_pitch_change=math.radians(12)):
+    """Response of the pitch and roll axes against the command, up to full stick. Each pulse
+    stops early (and the aircraft is brought back by the known sign) when the bank has
+    changed by 20 deg, or the load factor up by max_nz_change g (or down to -2 g) or the pitch by 12 deg. A pulse
+    stopped early on load factor or pitch only shows the response is *at least* that: such
+    pitch points are marked * and left out of the stored curve."""
+    for k in ("roll_sign", "pitch_sign"):
+        if k not in gains:
+            raise SystemExit("curve needs the signs: run `pulses` first (or `all`).")
+    out = {}
+    print(f"\n  pulses of {', '.join(f'{a:g}' for a in amps)} each way, stopped early at 20 deg of bank, "
+          f"{max_nz_change:g} g or {math.degrees(max_pitch_change):.0f} deg of pitch")
+    for axis in axes:
+        rows, push = [], {}
+        for a in amps:
+            peak, held, early = {}, {}, {}
+            for sgn in (1, -1):
+                base = drive(run, 1.5, lambda f, tau: dict(ZERO))
+                f0 = base[-1]
+                bank0, gam0 = f0.bank, f0.pitch
+                nz0 = float(np.nanmean(series(base[-25:], "nz")))
+                rate0 = float(np.nanmean(deriv(series(base, "t"), series(base, "bank"), wrap=True)))
+                st = {"stop": None, "why": None}
+                on_max = 1.0 if axis == "pitch" else 0.7
+
+                def fn(f, tau):
+                    if st["stop"] is None:
+                        hit = (axis == "roll" and abs(wrap_pi(f.bank - bank0)) > max_bank_change) \
+                            or (axis == "pitch" and (f.nz - nz0 > max_nz_change or f.nz < -2.0
+                                                     or abs(f.pitch - gam0) > max_pitch_change))
+                        if tau >= on_max or hit:
+                            st["stop"], st["why"] = tau, ("limit" if hit else "time")
+                    return {**ZERO, axis: 0.0 if st["stop"] is not None else sgn * a}
+                fr = drive(run, on_max + 0.5, fn)
+                held[sgn] = st["stop"] if st["stop"] is not None else on_max
+                early[sgn] = st["why"] == "limit"
+                if axis == "roll":
+                    r = deriv(series(fr, "t"), series(fr, "bank"), wrap=True) - rate0
+                    peak[sgn] = float(r[np.nanargmax(np.abs(r))])
+                else:
+                    d = series(fr, "nz") - nz0
+                    peak[sgn] = float(d[np.nanargmax(np.abs(d))])
+                # bring it back with the known sign
+                if axis == "roll":
+                    drive_until(run, 8.0, lambda f, tau: {**ZERO, "roll": gains["roll_sign"] * max(-0.25, min(0.25, -0.8 * wrap_pi(f.bank - bank0)))},
+                                lambda f: abs(wrap_pi(f.bank - bank0)) < math.radians(3))
+                else:
+                    drive_until(run, 10.0, lambda f, tau: {**ZERO, "pitch": gains["pitch_sign"] * max(-0.2, min(0.2, -2.0 * (f.pitch - gam0)))},
+                                lambda f: abs(f.pitch - gam0) < math.radians(1.5) and abs(f.nz - nz0) < 0.25)
+            resp = (peak[1] - peak[-1]) / 2.0
+            lim = early[1] or early[-1]
+            if axis == "pitch":
+                # pull and push are different: the F-16 pushes over to about -1.7 g and no further
+                ps = int(gains["pitch_sign"])
+                resp = abs(peak[ps])                      # the pull side: what a turn needs
+                lim = early[ps]
+                push[a] = abs(peak[-ps])
+            rows.append((a, peak[1], peak[-1], resp, 0.5 * (held[1] + held[-1]), lim))
+        k = DEG if axis == "roll" else 1.0
+        unit = "deg/s" if axis == "roll" else "g"
+        print(f"\n  {axis}: {'rate' if axis == 'roll' else 'load factor change, pull side (push in the last column)'} "
+              f"against command")
+        print(f"  {'cmd':>6}{'+ pulse':>12}{'- pulse':>12}{'response':>12}{'per unit':>12}{'held s':>9}"
+              + (f"{'push':>8}" if axis == "pitch" else ""))
+        for a, pp, pm, resp, held, er in rows:
+            mark = " *" if er and axis == "pitch" else "  "
+            print(f"  {a:>6.2f}{pp * k:>+12.2f}{pm * k:>+12.2f}{abs(resp) * k:>9.2f} {unit:<4}{abs(resp) * k / a:>8.2f}"
+                  f"{held:>9.2f}{mark}" + (f"{push[a]:>7.2f}g" if axis == "pitch" else ""))
+        keep = [r for r in rows if not (axis == "pitch" and r[5])]
+        if axis == "pitch" and len(keep) < len(rows):
+            print(f"  * stopped early at the limit: at least this much; left out of the stored curve")
+        if len(keep) < 3:
+            keep = rows
+        out[f"{axis}_curve"] = [[r[0], abs(r[3])] for r in keep]
+        if axis == "pitch":
+            out["pitch_push_curve"] = [[r[0], push[r[0]]] for r in rows]
+        sgn_resp = [1 if r[3] >= 0 else -1 for r in rows]
+        if len(set(sgn_resp)) > 1:
+            print(f"  WARN: the {axis} response changes sign along the sweep")
+        top = rows[-1]
+        print(f"  at command {top[0]:g}: {abs(top[3]) * k:.1f} {unit}{' or more' if top[5] and axis == 'pitch' else ''}")
+    return out
+
+
+def stage_throttle(run, gains, hold_s=6.0, bank_max=math.radians(30)):
+    """Which way the throttle code goes, and RPM and fuel flow against it, holding heading and
+    altitude on the stick. DCS's code turned out inverted (-1 afterburner, +1 idle), so the
+    sign is found first, from two moderate codes, and the levels are then run in thrust order
+    u = -1 ... +1. A level ends early if the speed changes by 35 m/s during it, leaves the start speed by 120 m/s or passes Mach 1.15."""
+    need = ("roll_sign", "pitch_sign")
+    if not all(k in gains for k in need) or not (gains.get("roll_curve") or gains.get("roll_rate")):
+        raise SystemExit("throttle needs the stick gains: run `pulses` and `curve` first (or `all`).")
+    f0 = run.next()
+    hdg, alt, tas0 = f0.hdg, f0.alt, f0.tas
+    h = Hold(gains, bank_max=bank_max)
+
+    def level(code, secs):
+        k0, st = len(run.frames), {}
+
+        def done(f):
+            st.setdefault("v0", f.tas)
+            return abs(f.tas - st["v0"]) > 35 or abs(f.tas - tas0) > 120 or (f.mach or 0) > 1.15
+        drive_until(run, secs, lambda f, tau: h.axes(f, hdg, alt, thr=code), done)
+        return run.frames[k0:]
+
+    def tail(fr, secs, attr):
+        t1 = fr[-1].t
+        v = [getattr(f, attr) for f in fr if f.t >= t1 - secs and getattr(f, attr) is not None]
+        return float(np.mean(v)) if v else float("nan")
+
+    print(f"\n  heading {hdg * DEG:.0f} deg, {alt:.0f} m, {tas0:.0f} m/s (Mach {f0.mach:.2f}) held on the stick")
+    a_fr, b_fr = level(0.5, 4.0), level(-0.5, 4.0)
+    ra, rb = tail(a_fr, 1.5, "rpm"), tail(b_fr, 1.5, "rpm")
+    fa, fb = tail(a_fr, 1.5, "fuel_flow"), tail(b_fr, 1.5, "fuel_flow")
+    more_at_minus = (rb > ra + 1.0) or (rb >= ra - 1.0 and fb > fa * 1.1)
+    more_at_plus = (ra > rb + 1.0) or (ra >= rb - 1.0 and fa > fb * 1.1)
+    sign = -1 if more_at_minus and not more_at_plus else 1 if more_at_plus and not more_at_minus else 0
+    print(f"  probe: code +0.5 -> RPM {ra:.1f}, fuel {fa:.2f};  code -0.5 -> RPM {rb:.1f}, fuel {fb:.2f}")
+    if sign == 0:
+        print("  WARN: the probe codes gave no clear difference: is the throttle axis overridden (physical "
+              "throttle assigned)? Assuming a positive code is more thrust.")
+        sign = 1
+    print(f"  throttle code is {'INVERTED: -1 is the most thrust' if sign < 0 else 'normal: +1 is the most thrust'}")
     rows = []
-    for thr in levels:
-        fr = drive(run, hold_s, law(thr))
-        tail = _window(fr, fr[0].t + hold_s - 5.0, fr[-1].t + 1e-6)
-        ts, tas = series(tail, "t"), series(tail, "tas")
-        acc = float(np.polyfit(ts - ts[0], tas, 1)[0]) if len(tail) > 5 else float("nan")
-        rpm = float(np.nanmean(series(_window(fr, fr[-1].t - 2.0, fr[-1].t + 1e-6), "rpm")))
-        rows.append((thr, rpm, acc, float(tail[-1].tas), float(tail[-1].alt - alt)))
-    print(f"\n  {'code':>6}{'RPM %':>9}{'accel m/s2':>12}{'TAS':>8}{'alt err':>9}")
-    for thr, rpm, acc, tas, da in rows[1:]:
-        print(f"  {thr:>+6.2f}{rpm:>9.1f}{acc:>+12.2f}{tas:>8.0f}{da:>+9.0f}")
-    xs, ys, rp = (np.array([r[i] for r in rows[1:]]) for i in (0, 2, 1))
-    slope, icpt = np.polyfit(xs, ys, 1)
-    out = {"thr_slope": float(slope), "thr_trim": float(np.clip(-icpt / slope, -1, 1)) if slope > 0 else 0.0,
-           "rpm_by_code": {f"{r[0]:+.2f}": r[1] for r in rows[1:]}}
-    if slope <= 0 or rp[-1] <= rp[0]:
-        print("  WARN: more throttle code did not give more RPM / acceleration: code 2004 may not be the throttle, "
-              "or a physical throttle is overriding it")
-    else:
-        print(f"\n  acceleration {slope:.2f} m/s2 per code unit; level flight at code {out['thr_trim']:+.2f} "
-              f"(RPM {np.interp(out['thr_trim'], xs, rp):.0f}%)")
-    drive(run, 3.0, lambda f, tau: h.axes(f, hdg, alt, thr=out["thr_trim"]))
+    for u in (-1.0, -0.5, 0.0, 0.5, 1.0):
+        fr = level(sign * u, hold_s)
+        dur = fr[-1].t - fr[0].t
+        tl = [f for f in fr if f.t >= fr[-1].t - 4.0]
+        acc = float(np.polyfit(series(tl, "t") - tl[0].t, series(tl, "tas"), 1)[0]) \
+            if dur >= 3.5 and len(tl) > 5 else float("nan")
+        rows.append((u, sign * u, tail(fr, 1.5, "rpm"), tail(fr, 1.5, "fuel_flow"), acc, fr[-1].tas, fr[-1].mach, dur))
+    print(f"\n  {'u':>5}{'code':>7}{'RPM':>8}{'fuel':>8}{'accel m/s2':>12}{'TAS':>7}{'Mach':>7}{'held s':>8}")
+    for u, c, rp, fu, acc, tas, m, dur in rows:
+        print(f"  {u:>+5.1f}{c:>+7.1f}{rp:>8.1f}{fu:>8.2f}{acc:>+12.2f}{tas:>7.0f}{m:>7.2f}{dur:>8.1f}")
+    ok = [(r[0], r[4]) for r in rows if not math.isnan(r[4])]
+    out = {"thr_sign": sign, "thr_map": [[r[0], r[2], r[3]] for r in rows], "thr_u_trim": 0.0, "thr_slope": float("nan")}
+    if len(ok) >= 3:
+        xs, ys = np.array([o[0] for o in ok]), np.array([o[1] for o in ok])
+        slope, icpt = np.polyfit(xs, ys, 1)
+        if slope > 0:
+            out["thr_slope"] = float(slope)
+            out["thr_u_trim"] = float(np.clip(-icpt / slope, -0.5, 0.5))
+        else:
+            print("  WARN: acceleration did not rise with thrust (drag changes through the transonic range?): "
+                  "the speed loop will find its own trim")
+    r = [x[2] for x in rows]
+    if not (r[-1] > r[0] + 5):
+        print("  WARN: RPM did not rise from u = -1 to +1: the throttle code may not be reaching the engine")
+    print(f"\n  thrust-neutral position (from the acceleration): u = {out['thr_u_trim']:+.2f}; "
+          f"afterburner is where the fuel flow jumps (u = +1 here: {rows[-1][3]:.1f} against {rows[-2][3]:.1f})")
+    level(sign * out["thr_u_trim"], 3.0)
     return out
 
 
@@ -509,23 +725,42 @@ def _steps(fr, t_cmd, hdg0, delta, span=22.0):
     d = (h - h[0]) * np.sign(delta)
     tgt = abs(delta)
     half = ts[np.argmax(d >= 0.5 * tgt)] if np.any(d >= 0.5 * tgt) else float("nan")
+    near = tgt - math.radians(10.0)
+    t10 = ts[np.argmax(d >= near)] if np.any(d >= near) else float("nan")
     nin = ts[np.argmax(d >= 0.9 * tgt)] if np.any(d >= 0.9 * tgt) else float("nan")
     rate = deriv(ts, h * np.sign(delta))
     bulk = (tgt - d > math.radians(30)) & (ts > 1.5)
     bank = np.array([f.bank for f in seg]) * np.sign(delta)
-    return {"delta_deg": delta * DEG, "half_s": float(half), "p90_s": float(nin),
+    peak_rate = float(np.nanmax(deriv(ts, h * np.sign(delta), smooth=41)) * DEG)
+    return {"delta_deg": delta * DEG, "half_s": float(half), "p90_s": float(nin), "within10_s": float(t10),
+            "peak_rate_dps": peak_rate,
             "rate_bulk_dps": float(np.nanmean(rate[bulk]) * DEG) if np.any(bulk) else float("nan"),
             "peak_bank_deg": float(np.nanmax(bank) * DEG), "peak_nz": float(np.nanmax([f.nz for f in seg]))}
 
 
-def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0, alt_step=300.0):
-    need = ("roll_sign", "roll_rate", "pitch_sign", "nz_per_cmd")
-    if not all(k in gains for k in need):
-        raise SystemExit("hold needs the stick gains: run `pulses` first (or `all`).")
+def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0, alt_step=300.0, speed=None):
+    need = ("roll_sign", "pitch_sign", "thr_sign")
+    if not all(k in gains for k in need) or not gains.get("roll_curve") or not gains.get("pitch_curve"):
+        raise SystemExit("hold needs the stick gains and curves and the throttle sign: run `pulses`, `curve` and "
+                         "`throttle` first (or `all`).")
     link = run.link
     f0 = run.next()
-    hdg0, alt0, v0 = f0.hdg, f0.alt, f0.tas
     h = Hold(gains, bank_max=math.radians(bank_deg), nz_max=nz_max)
+    if speed is not None and abs(f0.tas - speed) > 6.0:
+        # capture the speed first: the speed loop on the throttle, heading and altitude on the stick
+        print(f"\n  capturing {speed:.0f} m/s from {f0.tas:.0f} (heading and altitude held)")
+        hc, ac = f0.hdg, f0.alt
+        st = {"n": 0}
+
+        def settled(f):
+            st["n"] = st["n"] + 1 if abs(f.tas - speed) < 4.0 else 0
+            return st["n"] > 150                       # within 4 m/s for 3 s
+        fl = drive_until(run, 60.0, lambda f, tau: h.axes(f, hc, ac, v=speed), settled)
+        print(f"  speed {fl.tas:.0f} m/s (Mach {fl.mach:.2f}) after {fl.t - f0.t:.0f} s")
+        if abs(fl.tas - speed) > 10.0:
+            raise Abort(f"could not capture {speed:.0f} m/s in 60 s (at {fl.tas:.0f}): the speed loop does not work")
+        f0 = run.next()
+    hdg0, alt0, v0 = f0.hdg, f0.alt, f0.tas
     d = math.radians(turn)
     T1, T2, T3, T4, T5 = 8.0, 38.0, 68.0, 96.0, 120.0
     plan = [(0.0, hdg0, alt0, v0), (T1, hdg0 + d, alt0, v0), (T2, hdg0, alt0, v0),
@@ -572,10 +807,12 @@ def stage_hold(run, gains, bank_deg=60.0, nz_max=5.0, turn=60.0, speed_step=40.0
     lat = link.latencies
     res["loop"] = {"commands": link.commands_sent, "command_to_frame_ms_p50": 1e3 * pct(lat, 50),
                    "p95": 1e3 * pct(lat, 95)}
-    print(f"\n  {'step':<10}{'turn':>7}{'half':>8}{'90%':>8}{'deg/s':>8}{'bank':>7}{'nz':>6}")
+    print(f"\n  {'step':<10}{'turn':>7}{'half':>8}{'to 10d':>8}{'90%':>8}{'mean':>8}{'peak':>7}{'bank':>7}{'nz':>6}")
     for i, s in enumerate(res["heading_steps"]):
-        print(f"  {'turn ' + str(i + 1):<10}{s['delta_deg']:>+6.0f}d{s['half_s']:>7.1f}s{s['p90_s']:>7.1f}s"
-              f"{s['rate_bulk_dps']:>8.1f}{s['peak_bank_deg']:>6.0f}d{s['peak_nz']:>6.1f}")
+        print(f"  {'turn ' + str(i + 1):<10}{s['delta_deg']:>+6.0f}d{s['half_s']:>7.1f}s{s['within10_s']:>7.1f}s"
+              f"{s['p90_s']:>7.1f}s{s['rate_bulk_dps']:>8.1f}{s['peak_rate_dps']:>7.1f}{s['peak_bank_deg']:>6.0f}d{s['peak_nz']:>6.1f}")
+    print(f"  (deg/s: mean while more than 30 deg to go, and peak; bank limit {bank_deg:.0f} deg sustains "
+          f"{math.degrees(G * math.tan(math.radians(bank_deg)) / max(v0, 100.0)):.1f} deg/s at {v0:.0f} m/s)")
     a, s_, e, lp = res["alt_step"], res["speed_step"], res["hold_error"], res["loop"]
     print(f"  altitude +{a['step_m']:.0f} m: 90% in {a['t90_s']:.1f} s, overshoot {a['overshoot_m']:.0f} m")
     print(f"  speed +{s_['step_ms']:.0f} m/s: 90% in {s_['t90_s']:.1f} s, final error {s_['end_error']:+.1f} m/s")
@@ -605,26 +842,81 @@ def save_gains(path, gains):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("test", choices=["info", "rate", "pulses", "throttle", "hold", "all", "release", "raw"])
-    ap.add_argument("args", nargs="*", help="raw: CODE VALUE")
+    ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
+                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry", "cursormap"])
+    ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
+    ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
+    ap.add_argument("--mode", choices=["c", "s", "l"], default=None,
+                    help="click: c = clickable element (mouse click), s = device SetCommand (key binding), l = LoSetCommand "
+                         "(default: s for HOTAS controls, c for the rest)")
+    ap.add_argument("--hold", type=float, default=0.2, help="click: seconds between press and release")
+    ap.add_argument("--scan", action="store_true", help="lock: also slew the radar cursor between presses")
+    ap.add_argument("--tws", action="store_true",
+                    help="lock: no cursor: target management right held to TWS, right again until the track is bugged "
+                         "(an AIM-120 can be fired at it; --stt also asks for a single-target track)")
+    ap.add_argument("--stt", action="store_true", help="lock --tws: after the bug, target management up for a single-target track")
+    ap.add_argument("--aim", action="store_true",
+                    help="lock: put the cursor where the target is (bullseye readout) in range and azimuth, tilt the antenna "
+                         "to its altitude, then designate: works off the nose and off the level")
+    ap.add_argument("--bull", type=float, nargs=2, metavar=("X", "Z"), default=None,
+                    help="lock --aim: the bullseye in DCS metres (x north, z east); by default it is read off the radar page")
+    ap.add_argument("--ref", choices=["auto", "own", "bull"], default="auto",
+                    help="lock --aim: what the radar page's cursor readout is measured from (auto: switch it to our own "
+                         "aircraft through the DED if it reads from a bullseye)")
+    ap.add_argument("--relock", action="store_true", help="lock --aim: drop an existing lock first (target management down)")
+    ap.add_argument("--magvar", type=float, default=None,
+                    help="lock --aim: magnetic variation, deg east (default: from the module's magnetic heading)")
+    ap.add_argument("--force", action="store_true", help="fire: release even without a lock")
+    ap.add_argument("--offset", type=float, default=None,
+                    help="lock, fire, cursormap: first turn so the target is this many degrees right of the nose (negative: left)")
+    ap.add_argument("--dalt", type=float, default=None,
+                    help="lock, fire, cursormap: fly this many metres above the target (negative: below) instead of level with it")
+    ap.add_argument("--release-hold", type=float, default=1.5,
+                    help="fire: seconds the weapon release button is held (default 1.5; the missile leaves only while it is held)")
+    ap.add_argument("--watch", type=int, default=15,
+                    help="fire: seconds to watch for the missile (default 15; 90 shows the target destroyed from 60 km)")
+    ap.add_argument("--aa", action="store_true",
+                    help="lock, fire: always press the ICP A-A button (it toggles; by default it is pressed only if the HUD is not in A-A)")
+    ap.add_argument("--no-aa", action="store_true", help="lock, fire: never press the ICP A-A button")
+    ap.add_argument("--scan-steps", type=int, default=40, help="lock --scan: cursor steps (default 40)")
+    ap.add_argument("--scan-hold", type=float, default=0.3, help="lock --scan: seconds of cursor slew per step (default 0.3)")
+    ap.add_argument("--soi", choices=["left", "right", "none"], default="none",
+                    help="lock: first make this MFD the sensor of interest (display management switch); default none: the radar MFD is normally the SOI already; a display management press can switch the MFD to its menu page")
+    ap.add_argument("--release", type=float, default=None,
+                    help="click: the value to send after --hold (for axes such as hotas.THROTTLE_RDR_CURSOR_Y_AXIS --value 0.5 --release 0)")
+    ap.add_argument("--match-alt", action="store_true",
+                    help="radar, lock, fire: fly to the nearest aircraft's altitude (a radar sees it best there)")
+    ap.add_argument("--alt", type=float, default=None, help="radar, lock, fire: fly at this altitude, m")
+    ap.add_argument("--show", type=int, nargs="*", default=None,
+                    help="ind: print these displays in full (default: a summary of each); inddiff: only these displays")
+    ap.add_argument("--tag", default="", help="ind: a name for the saved file (before_lock, locked)")
+    ap.add_argument("--no-fly", action="store_true", help="radar, lock, fire: do not hold heading, altitude and speed")
     ap.add_argument("--secs", type=float, default=10.0, help="rate: how long to listen (s)")
     ap.add_argument("--size", type=float, default=0.1, help="pulses: stick deflection (default 0.1)")
     ap.add_argument("--bank", type=float, default=60.0, help="hold: bank limit, deg (try 75 with --nz 6 once it works)")
     ap.add_argument("--nz", type=float, default=5.0, help="hold: load factor limit, g")
     ap.add_argument("--turn", type=float, default=60.0, help="hold: heading step, deg")
+    ap.add_argument("--speed", type=float, default=None,
+                    help="hold: capture this true airspeed (m/s) first; default: hold the speed you are at")
+    ap.add_argument("--axes", default="pitch,roll", help="curve: which axes (default pitch,roll)")
+    ap.add_argument("--max-nz", type=float, default=5.5, help="curve: stop a pitch pulse at this load factor change, g")
     ap.add_argument("--min-agl", type=float, default=1500.0, help="stop below this height above ground, m")
     ap.add_argument("--out", default="dcs_runs")
     ap.add_argument("--gains", default=None, help="gains file (default <out>/stick_gains.json)")
     ap.add_argument("--fake", action="store_true", help="fly a synthetic aircraft instead of DCS")
     ap.add_argument("--fake-roll-sign", type=int, default=1)
     ap.add_argument("--fake-pitch-sign", type=int, default=1)
+    ap.add_argument("--fake-roll-tau", type=float, default=0.12, help="fake aircraft: roll rate lag, s")
+    ap.add_argument("--fake-thr-inverted", action="store_true", help="fake aircraft: throttle code -1 is most thrust")
+    ap.add_argument("--fake-curve", type=float, default=1.0, help="fake aircraft: response ~ command ** this")
     ap.add_argument("--port-tel", type=int, default=TEL_PORT)
     ap.add_argument("--port-cmd", type=int, default=CMD_PORT)
     a = ap.parse_args(argv)
 
     if a.fake:
         from fake_export import FakeLink
-        link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign)
+        link = FakeLink(roll_sign=a.fake_roll_sign, pitch_sign=a.fake_pitch_sign, curve_pow=a.fake_curve,
+                        thr_inverted=a.fake_thr_inverted, roll_tau=a.fake_roll_tau)
     else:
         link = UdpLink(a.port_tel, a.port_cmd)
     gains_path = a.gains or os.path.join(a.out, "stick_gains.json")
@@ -646,7 +938,72 @@ def main(argv=None):
         if a.test == "info":
             stage_info(link)
             return summary
-        todo = ["rate", "pulses", "throttle", "hold"] if a.test == "all" else [a.test]
+        if a.test == "ind":
+            import cockpit
+            cockpit.stage_ind(link, a.tag, a.out, show=a.show)
+            return summary
+        if a.test == "inddiff":
+            import cockpit
+            if len(a.args) != 2:
+                raise SystemExit("inddiff FILE_A FILE_B (two files saved by `ind`)")
+            cockpit.ind_diff(a.args[0], a.args[1], ids=a.show)
+            return summary
+        if a.test in ("click", "radar", "lock", "fire", "cursor", "cursortry", "cursormap"):
+            import cockpit
+            defs = cockpit.load_defs()
+            cockpit.HOLD_OPTS.update(offset=a.offset, dalt=a.dalt)
+            gains = load_gains(gains_path)
+            have = all(k in gains for k in ("roll_sign", "pitch_sign", "thr_sign")) and gains.get("roll_curve") \
+                and gains.get("pitch_curve")
+            if a.test != "click" and not a.no_fly and not have:
+                raise SystemExit("heading, altitude and speed are held on the stick while this runs, which needs the gains "
+                                 "from pulses, curve and throttle (or add --no-fly and hold the aircraft yourself).")
+            run = Run(link, a.out, a.test, limits)
+            try:
+                first = run.next()
+                fgains = None if a.no_fly else gains
+                if a.test == "click":
+                    if not a.args:
+                        raise SystemExit("click NAME (e.g. hotas.STICK_TGT_MANAGE_UP, ufc.AA, left_osb.4) or click DEVICE COMMAND")
+                    spec = a.args if len(a.args) == 2 and all(x.lstrip("-").isdigit() for x in a.args) else a.args[0]
+                    try:
+                        cockpit.click(run, spec, defs, value=a.value, hold=a.hold, release=a.release, mode=a.mode)
+                    except ValueError as e:
+                        raise SystemExit(str(e))
+                elif a.test == "cursormap":
+                    summary["cursormap"] = cockpit.stage_cursormap(run, fgains, defs, out_dir=a.out, alt=a.alt,
+                                                                   match_alt=a.match_alt)
+                elif a.test == "cursortry":
+                    summary["cursortry"] = cockpit.stage_cursortry(run, fgains, defs, alt=a.alt, match_alt=a.match_alt)
+                elif a.test == "cursor":
+                    summary["cursor"] = cockpit.stage_cursorprobe(run, fgains, defs, out_dir=a.out, alt=a.alt,
+                                                                  match_alt=a.match_alt)
+                elif a.test == "radar":
+                    fn = cockpit.hold_fn(run, fgains, a.alt, a.match_alt) if fgains else None
+                    summary["radar"] = cockpit.stage_radar(run, a.secs, a.out, fn=fn)
+                elif a.test == "lock" and a.tws:
+                    summary["lock"] = cockpit.stage_twslock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
+                                                            aa=True if a.aa else False if a.no_aa else None,
+                                                            relock=a.relock, stt=a.stt)
+                elif a.test == "lock" and a.aim:
+                    summary["lock"] = cockpit.stage_aimlock(run, fgains, defs, alt=a.alt, match_alt=a.match_alt,
+                                                            bull=a.bull, magvar=a.magvar, relock=a.relock, ref=a.ref,
+                                                            aa=True if a.aa else False if a.no_aa else None)
+                elif a.test == "lock":
+                    summary["lock"] = cockpit.stage_lock(run, fgains, defs, scan=a.scan, alt=a.alt, match_alt=a.match_alt,
+                                                         aa=True if a.aa else False if a.no_aa else None, soi=a.soi,
+                                                         scan_steps=a.scan_steps, scan_hold=a.scan_hold)
+                else:
+                    summary["fire"] = cockpit.stage_fire(run, fgains, defs, force=a.force, alt=a.alt,
+                                                         match_alt=a.match_alt, aa=True if a.aa else False if a.no_aa else None,
+                                                         watch=a.watch, release_hold=a.release_hold)
+            finally:
+                run.close()
+                link.release()
+            if a.test == "click":
+                return summary
+            return summary
+        todo = ["rate", "pulses", "curve", "throttle", "hold"] if a.test == "all" else [a.test]
         gains = load_gains(gains_path)
         for name in todo:
             print(f"\n=== {name} " + "=" * (60 - len(name)))
@@ -658,12 +1015,19 @@ def main(argv=None):
                     gains.update(stage_pulses(run, a.size))
                     save_gains(gains_path, gains)
                     summary["pulses"] = {k: v for k, v in gains.items()}
+                elif name == "curve":
+                    gains.update(stage_curve(run, gains, axes=tuple(a.axes.split(",")),
+                                             max_nz_change=a.max_nz))
+                    save_gains(gains_path, gains)
+                    summary["curve"] = {k: gains[k] for k in ("pitch_curve", "pitch_push_curve", "roll_curve") if k in gains}
                 elif name == "throttle":
                     gains.update(stage_throttle(run, gains))
+                    for stale in ("thr_trim", "rpm_by_code"):
+                        gains.pop(stale, None)
                     save_gains(gains_path, gains)
-                    summary["throttle"] = {k: gains[k] for k in ("thr_slope", "thr_trim", "rpm_by_code")}
+                    summary["throttle"] = {k: gains[k] for k in ("thr_sign", "thr_u_trim", "thr_slope", "thr_map")}
                 else:
-                    summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn)
+                    summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn, speed=a.speed)
             finally:
                 run.close()
                 link.release()

@@ -76,7 +76,7 @@ function LoGetAltitudeAboveSeaLevel() return 7000.5 end
 function LoGetAltitudeAboveGroundLevel() return 6800.0 end
 function LoGetADIPitchBankYaw() return 0.02, -0.3, 1.25 end
 function LoGetVectorVelocity() return {x = 80.0, y = 1.5, z = 237.0} end
-function LoGetEngineInfo() return {RPM = {left = 88.0, right = 88.5}, fuel_internal = 2100.0} end
+function LoGetEngineInfo() return {RPM = {left = 88.0, right = 0}, FuelConsumption = {left = 1.2, right = 0}, fuel_internal = 2100.0} end
 function LoGetWorldObjects()
   return {[10] = {Name = "Su-27", UnitName = "Bandit-1", GroupName = "R", CoalitionID = 1, Type = {level1 = 1, level2 = 1},
                   LatLongAlt = {Lat = 42.5, Long = 41.9, Alt = 9000}, Heading = 3.0, Pitch = 0, Bank = 0,
@@ -86,6 +86,21 @@ function LoGetWorldObjects()
 end
 function LoGetPayloadInfo() return {CurrentStation = 7, Stations = {{count = 1, CLSID = "{AIM-120C}"}}} end
 function LoSetCommand(c, v) CMDS[#CMDS + 1] = {c, v} end
+CLICKS = {}
+RD_TD, RD_TRACKED, RD_CURSOR = false, false, true
+function list_indication(id)
+  if id == 1 then return "HUD_glass\n" .. (RD_TD and "HUD_AA_TD_box\n" or "") end
+  if id == 4 then return "FCR_Antenna_Azimuth_Tics_Root\n" .. (RD_CURSOR and "Cursor_Root\n" or "") .. (RD_TRACKED and "FCR_TrackedTgtPlaceholder\n" or "") end
+  if id == 17 then return "CenterOrigin\nThreatSymbol1\n" end
+  if id == 3 then return "-----------\nMODE\nCRM\n-----------" end
+  if id == 5 then error("no such indicator") end
+  if id == 7 then return "" end
+  if id == 9 then return "-----------\nSTT\n-----------" end
+  return nil
+end
+function GetDevice(id)
+  return {performClickableAction = function(self, dev, c, v) CLICKS[#CLICKS + 1] = {dev, c, v} end}
+end
 
 -- what Export.lua already defined before our dofile
 LuaExportStart = function() CALLS.start = (CALLS.start or 0) + 1 end
@@ -158,7 +173,7 @@ def test_lua_export():
     assert not cmds(), "axes were touched before any command"
     f = Frame(tel[-1])
     assert abs(f.alt - 7000.5) < 1e-6 and abs(f.hdg - 1.25) < 1e-9 and abs(f.bank + 0.3) < 1e-9
-    assert abs(f.tas - 250.5) < 1e-9 and abs(f.nz - 1.2) < 1e-9 and abs(f.rpm - 88.25) < 1e-9 and f.agl == 6800.0
+    assert abs(f.tas - 250.5) < 1e-9 and abs(f.nz - 1.2) < 1e-9 and f.rpm == 88.0 and f.fuel_flow == 1.2 and f.agl == 6800.0
     assert f.t > 50 and f.rt > 1000
     objs = [d for d in tel if d.get("obj")]
     assert objs and len(objs[-1]["obj"]) == 1 and objs[-1]["obj"][0]["unit"] == "Bandit-1", "own aircraft not excluded"
@@ -219,16 +234,20 @@ def test_lua_export():
     calls = g.CALLS
     assert calls.start == 1 and calls.before > 100 and calls.after > 100 and calls.activity >= 6, \
         (calls.start, calls.before, calls.after, calls.activity)
-    g.LuaExportStop()
-    assert g.CALLS.stop == 1
-    assert any(json.loads(d)["ev"] == "bye" for _, d in sent())
-    for _, d in sent():
-        json.loads(d)
     # pause: the model time stands still, so nothing is sent (and the axes are not re-sent either way)
     n = len([1 for _, d in sent() if json.loads(d)["ev"] == "tel"])
     run(0.5, paused=True)
     assert len([1 for _, d in sent() if json.loads(d)["ev"] == "tel"]) == n, "telemetry while paused"
 
+    # while paused the module says so once a second, so a script can tell "paused" from "DCS gone"
+    idle = [d for d in m.lines() if d["ev"] == "idle"]
+    assert 0 < len(idle) <= 2, len(idle)
+
+    g.LuaExportStop()
+    assert g.CALLS.stop == 1
+    assert any(json.loads(d)["ev"] == "bye" for _, d in sent())
+    for _, d in sent():
+        json.loads(d)
     # the other source: the activity event, which runs at frame boundaries here, so 30/s at 60 fps
     e = Mock("event")
     e.g.LuaExportStart()
@@ -238,6 +257,131 @@ def test_lua_export():
     assert e.lines()[0]["source"] == "event"
     print(f"  Lua export module ........... OK  ({len(sent())} lines, {hz:.0f} telemetry/s per frame, {ehz:.0f}/s by "
           f"event at 60 fps; axes every frame, watchdog + RELEASE + PING + CMD, pause, callbacks chained)")
+
+
+def test_click():
+    """CLICK reaches performClickableAction; the dangerous devices and commands are refused."""
+    m = Mock()
+    m.g.LuaExportStart()
+    clicks = lambda: [(m.g.CLICKS[i][1], m.g.CLICKS[i][2], m.g.CLICKS[i][3]) for i in range(1, len(m.g.CLICKS) + 1)]
+    for text in ("CLICK 16 3010 1", "CLICK 16 3010 0", "CLICK 17 3018 1", "CLICK 19 3002 1.0", "CLICK 31 3001 1"):
+        m.send(text)
+    m.run(0.2)
+    assert clicks() == [(16, 3010, 1), (16, 3010, 0), (17, 3018, 1), (19, 3002, 1.0), (31, 3001, 1)], clicks()
+    ev = [d for d in m.lines() if d["ev"] == "click"]
+    assert len(ev) == 5 and all(d["ok"] for d in ev), ev
+    n = len(clicks())
+    refused = ["CLICK 10 3006 1",                           # CPT_MECH: ejection handle
+               "CLICK 10 3003 1", "CLICK 7 3001 1",         # canopy, landing gear handle
+               "CLICK 6 3003 1", "CLICK 4 3001 1", "CLICK 3 3001 1", "CLICK 2 3001 1",
+               "CLICK 32 3004 1",                           # countermeasures jettison
+               "CLICK 19 3003 1", "CLICK 19 3004 1", "CLICK 19 3005 1", "CLICK 19 3018 1"]   # stores jettison, ALT REL
+    for text in refused:
+        m.send(text)
+    m.run(0.3)
+    assert len(clicks()) == n, clicks()[n:]
+    ev = [d for d in m.lines() if d["ev"] == "click"][5:]
+    assert len(ev) == len(refused) and all(not d["ok"] and d["err"] == "refused" for d in ev), ev
+    # the deny list agrees with the module's own numbers
+    defs = json.load(open(os.path.join(HERE, "f16c_defs.json")))
+    mm = defs["commands"]["mmc"]
+    assert (mm["EmerStoresJett"], mm["GroundJett"], mm["AltRel"], mm["GroundJett_ITER"]) == (3003, 3004, 3005, 3018)
+    dv = defs["devices"]
+    assert [dv[k] for k in ("CONTROL_INTERFACE", "ELEC_INTERFACE", "FUEL_INTERFACE", "HYDRO_INTERFACE", "ENGINE_INTERFACE",
+                            "GEAR_INTERFACE", "OXYGEN_INTERFACE", "CPT_MECH", "CMDS")] == [2, 3, 4, 5, 6, 7, 8, 10, 32]
+    assert defs["devices"]["MMC"] == 19 and defs["commands"]["cmds"]["Jett"] == 3004
+    # a failing DCS call is reported, not fatal
+    m.L.execute("function GetDevice(id) error('no device') end")
+    m.send("CLICK 16 3010 1")
+    m.run(0.1)
+    last = [d for d in m.lines() if d["ev"] == "click"][-1]
+    assert last["ok"] is False and "no device" in last["err"], last
+    print("  CLICK ....................... OK  (5 cockpit commands pass; 12 dangerous ones refused, the deny list "
+          "matches the module's numbers; a DCS error is reported)")
+
+
+def test_ind():
+    m = Mock()
+    m.g.LuaExportStart()
+    m.send("IND 0 20")
+    m.run(0.2)
+    ev = [d for d in m.lines() if d["ev"] in ("ind", "ind_end")]
+    assert [d["id"] for d in ev if d["ev"] == "ind"] == [1, 3, 4, 9, 17], ev   # nil, "" and an error are skipped
+    assert ev[-1]["ev"] == "ind_end" and ev[-1]["count"] == 5
+    assert "CRM" in ev[1]["text"] and "STT" in ev[3]["text"]
+    m.L.execute("function list_indication(id) if id == 1 then return string.rep('HUD_Element_Name_x\\n', 3000) end end")
+    m.send("IND 0 3")
+    m.run(0.1)
+    big = [d for d in m.lines() if d["ev"] == "ind" and d["id"] == 1][-1]
+    assert big["len"] == 3000 * 19 and len(big["text"]) == 30000, (big["len"], len(big["text"]))   # a long display is cut at 30000
+    m.send("IND 0 100000")                                                 # the range is capped
+    m.run(0.1)
+    print("  IND ......................... OK  (a message per display, then ind_end; long displays kept to 30000 characters)")
+
+
+def test_radar_markers():
+    """The module reads the radar state from what the displays draw."""
+    import cockpit
+    from stick_test import Frame
+    m = Mock()
+    m.g.LuaExportStart()
+    states = []
+    for td, tracked, cursor in ((False, False, True), (True, True, True), (False, True, False)):
+        m.g.RD_TD, m.g.RD_TRACKED, m.g.RD_CURSOR = td, tracked, cursor
+        n0 = len(m.lines())
+        m.run(0.6)
+        rds = [d for d in m.lines()[n0:] if d["ev"] == "tel" and "rd" in d]
+        assert rds, "no rd in the telemetry"
+        states.append((cockpit.lock_state(Frame(rds[-1])), rds[-1]["rd"]))
+    assert [s[0] for s in states] == ["search", "designated", "stt"], states
+    assert states[0][1]["fcr"] == 4 and states[1][1]["td"] is True and states[2][1]["cursor"] is False
+    assert states[0][1]["threat"] is True
+    # no radar page up: no state to read
+    m.L.execute("function list_indication(id) if id == 1 then return 'HUD_glass' end end")
+    n0 = len(m.lines())
+    m.run(0.6)
+    last = [d for d in m.lines()[n0:] if d["ev"] == "tel" and "rd" in d][-1]
+    assert cockpit.lock_state(Frame(last)) == "no radar page", last["rd"]
+    print("  radar markers ............... OK  (search, designated and single-target track read from the radar page; "
+          "no page: no state)")
+
+
+def test_precision_and_command_defs():
+    """Epoch-sized times keep their decimals; the command numbers are read from command_defs.lua."""
+    m = Mock()
+    m.g.CLOCK = 1760351071.123456
+    m.g.LuaExportStart()
+    m.run(0.2)
+    raw = [d for p, d in m.sent() if json.loads(d)["ev"] == "tel"]
+    rts = [json.loads(d)["rt"] for d in raw]
+    assert len(set(rts)) > 5 and all(abs(b - a - 1 / 60) < 1e-4 for a, b in zip(rts, rts[1:])), rts[:6]
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "Scripts"))
+        with open(os.path.join(d, "Scripts", "command_defs.lua"), "w") as fh:
+            fh.write("iCommandPlanePitch = 2001\niCommandPlaneRoll = 2002\niCommandPlaneRudder = 2003\n"
+                     "iCommandPlaneThrustCommon = 2004\niCommandOther = 5\n")
+        m = Mock()
+        m.L.execute(f'lfs = {{currentdir = function() return [[{d}]] end}}')
+        # lfs must exist before the module is loaded: boot a second copy
+        m.L.execute(open(os.path.join(HERE, "bvr_stick_export.lua")).read())
+        m.g.LuaExportStart()
+        h = [x for x in m.lines() if x["ev"] == "hello"][-1]
+        assert h["codes_from"] == "command_defs.lua", h["codes_from"]
+        with open(os.path.join(d, "Scripts", "command_defs.lua"), "w") as fh:
+            fh.write("iCommandPlanePitch = 3001\niCommandPlaneRoll = 3002\niCommandPlaneRudder = 3003\n"
+                     "iCommandPlaneThrustCommon = 3004\n")
+        m.L.execute(open(os.path.join(HERE, "bvr_stick_export.lua")).read())
+        m.g.LuaExportStart()
+        h = [x for x in m.lines() if x["ev"] == "hello"][-1]
+        assert h["codes"] == {"pitch": 3001, "roll": 3002, "rudder": 3003, "throttle": 3004}, h
+    m = Mock()
+    m.L.execute('lfs = {currentdir = function() return "/nonexistent" end}')
+    m.L.execute(open(os.path.join(HERE, "bvr_stick_export.lua")).read())
+    m.g.LuaExportStart()
+    h = [x for x in m.lines() if x["ev"] == "hello"][-1]
+    assert h["codes_from"].startswith("default (") and "command_defs.lua" in h["codes_from"], h["codes_from"]
+    print("  precision, command_defs ..... OK  (epoch time keeps its decimals; codes read from command_defs.lua; "
+          "the reason is given when it can't be read)")
 
 
 def test_udp_link():
@@ -288,18 +432,21 @@ def test_udp_link():
     print("  UDP link .................... OK  (frames and events in, AXES/RELEASE/CMD lines out, latency measured)")
 
 
-def _check_fake(roll_sign, pitch_sign):
+def _check_fake(roll_sign, pitch_sign, thr_inv=False, speed=None):
     import stick_test
     with tempfile.TemporaryDirectory() as d:
         s = stick_test.main(["all", "--fake", "--out", d, "--fake-roll-sign", str(roll_sign),
-                             "--fake-pitch-sign", str(pitch_sign)])
+                             "--fake-pitch-sign", str(pitch_sign)] + (["--fake-thr-inverted"] if thr_inv else [])
+                            + (["--speed", str(speed)] if speed else []))
         gains = json.load(open(os.path.join(d, "stick_gains.json")))
         files = os.listdir(d)
     assert "aborted" not in s, s
     assert gains["roll_sign"] == roll_sign and gains["pitch_sign"] == pitch_sign, gains
     assert abs(gains["roll_rate"] - 2.6) < 0.15, gains            # rad/s per unit
     assert abs(gains["nz_per_cmd"] - 6.0) < 0.4, gains            # g per unit
-    assert abs(gains["thr_trim"] - 0.1) < 0.12 and 3.0 < gains["thr_slope"] < 5.0, gains
+    assert gains["thr_sign"] == (-1 if thr_inv else 1), gains["thr_sign"]
+    assert abs(gains["thr_u_trim"] - 0.1) < 0.2 and 2.5 < gains["thr_slope"] < 5.5, gains
+    assert "thr_trim" not in gains and "rpm_by_code" not in gains
     assert s["rate"]["real_hz"] > 49 and not s["rate"]["checks_failed"], s["rate"]
     h = s["hold"]
     t1 = h["heading_steps"][0]
@@ -311,11 +458,55 @@ def _check_fake(roll_sign, pitch_sign):
     return gains, t1
 
 
+def test_fake_nonlinear():
+    """DCS's first pulses gave a tenth of a linear stick's response: the curve stage must measure it
+    and hold must fly through the inverse."""
+    import stick_test
+    with tempfile.TemporaryDirectory() as d:
+        s = stick_test.main(["all", "--fake", "--fake-curve", "2.0", "--out", d])
+        gains = json.load(open(os.path.join(d, "stick_gains.json")))
+    assert "aborted" not in s, s
+    rc, pc = dict((round(a, 2), r) for a, r in gains["roll_curve"]), dict((round(a, 2), r) for a, r in gains["pitch_curve"])
+    assert rc[0.1] < 0.05 and rc[0.5] > 0.5 and rc[0.5] > 20 * rc[0.1], rc            # rad/s: ~ 2.6 a^2
+    assert abs(rc[0.5] - 2.6 * 0.25) < 0.1, rc
+    assert pc[0.1] < 0.1 and abs(pc[0.5] - 6.0 * 0.25) < 0.2, pc                     # g: ~ 6 a^2
+    assert stick_test.inverse(gains["roll_curve"], 0.65) > 0.45 and abs(stick_test.inverse(gains["roll_curve"], 0.65) - 0.5) < 0.05
+    assert stick_test.inverse(gains["roll_curve"], -0.65) < -0.45 and stick_test.inverse(gains["roll_curve"], 100.0) == 1.0
+    t1 = s["hold"]["heading_steps"][0]
+    assert 50 < t1["peak_bank_deg"] < 64 and t1["half_s"] < 15 and t1["rate_bulk_dps"] > 3.0, t1
+    assert s["hold"]["hold_error"]["alt_m"] < 15, s["hold"]["hold_error"]
+    # a pitch pulse that hits the limit is a lower bound and stays out of the curve; --axes keeps the rest
+    from fake_export import FakeLink
+    with tempfile.TemporaryDirectory() as d:
+        stick_test.main(["pulses", "--fake", "--out", d])
+        before = json.load(open(os.path.join(d, "stick_gains.json")))
+        link = FakeLink(curve_pow=1.0)                       # 6 g per unit: 1.0 would give 6 g > the 5.5 g stop
+        run = stick_test.Run(link, None, "c", stick_test.Limits(min_agl=0, min_alt=0))
+        out = stick_test.stage_curve(run, before, axes=("pitch",))
+        assert "roll_curve" not in out and 0.75 in [a for a, _ in out["pitch_curve"]], out
+        assert 1.0 not in [a for a, _ in out["pitch_curve"]], out["pitch_curve"]
+        stick_test.main(["curve", "--fake", "--axes", "pitch", "--out", d])
+        after = json.load(open(os.path.join(d, "stick_gains.json")))
+        assert "pitch_curve" in after and after["roll_sign"] == before["roll_sign"], after.keys()
+        # DCS pulls to +4.8 g but pushes only to -2.7 g: the curves must not be averaged
+        link = FakeLink(curve_pow=2.0, push_limit_g=2.7)
+        run = stick_test.Run(link, None, "c", stick_test.Limits(min_agl=0, min_alt=0))
+        out = stick_test.stage_curve(run, before, axes=("pitch",))
+        pull, push = dict(map(tuple, out["pitch_curve"])), dict(map(tuple, out["pitch_push_curve"]))
+        assert abs(pull[0.75] - 6 * 0.5625) < 0.15 and abs(push[0.75] - 2.7) < 0.15, (pull, push)
+        assert push[1.0] < 2.8 and pull[0.75] > push[0.75] + 0.4, (pull, push)
+        g2 = {**before, **out}
+        h = stick_test.Hold(g2)
+        assert stick_test.inverse(out["pitch_push_curve"], 2.0) < 1.0 and stick_test.inverse(out["pitch_curve"], 3.0) < 1.0
+    print(f"  stick_test.py, non-linear ... OK  (response ~ command squared measured; hold through the inverse "
+          f"turns {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank)")
+
+
 def test_fake_end_to_end():
     import stick_test
     from fake_export import FakeLink
-    for rs, ps in ((1, 1), (-1, -1), (1, -1)):
-        gains, t1 = _check_fake(rs, ps)
+    for rs, ps, ti, sp in ((1, 1, False, None), (-1, -1, True, 215), (1, -1, True, None)):
+        gains, t1 = _check_fake(rs, ps, ti, sp)
     # a limit stops it and releases the axes
     link = FakeLink()
     run = stick_test.Run(link, None, "limit", stick_test.Limits(min_agl=1e5))
@@ -337,6 +528,325 @@ def test_fake_end_to_end():
         raise AssertionError("the bank limit did not stop the run")
     print("  stick_test.py, synthetic .... OK  (signs found both ways round, gains within 5%, "
           f"hold turn {t1['rate_bulk_dps']:.1f} deg/s at {t1['peak_bank_deg']:.0f} deg of bank; limits stop it)")
+
+
+def test_roll_lead():
+    """DCS rolls 140 deg/s and takes 0.4 s to stop: without the lead term the bank overshoots by 15 deg or more."""
+    import stick_test
+    peaks = {}
+    for lead in (0.0, stick_test.Hold.T_LEAD):
+        stick_test.Hold.T_LEAD = lead
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                s = stick_test.main(["all", "--fake", "--fake-roll-tau", "0.35", "--bank", "60", "--out", d])
+        finally:
+            stick_test.Hold.T_LEAD = 0.25
+        assert "aborted" not in s, s
+        peaks[lead] = s["hold"]["heading_steps"][0]["peak_bank_deg"]
+    assert peaks[0.0] > 70 and peaks[0.25] < 66, peaks
+    print(f"  bank lead ................... OK  (a 0.35 s roll lag: peak bank {peaks[0.0]:.0f} deg without the lead, "
+          f"{peaks[0.25]:.0f} with, for a 60 deg limit)")
+
+
+def test_cockpit():
+    import io
+    import contextlib
+    import cockpit
+    import stick_test
+    from fake_export import FakeLink
+    defs = cockpit.load_defs()
+    # names resolve to the module's own numbers and key values
+    assert cockpit.resolve("hotas.STICK_TGT_MANAGE_UP", defs) == (16, 3010, 1.0, 0.0)
+    assert cockpit.resolve("HOTAS.STICK_WEAPON_RELEASE", defs) == (16, 3022, 1.0, 0.0)
+    assert cockpit.resolve("ufc.AA", defs) == (17, 3018, 1.0, 0.0)
+    assert cockpit.resolve("mmc.MasterArmSw", defs, value=1.0) == (19, 3002, 1.0, None)
+    assert cockpit.resolve("left_osb.4", defs) == (24, 3004, 1.0, 0.0)
+    assert cockpit.resolve("right_osb.20", defs)[0] == 25
+    assert cockpit.resolve(["16", "3010"], defs) == (16, 3010, 1.0, 0.0)
+    for bad in ("mmc.MasterArmSw", "nope.X", "hotas.NOT_A_COMMAND", "mfd.OSB_1"):
+        try:
+            cockpit.resolve(bad, defs)
+        except ValueError as e:
+            assert bad.split(".")[0] in str(e) or "switch" in str(e) or "MFD" in str(e), str(e)
+        else:
+            raise AssertionError(f"{bad} should not resolve")
+    # the UDP line
+    import socket as so
+    rx = so.socket(so.AF_INET, so.SOCK_DGRAM)
+    rx.bind(("127.0.0.1", 25412))
+    rx.settimeout(2.0)
+    link = stick_test.UdpLink(25411, 25412)
+    try:
+        link.click(16, 3010, 1.0)
+        assert rx.recvfrom(100)[0].decode() == "CLICK 16 3010 1", "wire format"
+        link.click(19, 3002, -0.5)
+        assert rx.recvfrom(100)[0].decode() == "CLICK 19 3002 -0.5"
+    finally:
+        link.close()
+        rx.close()
+    # gains the fake aircraft is flown with
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    lim = stick_test.Limits(min_agl=0, min_alt=0)
+
+    def flow(scan_needed, scan):
+        link = FakeLink(cockpit_defs=defs, scan_needed=scan_needed)
+        run = stick_test.Run(link, None, "cp", lim)
+        run.next()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            r = cockpit.stage_radar(run, 4.0)
+            lk = cockpit.stage_lock(run, gains, defs, scan=scan, aa=True)
+            fr = cockpit.stage_fire(run, gains, defs, aa=True)
+        return r, lk, fr, buf.getvalue(), link
+    r, lk, fr, out, link = flow(0, False)
+    assert not r["locked_seen"] and not r["targets_seen"], r        # nothing set up before `lock`
+    assert lk["locked"] and fr["fired"] and fr["payload"] == [4, 3], (lk, fr)
+    assert "LOCKED" in out and "a missile left the aircraft" in out and "TGT-1" in out and "km" in out, out
+    assert not link.cockpit.armed, "master arm must be back OFF after fire"
+    # the A-A button toggles: by default it is pressed only if the HUD is not in A-A
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk2 = cockpit.stage_lock(run, gains, defs)
+    assert lk2["locked"] and "the HUD shows it" in buf.getvalue() and "ICP A-A button" not in buf.getvalue(), buf.getvalue()
+    assert link.cockpit.aa, "A-A mode was toggled off"
+    link = FakeLink(cockpit_defs=defs)                                  # NAV: the button is pressed by itself
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk3 = cockpit.stage_lock(run, gains, defs)
+    assert lk3["locked"] and "the HUD is not in A-A: pressing the ICP A-A button" in buf.getvalue(), buf.getvalue()
+    assert link.cockpit.aa
+    buf = io.StringIO()                                                  # and never when told not to
+    link = FakeLink(cockpit_defs=defs)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    with contextlib.redirect_stdout(buf):
+        lk4 = cockpit.stage_lock(run, gains, defs, aa=False)
+    assert not lk4["locked"] and not link.cockpit.aa, buf.getvalue()
+    # the radar cursor has to be slewed first: lock fails without --scan, works with it
+    r, lk, fr, out, link = flow(3, False)
+    assert not lk["locked"] and not fr["fired"] and "run `radar`" in out, (lk, fr)
+    r, lk, fr, out, link = flow(3, True)
+    assert lk["locked"] and fr["fired"], (lk, fr)
+    assert fr["hud_mrm"] == [4, 3], fr                # the HUD's AIM-120 count goes down with the release
+    # ind through the fake: saved, and the difference between "not locked" and "locked" is what inddiff shows
+    with tempfile.TemporaryDirectory() as d:
+        link = FakeLink(cockpit_defs=defs)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cockpit.stage_ind(link, "before", d)
+            link.cockpit.aa = True
+            link.cockpit.locked = True
+            cockpit.stage_ind(link, "locked", d)
+        files = sorted(os.listdir(d))
+        assert len(files) == 2 and "RWS" in out.getvalue(), (out.getvalue(), files)
+        lines = []
+        n = cockpit.ind_diff(os.path.join(d, [f for f in files if "before" in f][0]),
+                             os.path.join(d, [f for f in files if "locked" in f][0]), out=lines.append)
+        text = "\n".join(lines)
+        assert n == 2 and "+ HUD_TD_Box" in text and "+ HUD_ASEC" in text and "- RWS" in text and "+ STT" in text, text
+        lines = []
+        assert cockpit.ind_diff(os.path.join(d, files[0]), os.path.join(d, files[0]), out=lines.append) == 0
+    # match-alt: the script flies to the target's altitude, and fire without a lock says it is a maddog shot
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.tx, link.cockpit.tz = link.cockpit.tx, link.cockpit.tz
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(12):
+        run.next()
+    link.ac.alt = 6000.0                                                # the target is at 6000 m + the fake's own height
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn = cockpit.hold_fn(run, gains, match_alt=True)
+    assert "matching the target's altitude" in buf.getvalue(), buf.getvalue()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        frr = cockpit.stage_fire(run, gains, defs, force=True, aa=True)
+    assert frr["fired"] and "maddog" in buf.getvalue() and "stations that changed" in buf.getvalue(), buf.getvalue()
+    # the cursor probe shows the lines that follow the cursor
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_cursorprobe(run, gains, defs, steps=3, hold=0.2)
+    text = buf.getvalue()
+    assert res["steps"] == 6 and "+ 23" in text and "- 20" in text and "cursor back 3" in text and "+ 20" in text, text
+    # cursortry announces every way and sends the clicks
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_cursortry(run, gains, defs, hold=0.2)
+    assert res["tried"] == list("ABCDEFGHI") and "try D" in buf.getvalue(), buf.getvalue()
+    # the sensor of interest: with it on the weapons page, target management does nothing until display management left
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa, link.cockpit.soi_left = True, False
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    for _ in range(25):
+        run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk5 = cockpit.stage_lock(run, gains, defs, soi="none")
+    assert not lk5["locked"], buf.getvalue()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        lk6 = cockpit.stage_lock(run, gains, defs, soi="left")                       # soi asked for
+    assert lk6["locked"] and "sensor of interest" in buf.getvalue(), buf.getvalue()
+    # an axis control is pressed, held, then set back with --release
+    buf = io.StringIO()
+    sent = []
+    link.click = lambda dev, cmd, value, mode=None: (sent.append((dev, cmd, value)), link.events.__setitem__("click", {"ev": "click", "ok": True}))
+    with contextlib.redirect_stdout(buf):
+        cockpit.click(run, "hotas.THROTTLE_RDR_CURSOR_Y_AXIS", defs, value=0.5, hold=0.2, release=0.0)
+    assert [x[2] for x in sent] == [0.5, 0.0], sent
+    # a click the module refuses is reported
+    link = FakeLink(cockpit_defs=defs)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    link.click = lambda dev, cmd, value, mode=None: link.events.__setitem__("click", {"ev": "click", "ok": False, "err": "refused"})
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cockpit.click(run, "hotas.STICK_TGT_MANAGE_UP", defs)
+    assert "NOT done: refused" in buf.getvalue(), buf.getvalue()
+    # the CLI
+    with tempfile.TemporaryDirectory() as d:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            stick_test.main(["click", "ufc.AA", "--fake", "--out", d])
+        assert "device 17, command 3018" in out.getvalue(), out.getvalue()
+    # --offset and --dalt: the script turns to put the target 30 deg right and climbs 500 m above it; cursormap runs
+    link = FakeLink(cockpit_defs=defs)
+    link.cockpit.aa = True
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    cockpit.HOLD_OPTS.update(offset=30.0, dalt=500.0)
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = cockpit.stage_cursormap(run, gains, defs, hold=0.2, max_steps=3)
+    finally:
+        cockpit.HOLD_OPTS.update(offset=None, dalt=None)
+    nr = cockpit.nearest(cockpit.last_with(run.frames[-300:], "obj"))
+    assert abs(nr[2] - 30.0) < 5.0 and abs(-nr[3] - 500.0) < 200.0 and res["steps"] > 0, (nr, buf.getvalue()[-800:])
+    # the nearest aircraft, not the AIM-120 just fired (DCS: the next runs set up on the missile, 17 km away and lofting)
+    fr = stick_test.Frame({"me": {"x": 0.0, "z": 0.0, "alt": 7000.0, "hdg": 0.0},
+                           "obj": [{"name": "AIM_120C", "l1": 4, "l2": 4, "x": 17000.0, "y": 10000.0, "z": 0.0},
+                                   {"unit": "TGT-1", "l1": 1, "l2": 1, "x": 40000.0, "y": 7000.0, "z": 0.0}]})
+    assert cockpit.nearest(fr)[0] == "TGT-1", cockpit.nearest(fr)
+    # the radar page's text as DCS wrote it (13 October): the cursor's bullseye bearing and range, coverage, scale, SOI
+    real = ["Range_Scale_Root", "children are {", "Range_Scale_Value_Outlined", "40", "Range_Scale_Value", "40", "}",
+            "FCR_Bearing_range", "174 245", "DBG_AA_RadarContactsKeeper", "Cursor_Root", "children are {",
+            "Cursor_Line_Left", "Cursor_Line_Right", "Max_Search_Altitude", "34", "Min_Search_Altitude", "11", "}",
+            "FCR_TUC_contactData", "FCR_TUC_contact_Altitude", "23",
+            "  Table. Root. Unic ID: _id:8. Text", "4", "B", "children are {", "  Table. Root. Unic ID: _id:9. Text", "A",
+            "6", "RWS Table. Root. Unic ID: _id:14", "children are {", "RWS Table. Root. Unic ID: _id:14. Text", "RWS",
+            "TWS Table. Root. Unic ID: _id:17", "children are {", "}", "SOI"]
+    assert cockpit.fcr_info(real) == {"br": (174, 245), "hi": 34, "lo": 11, "scale": 40, "tuc": True, "tuc_alt": 23,
+                                      "soi": True, "mode": "RWS", "az": 6, "bars": 4}, cockpit.fcr_info(real)
+    # the aimed lock: a target 30 deg right and 2 km above, which only aiming designates (scan_needed 999), is locked;
+    # one 70 deg off the nose is refused
+    # the aimed lock: the readout is switched from the bullseye (485 km ahead, like DCS's default) to our own aircraft
+    # through the DED; with ref="bull" the bullseye is found at the bottom edge instead (slower, coarse); --relock
+    # drops a lock that is already there; a target 70 deg off the nose is refused
+    for az, dh, ok, ref, locked0 in ((30.0, 2000.0, True, "auto", False), (70.0, 0.0, False, "auto", False),
+                                     (-20.0, 3000.0, True, "bull", False), (10.0, 6000.0, True, "auto", True)):
+        link = FakeLink(cockpit_defs=defs, scan_needed=999)
+        c, ac = link.cockpit, link.ac
+        c.aa = True
+        c.stage = 2 if locked0 else 0
+        a = ac.hdg + math.radians(az)
+        c.tx, c.tz, c.ty = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a), ac.alt + dh
+        run = stick_test.Run(link, None, "cp", lim)
+        run.next()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = cockpit.stage_aimlock(run, gains, defs, relock=locked0, ref=ref)
+        out = buf.getvalue()
+        assert res["locked"] == ok, out[-1500:]
+        assert ok or "outside the radar's azimuth limits" in out, out[-800:]
+        assert "magnetic variation +6.0" in out, out[:800]
+        assert ("readout from our own aircraft" in out) == (ref == "auto"), out[:1200]
+        assert (ref == "bull") == ("coarse, because the bullseye is 261 NM away" in out), out[:1200]
+        assert not locked0 or ("drops the lock first" in out and "after: radar search" in out), out[:1200]
+        n_aim = out.count("    aim ")
+        assert ref == "bull" or not ok or n_aim <= 12, (n_aim, out[-1500:])     # straight there, no hunting
+    # the TWS lock: target management right to TWS, right again bugs the track, up gives the single-target track
+    link = FakeLink(cockpit_defs=defs, scan_needed=999)
+    c, ac = link.cockpit, link.ac
+    c.aa = True
+    a = ac.hdg + math.radians(-40.0)
+    c.tx, c.tz = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_twslock(run, gains, defs)
+    out = buf.getvalue()
+    assert res["designated"] and not res["locked"] and "RWS -> TWS" in out and "mode now TWS" in out \
+        and "radar page: RWS, A6" in out and "the TWS track is bugged" in out, out[-1200:]
+    with contextlib.redirect_stdout(io.StringIO()):          # stt=True: target management up after the bug
+        res = cockpit.stage_twslock(run, gains, defs, stt=True)
+    assert res["locked"], res
+    # a target 30 deg off the nose is outside a scan centred on the nose: the cursor is moved to it first
+    link = FakeLink(cockpit_defs=defs, scan_needed=999)
+    c, ac = link.cockpit, link.ac
+    c.aa = True
+    a = ac.hdg + math.radians(30.0)
+    c.tx, c.tz = ac.x + 55000 * math.cos(a), ac.z + 55000 * math.sin(a)
+    run = stick_test.Run(link, None, "cp", lim)
+    run.next()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = cockpit.stage_twslock(run, gains, defs)
+    assert res["designated"] and "cursor to the right edge" in buf.getvalue() and abs(c.cur_az - 30.0) < 5.0, \
+        (c.cur_az, buf.getvalue()[-800:])
+    print("  cockpit, radar, lock, fire .. OK  (names resolve to the module's numbers; radar, lock, fire run end to "
+          "end on a fake cockpit, with and without a cursor scan; the aimed lock off the nose and above; master arm ends OFF; refusals are shown)")
+
+
+def test_stall_message():
+    import stick_test
+    from fake_export import FakeLink
+
+    class Silent(FakeLink):
+        def next(self, timeout=1.0):
+            return None
+    link = FakeLink()
+    run = stick_test.Run(link, None, "stall", stick_test.Limits(min_agl=0, min_alt=0))
+    for _ in range(5):
+        run.next()
+    run.link = Silent()
+    try:
+        run.next()
+    except stick_test.Abort as e:
+        assert "nothing at all" in str(e) and "model time" in str(e) and "Mach" in str(e), str(e)
+    else:
+        raise AssertionError("a silent link did not stop the run")
+    run.link.last_tel_wall, run.link.last_event_wall = 10.0, 11.0          # an idle line came after the last frame
+    try:
+        run.next()
+    except stick_test.Abort as e:
+        assert "PAUSED" in str(e), str(e)
+    else:
+        raise AssertionError("a paused sim did not stop the run")
+    print("  stall diagnosis ............. OK  (paused sim and silent DCS are told apart, with the last frame)")
 
 
 def test_install():
@@ -378,7 +888,15 @@ if __name__ == "__main__":
         print("lupa is not installed (pip install lupa): skipped")
         sys.exit(0)
     test_lua_export()
+    test_precision_and_command_defs()
+    test_click()
+    test_ind()
+    test_radar_markers()
     test_udp_link()
     test_fake_end_to_end()
+    test_fake_nonlinear()
+    test_roll_lead()
+    test_cockpit()
+    test_stall_message()
     test_install()
-    print("4/4 passed")
+    print("12/12 passed")

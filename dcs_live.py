@@ -11,6 +11,12 @@ speed and fire command. See dcs/README.md for the whole setup.
     python dcs_live.py models_bvr/latest.zip                 # fly
     python dcs_live.py models_bvr/latest.zip --shadow        # only watch: the DCS AI flies
     python dcs_live.py models_bvr/latest.zip --episodes 5    # restart the mission between them
+    python dcs_live.py models_bvr/latest.zip --stick         # fly the player's Viper (BLUE-1, you sit in it)
+
+--stick: the policy flies the player's F-16C through dcs/stick/bvr_stick_export.lua (Export.lua) with
+the inner loop measured in DCS, and locks and fires through the cockpit (TWS, weapon release): see
+dcs/stick/pilot.py. The mission's bridge still reports everything and flies red. Build the mission with
+python dcs/make_mission.py --blue-player and take BLUE-1's seat.
 
 Start it before or after the mission; it waits for DCS. When an episode ends
 (a kill, a loss, the step limit) it gives the aircraft back to the DCS AI and
@@ -277,6 +283,53 @@ class DcsLiveWorld(DcsReplayWorld):
             self._destroy_sent[wid] = self.t
 
 
+class StickLiveWorld(DcsLiveWorld):
+    """DcsLiveWorld whose BLUE-1 is the player's Viper, flown by a StickPilot (dcs/stick/pilot.py): the
+    policy's heading, altitude and speed go to the pilot's inner loop and FIRE to its cockpit job, not to
+    the bridge (which never takes control of BLUE-1: it only does so on a CMD line)."""
+
+    RADAR_EVERY_S = 15.0       # re-aim the TWS scan at the target this often while no track is bugged
+
+    def __init__(self, link, rec, blue, red, pilot, **kw):
+        kw.pop("speed_boost", None)
+        kw.pop("eta_lock", None)
+        super().__init__(link, rec, blue, red, **kw)
+        self.pilot = pilot
+        self.t_radar = -math.inf
+
+    def send_command(self, cmd, fire):
+        hdg = float(cmd["hdgCmd"])
+        alt, spd = float(cmd["altTarget"]), float(cmd["V"])
+        self.last_cmd = (round(math.degrees(hdg) % 360.0, 2), round(alt, 1), round(spd, 1))
+        if self.shadow:
+            return
+        self.pilot.command(hdg, alt, spd)
+        if fire and self.fire_pending is None:
+            self.pilot.fire()
+            self.fire_pending = self.t
+            self.fire_log.append((round(self.t - self.t0, 1), "requested"))
+
+    def _pilot_events(self):
+        for kind, status, why in self.pilot.drain_events():
+            if kind == "fire":
+                self.fire_log.append((round(self.t - self.t0, 1), status))
+                self.fire_pending = None
+                self.log(f"  fire {status} at {self.t - self.t0:.1f} s: {why}")
+            else:
+                self.log(f"  radar: {why}")
+
+    def step(self, cmd1, cmd2):
+        self._pilot_events()
+        if (not self.shadow and self.fire_pending is None and self.pilot.busy is None and self.pilot.jobs.empty()
+                and self.t - self.t_radar >= self.RADAR_EVERY_S):
+            self.t_radar = self.t
+            self.pilot.radar()
+        return super().step(cmd1, cmd2)
+
+    def stop(self):
+        pass                    # the pilot is stopped by run_episode; the bridge never had BLUE-1
+
+
 class DcsLiveEnv(BvrEnv):
     """BvrEnv whose world is DCS, live. The observation code runs unchanged."""
 
@@ -410,10 +463,20 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
 
     privileged = isinstance(model.observation_space, spaces.Dict)
     rule = getattr(args, "support_rule", "training")
-    env = DcsLiveEnv(lambda bp, rp: DcsLiveWorld(link, rec, agent, red, bp, rp,
-                                                 shadow=args.shadow, log=log, support_rule=rule,
-                                                 speed_boost=getattr(args, "speed_boost", None),
-                                                 eta_lock=getattr(args, "eta_lock", None)),
+    pilot = None
+    if getattr(args, "stick_link", None) is not None:
+        from pilot import StickPilot
+        pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out)
+        pilot.start()
+        pilot.radar()
+
+    def world_factory(bp, rp):
+        kw = dict(shadow=args.shadow, log=log, support_rule=rule,
+                  speed_boost=getattr(args, "speed_boost", None), eta_lock=getattr(args, "eta_lock", None))
+        if pilot is not None:
+            return StickLiveWorld(link, rec, agent, red, pilot, blue_platform=bp, red_platform=rp, **kw)
+        return DcsLiveWorld(link, rec, agent, red, bp, rp, **kw)
+    env = DcsLiveEnv(world_factory,
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
@@ -459,10 +522,13 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                 break
     finally:
         world.stop()
+        if pilot is not None:
+            pilot.stop()
         link.sink = None
         raw_fh.close(); steps_fh.close()
     outcome = info.get("terminal_outcome", "?")
-    row = {"episode": name, "mode": "shadow" if args.shadow else "live", "agent": agent,
+    row = {"episode": name, "mode": "shadow" if args.shadow else ("stick" if pilot is not None else "live"),
+           "agent": agent,
            "red": red, "outcome": outcome, "flight_time_s": round(env._t_sim, 1),
            "start_range_km": round(ic["start_range"] / 1000, 1),
            "shots": info.get("shots_fired", 0),
@@ -524,6 +590,10 @@ def main(argv=None):
                     help="give the route's points locked arrival times from the commanded speed, "
                          "so the DCS AI uses afterburner to make them (rebuild the mission first). "
                          "mission (default): times on the mission clock; abs: on the time of day")
+    ap.add_argument("--stick", action="store_true",
+                    help="fly the player's F-16C (BLUE-1) through dcs/stick/bvr_stick_export.lua instead of the DCS AI: "
+                         "make the mission with dcs/make_mission.py --blue-player and sit in BLUE-1")
+    ap.add_argument("--stick-gains", help="stick gains file (default dcs_runs/stick_gains.json, from stick_test.py)")
     ap.add_argument("--doctrine", default="BALANCED")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)
@@ -546,6 +616,17 @@ def main(argv=None):
           f"{args.opp_platform or scen['opponent_platform']}), {args.doctrine} doctrine")
     link = UdpLink(port_in=args.port_in, port_out=args.port_out)
     print(f"listening for DCS on UDP {args.port_in}, commands to {args.port_out}")
+    args.stick_link = None
+    if args.stick:
+        if args.shadow:
+            raise SystemExit("--stick and --shadow: the policy either flies the Viper or watches")
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "dcs", "stick"))
+        from stick_test import UdpLink as StickLink, load_gains
+        from pilot import GAINS_PATH
+        args.stick_gains = load_gains(args.stick_gains or GAINS_PATH)
+        args.stick_link = StickLink()
+        print("stick: the policy flies the player's Viper (BLUE-1) through Export.lua; hands off the stick "
+              "and throttle once the mission runs")
     if not args.shadow:
         print("support rule: " + ("as in training (3 s without support before the seeker takes "
                                   "over: the missile is removed)" if args.support_rule == "training"
@@ -563,6 +644,8 @@ def main(argv=None):
         link.send("STOP")
     finally:
         link.close()
+        if args.stick_link is not None:
+            args.stick_link.close()
     if rows:
         from collections import Counter
         c = Counter(r["outcome"] for r in rows)
