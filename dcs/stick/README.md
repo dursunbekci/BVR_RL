@@ -461,3 +461,15 @@ CL_MAX / weight, at most NZ_POS_MAX) and the bank to what leaves BANK_NZ_MARGIN 
 stick pilot now does the same, from the policy's platform's airframe and DCS's fuel (`Hold(..., airframe=)`; `pilot.py`,
 `dcs_live.py --stick` and `stick_test.py manoeuvre --platform` pass it): at 7 km, 86% fuel, F-16C-DCS, 80 deg down to
 about 250 m/s, 73 at 200, 60 at 150, 38 at 120.
+
+**Third try (14 October)**: stopped again at 110 m/s, but the record showed why: a pitch oscillation. Rolling out of the 80 deg
+turn the g took about a second to unload (6 g still at 50 deg of bank: climbing 24 m/s); the altitude law then asked for a
+push and the fast g correction (1.5 g per g-second, added) drove the stick from stop to stop: +3.4 to -1.5 g every 4 s, the
+heading swinging back and forth; in the 180 deg turn the stick stayed at its stop for 8 s at 20-23 deg of angle of attack and
+the speed fell from 290 to 180 m/s. Changes to `Hold`: (1) the g correction is a factor on the pull (the stick's g per unit
+grows with dynamic pressure; an added g learnt at 6 g was wrong at 1 g), learnt slowly (0.3 per second on the relative
+error, between x0.5 and x1.6) and only on a steady pull (above 2 g, not rolling faster than 20 deg/s, the demand steady,
+demand and measured g through the same 0.5 s filter, not at the wing's limit or the stick's stop); (2) the g that holds the
+flight path is for the bank 0.4 s ahead when rolling out (`NZ_LEAD`), so the g comes off as the wings come level. The fake
+now has DCS's lag and a g rate limit (0.25 s, 6 g/s): with a stick 40% stronger than its curve, the factor learnt is 0.71
+(true 0.71) and the altitude stays within 21 m through turn and roll-out (65 m without the correction).

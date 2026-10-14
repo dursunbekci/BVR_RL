@@ -329,8 +329,15 @@ class Hold:
 
     T_LEAD = 0.25          # s: the bank error is taken against the bank the roll rate will reach in this time
                            # (DCS rolls 140 deg/s at a 0.6 command and needs about 0.4 s to stop)
-    KI_NZ = 1.5            # g of stick demand per g of error and second: the measured g closes the loop
-    NZ_INT_MAX = 3.0       # g the correction may add or take away
+    # The measured g scales the stick curve, slowly. The curve was measured at one speed and the stick's g per
+    # unit grows with dynamic pressure, so the correction is a factor on the pull (an added g, learnt at 6 g,
+    # was wrong at 1 g: out of a turn the aircraft sank). A fast one (1.5 g per g-second, added) made the stick
+    # go from stop to stop in DCS (+3.4 to -1.5 g every 4 s: the g answers 0.23 s late and unloads in a second).
+    KI_NZ = 0.3            # per second, on the relative g error
+    NZ_GAIN_LIM = (0.5, 1.6)
+    NZ_TAU = 0.5           # s, the filter on the measured g
+    NZ_LEAD = 0.4          # s: the g that holds the flight path is for the bank this far ahead (DCS's g needs about a
+                           # second to unload: rolling out of 80 deg it still pulled 6 g at 50 and climbed 24 m/s)
     KP_V = 0.04            # throttle position per m/s of speed error
     KI_V = 0.002           # and per m/s of error and second
 
@@ -344,7 +351,8 @@ class Hold:
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
-        self.nz_int, self.t_nz = 0.0, None     # the g correction: the stick curve was measured at one speed
+        self.nz_gain, self.t_nz = 1.0, None    # the g correction: a factor on the pull the stick curve gives
+        self.nz_f = self.nz_cmd_f = None       # the measured g and the demand, through the same filter
 
     # the simulator's altitude law (f16_sim.F16Cfg), used when the command carries its flight-path limits
     K_ALT_GAM = 0.0003     # rad of flight-path angle per m of altitude error
@@ -401,7 +409,12 @@ class Hold:
         gam = math.asin(max(-0.9, min(0.9, vs / tas)))
         if dive is not None and climb is not None:
             gam_cmd = max(-abs(dive), min(abs(climb), self.K_ALT_GAM * (alt - f.alt)))
-            nz_cmd = (math.cos(gam) + self.K_GAM_NZ * (gam_cmd - gam)) / max(math.cos(f.bank), 0.1)
+            bank_nz = f.bank + self.NZ_LEAD * self.roll_rate
+            if abs(bank_nz) < abs(f.bank):              # only the unloading side: rolling in, the g follows anyway
+                pass
+            else:
+                bank_nz = f.bank
+            nz_cmd = (math.cos(gam) + self.K_GAM_NZ * (gam_cmd - gam)) / max(math.cos(bank_nz), 0.1)
         else:
             vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
             gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
@@ -410,21 +423,31 @@ class Hold:
         # The curve gives the stick for a g, measured at one speed; at another the same stick gives another g (in
         # DCS, 7 g instead of 5.8 at 304 m/s and 80 deg of bank: the turn climbed and bled speed). The measured g
         # closes the loop: its error is integrated into the demand (not while the stick is at its stop).
-        d_corr = 0.0
         if f.nz is not None:
             dt = 0.0 if self.t_nz is None else max(0.0, min(0.2, f.t - self.t_nz))
             self.t_nz = f.t
-            err = nz_cmd - f.nz
+            k = min(1.0, dt / self.NZ_TAU)
+            self.nz_f = f.nz if self.nz_f is None else self.nz_f + (f.nz - self.nz_f) * k
+            self.nz_cmd_f = nz_cmd if self.nz_cmd_f is None else self.nz_cmd_f + (nz_cmd - self.nz_cmd_f) * k
+            err = self.nz_cmd_f - self.nz_f                    # both lag alike
             sat = getattr(self, "_pitch_sat", 0)
-            if not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
-                self.nz_int = max(-self.NZ_INT_MAX, min(self.NZ_INT_MAX, self.nz_int + self.KI_NZ * err * dt))
-            d_corr = self.nz_int
+            # only in a steady pull: not while rolling, not on a large error (a transient), not against the stick's
+            # stop, not when the wing's limit is what holds the g down
+            steady = (abs(self.roll_rate) < math.radians(20) and abs(err) < 2.5 and nz_cmd < nz_av - 0.2
+                      and nz_cmd > 2.0                  # a real pull: the factor is about the pull
+                      and abs(nz_cmd - self.nz_cmd_f) < 0.3)    # and a steady one (not rolling out)
+            if steady and not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
+                lo, hi = self.NZ_GAIN_LIM
+                self.nz_gain = max(lo, min(hi, self.nz_gain + self.KI_NZ * err / (self.nz_cmd_f - 1.0) * dt))
         if g.get("pitch_curve"):
-            d = nz_cmd - 1.0 + d_corr            # pull and push have their own curves
+            d = nz_cmd - 1.0                     # pull and push have their own curves
+            if d > 0:
+                d *= self.nz_gain
             cmd = inverse(g["pitch_curve"], d) if d >= 0 else -inverse(g.get("pitch_push_curve") or g["pitch_curve"], -d)
             pitch = g["pitch_sign"] * cmd
         else:
-            pitch = g["pitch_sign"] * (nz_cmd - 1.0 + d_corr) / g["nz_per_cmd"]
+            d = nz_cmd - 1.0
+            pitch = g["pitch_sign"] * (d * self.nz_gain if d > 0 else d) / g["nz_per_cmd"]
         self._pitch_sat = 1 if g["pitch_sign"] * pitch >= 1.0 else -1 if g["pitch_sign"] * pitch <= -1.0 else 0
         if v is not None:
             # speed -> throttle position u (+1 = most thrust) by PI; the axis code is sign * u

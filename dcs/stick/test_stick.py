@@ -555,19 +555,26 @@ def test_g_loop():
     from fake_export import FakeLink
     gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
              "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
-    link = FakeLink(nz_per_cmd=8.5)           # 40% more g per stick than the curve
+    link = FakeLink(nz_per_cmd=8.5, nz_tau=0.25, nz_rate_max=6.0)   # 40% more g per stick than the curve; DCS's lag
     run = stick_test.Run(link, None, "g", stick_test.Limits(min_agl=0, min_alt=0))
     f0 = run.next()
     hold = stick_test.Hold(gains, bank_max=math.radians(80), nz_max=8.0)
     hdg, alt = f0.hdg + math.radians(150), f0.alt
     frames = stick_test.drive(run, 14.0, lambda f, tau: hold.axes(f, hdg, alt, v=None, dive=math.radians(25),
                                                                      climb=math.radians(15)))
+    # and out of the turn: no pitch oscillation (DCS: +3.4 to -1.5 g every 4 s with a fast correction)
+    frames += stick_test.drive(run, 12.0, lambda f, tau: hold.axes(f, hdg, alt, v=None, dive=math.radians(25),
+                                                                      climb=math.radians(15)))
+    out = frames[-300:]
+    assert min(f.nz for f in out) > 0.3 and max(f.nz for f in out) < 2.0, (min(f.nz for f in out), max(f.nz for f in out))
     turning = [f for f in frames if abs(f.bank) > math.radians(75)]
-    peak = max(f.nz for f in turning)
     climb = max(abs(f.alt - f0.alt) for f in frames)
     late = [f.nz for f in turning[len(turning) // 2:]]
     mean_late = sum(late) / len(late)
-    assert len(turning) > 100 and abs(mean_late - 5.76) < 0.5 and climb < 30.0, (peak, mean_late, climb, len(turning))
+    # the factor learnt for the stick's g is the fake's true one (curve 6 g a unit, the stick 8.5: 0.71); the
+    # altitude stays within 30 m through the turn and the roll-out
+    assert len(turning) > 100 and 0.62 < hold.nz_gain < 0.80 and climb < 30.0 and 4.5 < mean_late < 6.5, \
+        (hold.nz_gain, mean_late, climb, len(turning))
     # with the airframe, bank and g are limited as the simulator limits them: less bank as the wing gives less g
     sys.path.insert(0, os.path.join(HERE, "..", ".."))
     from bvr_library import load_platform
@@ -579,8 +586,8 @@ def test_g_loop():
         h.axes(fr, math.radians(150), 6950.0, v=tas, dive=0.4, climb=0.3)
         lims[tas] = (h.last["nz_avail"], math.degrees(h.last["bank_lim"]))
     assert lims[312.0][1] == 80.0 and 65 < lims[200.0][1] < 78 and 50 < lims[150.0][1] < 66, lims
-    print(f"  g loop ...................... OK  (80 deg of bank, the stick 40% stronger than its curve: {mean_late:.2f} g "
-          f"held (5.76 holds altitude), altitude within {climb:.0f} m; bank limit 80/{lims[200.0][1]:.0f}/"
+    print(f"  g loop ...................... OK  (80 deg of bank, the stick 40% stronger than its curve and g 0.25 s "
+          f"late: factor {hold.nz_gain:.2f} learnt (0.71), altitude within {climb:.0f} m through turn and roll-out; bank limit 80/{lims[200.0][1]:.0f}/"
           f"{lims[150.0][1]:.0f} deg at 312/200/150 m/s)")
 
 
