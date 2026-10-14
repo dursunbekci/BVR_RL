@@ -26,7 +26,8 @@ def wrap_pi(a):
 
 class FakeAircraft:
     def __init__(self, roll_sign=1, pitch_sign=1, rudder_sign=1, roll_rate=2.6, nz_per_cmd=6.0,
-                 thr_trim=0.1, thr_slope=4.0, v0=250.0, alt0=7000.0, hdg0=1.0, noise=0.0, curve_pow=1.0, push_limit_g=None, thr_inverted=False, roll_tau=0.12):
+                 thr_trim=0.1, thr_slope=4.0, v0=250.0, alt0=7000.0, hdg0=1.0, noise=0.0, curve_pow=1.0, push_limit_g=None, thr_inverted=False, roll_tau=0.12,
+                 nz_tau=0.10, nz_rate_max=None):
         self.roll_sign, self.pitch_sign, self.rudder_sign = roll_sign, pitch_sign, rudder_sign
         self.roll_rate, self.nz_per_cmd = roll_rate, nz_per_cmd
         self.thr_trim, self.thr_slope = thr_trim, thr_slope
@@ -39,6 +40,8 @@ class FakeAircraft:
         self.roll_tau = roll_tau              # roll rate lag, s
         self.thr_inverted = thr_inverted      # DCS: code -1 is the most thrust
         self.curve_pow = curve_pow        # > 1: small commands do little, as DCS's did at 0.1
+        self.nz_tau = nz_tau              # s, the g's lag on the stick (DCS: about 0.23)
+        self.nz_rate_max = nz_rate_max    # g/s the g can change at most (DCS: about 6)
 
     def step(self, ax, dt=DT):
         def shape(c):
@@ -52,7 +55,10 @@ class FakeAircraft:
         nz_t = 1.0 + self.pitch_sign * self.nz_per_cmd * pitch
         if self.push_limit_g is not None:
             nz_t = max(nz_t, 1.0 - self.push_limit_g)
-        self.nz += (nz_t - self.nz) * dt / 0.10
+        dnz = (nz_t - self.nz) * dt / self.nz_tau
+        if self.nz_rate_max is not None:
+            dnz = max(-self.nz_rate_max * dt, min(self.nz_rate_max * dt, dnz))
+        self.nz += dnz
         self.gamma += G * (self.nz * math.cos(self.bank) - math.cos(self.gamma)) / self.V * dt
         self.hdg = (self.hdg + (G * self.nz * math.sin(self.bank) / (self.V * max(math.cos(self.gamma), 0.2))
                                 + self.rudder_sign * 0.08 * rud) * dt) % (2 * math.pi)

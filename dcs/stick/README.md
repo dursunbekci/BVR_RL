@@ -416,3 +416,78 @@ To fly it:
 
 Tested on the fakes (`test_sim.py`, "DCS live stick"): the policy's commands reach the pilot and no `CMD` reaches the bridge; a
 FIRE runs A-A, TWS, the bug, master arm and the held release on the fake cockpit, and its launch comes back as "fire launched".
+
+## Making the simulator fly like the DCS Viper (`stick_test.py manoeuvre`, `manoeuvre.py`)
+
+The policy only gives heading, altitude and speed targets; how fast the aircraft gets there is the airframe and its
+autopilot. For the policy to meet in DCS the aircraft it trained on, the simulator's F-16C must fly those targets as the
+stick pilot flies the DCS Viper. The stick pilot now uses the simulator's altitude law when the command carries the
+policy's flight-path limits (`Hold.axes(..., dive, climb)`: 0.0003 rad of flight path per metre of altitude error, limited
+to the platform's climb angle and 25 deg down, and 7 g per rad of flight-path error), as the simulator's autopilot does;
+`dcs_live.py --stick` passes `altFPA` and `climbFPA` on. Heading to bank (2.0, 80 deg) and speed to throttle (PI) were
+already alike. What is left to differ is the aircraft:
+
+1. `python dcs/stick/stick_test.py manoeuvre` (in DCS, stick-test mission, trimmed level at 7 km about Mach 0.9, hands off):
+   about 7 minutes of targets relative to the start: hold 10 s, turn right 90, turn left 180, back, climb 2000 m, descend
+   2000 m, accelerate 100 m/s (at most 460), decelerate to 80 below the start (at least 220), turn 170 at that speed.
+   Saved every 0.1 s: `dcs_runs/manoeuvre_<time>.json`.
+2. `python dcs/stick/manoeuvre.py dcs_runs/manoeuvre_<time>.json` (no DCS): the simulator's F-16C-DCS flies the same targets
+   from the same start; per segment turn rate, time to 90%, peak bank and g, speed lost in turns, vertical speed, overshoot,
+   acceleration, final Mach, DCS against the simulator; a plot of both (`_compare.png`) and what the differences point at.
+3. `... --fit`: a Nelder-Mead over factors on the airframe's thrust (T_MIL_SL and T_AB_SL together), CD0, K_IND, CL_MAX and
+   DRAG_RISE_PEAK, minimising speed RMS / 5 m/s + heading RMS / 5 deg + altitude RMS / 50 m over the whole program (about
+   1.4 s a simulation, 5 minutes); the result is compared again (`_fit.png`) and saved to the library as a new airframe and
+   platform, `F-16C-DCSFIT` (`--save-as`), to train with. Missile envelopes are keyed to the missile, so none need
+   recalculating. Checked on a record the simulator made with thrust x0.85, CD0 x1.3, CL_MAX x0.9: the fit took the
+   mismatch from 2.19 to 0.17 and found CL_MAX x0.90 exactly, thrust x0.885 and CD0 x1.20 (thrust and drag trade against
+   each other in one record; the flight is what has to match).
+
+**First DCS comparison (14 October, `manoeuvre_20261014_084543`, 6.3 km, 304 m/s, fuel 0.86)**: climbs and descents matched
+(vertical speed 81 against 79 and -114 against -103 m/s, the same times to 90%), and so did the bank (80 deg both). The turns
+did not, and the cause was the DCS pilot, not the airframe: it pulled 7.0 g at 80 deg of bank where holding altitude takes
+1/cos 80 = 5.76 g (the simulator's autopilot flies exactly that), so DCS's turns climbed 80-340 m, turned faster (12-13
+against 8.5-10 deg/s) and bled more speed (49 against 15 m/s in 90 deg, 121 against 41 in 180). The pitch stick came from
+the curve measured at 243 m/s, open loop; at 304 m/s the same stick gives more g. The fit then blamed drag (K_IND x1.82, CD0
+x2.0 at its bound), which the turn rates did not support: that F-16C-DCSFIT is not to be used. Real differences: DCS
+accelerated faster (2.84 against 2.19 m/s2) and also slowed faster (-2.97 against -2.20), more thrust and more drag (four
+AIM-120s on pylons). Fix: `Hold` closes the loop on the measured g (an integrator, 1.5 g per g-second, up to 3 g, not while
+the stick is at its stop); on the fake with a stick 40% stronger than its curve it holds 5.6 g at 80 deg and the altitude
+within 6 m (63 m without the loop). The fit's bounds were widened (CD0 up to x3.5, K_IND to x2.5).
+
+**Second try (14 October)**: with the g loop the Viper held the g the altitude law asked for, 5.76 g at 80 deg of bank,
+which at 7 km it cannot sustain: from 312 m/s (Mach 1.0) it bled to 110 m/s in the 180 deg turn and the speed guard
+stopped the run. The simulator never gets there: its autopilot limits g to what the wing gives (dynamic pressure x S_REF x
+CL_MAX / weight, at most NZ_POS_MAX) and the bank to what leaves BANK_NZ_MARGIN (0.85) of that to hold the flight path. The
+stick pilot now does the same, from the policy's platform's airframe and DCS's fuel (`Hold(..., airframe=)`; `pilot.py`,
+`dcs_live.py --stick` and `stick_test.py manoeuvre --platform` pass it): at 7 km, 86% fuel, F-16C-DCS, 80 deg down to
+about 250 m/s, 73 at 200, 60 at 150, 38 at 120.
+
+**Third try (14 October)**: stopped again at 110 m/s, but the record showed why: a pitch oscillation. Rolling out of the 80 deg
+turn the g took about a second to unload (6 g still at 50 deg of bank: climbing 24 m/s); the altitude law then asked for a
+push and the fast g correction (1.5 g per g-second, added) drove the stick from stop to stop: +3.4 to -1.5 g every 4 s, the
+heading swinging back and forth; in the 180 deg turn the stick stayed at its stop for 8 s at 20-23 deg of angle of attack and
+the speed fell from 290 to 180 m/s. Changes to `Hold`: (1) the g correction is a factor on the pull (the stick's g per unit
+grows with dynamic pressure; an added g learnt at 6 g was wrong at 1 g), learnt slowly (0.3 per second on the relative
+error, between x0.5 and x1.6) and only on a steady pull (above 2 g, not rolling faster than 20 deg/s, the demand steady,
+demand and measured g through the same 0.5 s filter, not at the wing's limit or the stick's stop); (2) the g that holds the
+flight path is for the bank 0.4 s ahead when rolling out (`NZ_LEAD`), so the g comes off as the wings come level. The fake
+now has DCS's lag and a g rate limit (0.25 s, 6 g/s): with a stick 40% stronger than its curve, the factor learnt is 0.71
+(true 0.71) and the altitude stays within 21 m through turn and roll-out (65 m without the correction).
+
+**Fourth try (14 October, `manoeuvre_20261014_093818`)**: the whole program flew, the roll-outs smooth (no oscillation), and
+climbs, descents and speed changes compare as before (vertical speed 79 against 77 m/s; DCS accelerates 3.08 against 2.17
+m/s2 and slows -2.91 against -2.20: more thrust and more drag than the simulator's F-16C-DCS). The turns still pulled 6.7-6.9 g
+for 5.76 asked (turn rate 12 against 8.8 deg/s, 75-145 m of climb): the stick factor did not learn. Likely why: at 80 deg of
+bank the altitude law's demand swings with every half degree of flight path (0.35 g), and the steadiness gate (0.3 g) shut
+the learning out. The gate is now 1 g and the learning 0.5 per second; the manoeuvre record keeps the pilot's own state (g
+asked, stick factor, learning or not, stick position) and the comparison prints it for the hard part of each turn.
+
+**Fifth try (14 October, `manoeuvre_20261014_095036`)**: the pilot's own state answered it. Above 70 deg of bank it asked
+5.71 / 5.78 / 5.32 g and flew 5.31 / 4.99 / 5.35, with the stick at its stop 65 / 50 / 58% of the time (so the factor could
+not learn: never against the stop): the DCS Viper does not give the g the simulator's wing does. Only the roll-in, at full
+speed, overshot (6.6-6.7 g). In lift coefficient: 6.7 g at 300 m/s is CL about 1.0, 5 g at 250 m/s about 1.1, where the
+simulator's F-16C has CL_MAX 1.45 (DCS's flight control limits the angle of attack; four AIM-120 on the rails). That is the
+aircraft, and it is measured directly, not fitted: `manoeuvre.py` takes every sample with the stick at its stop above 2 g,
+CL = g x weight / (dynamic pressure x S_REF), and prints the 90th percentile; `--fit` sets CL_MAX to it and fits thrust and
+drag only. The simulator and the stick pilot both take their g and bank limits from that CL_MAX (the pilot from the
+platform's airframe), so both cut the bank where the wing runs out.

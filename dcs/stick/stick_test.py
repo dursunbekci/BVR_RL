@@ -20,6 +20,7 @@ joystick that is still sending can fight the commands). Then:
     python dcs/stick/stick_test.py click NAME          a cockpit switch or HOTAS control (see cockpit.py)
     python dcs/stick/stick_test.py radar               what the radar reports, once a second (lock by hand)
     python dcs/stick/stick_test.py ind --tag locked    the text of the cockpit displays (HUD, MFDs): run it with and without a lock
+    python dcs/stick/stick_test.py manoeuvre           fly turns, climbs and speed changes to compare with the simulator (manoeuvre.py)
     python dcs/stick/stick_test.py cursormap           slew the radar cursor to each edge of the page and save the page (azimuth and range map)
     python dcs/stick/stick_test.py cursortry           try nine ways of moving the radar cursor, announced; you say which moved it
     python dcs/stick/stick_test.py cursor              slew the radar cursor and print which lines of the radar page follow it
@@ -328,23 +329,73 @@ class Hold:
 
     T_LEAD = 0.25          # s: the bank error is taken against the bank the roll rate will reach in this time
                            # (DCS rolls 140 deg/s at a 0.6 command and needs about 0.4 s to stop)
+    # The measured g scales the stick curve, slowly. The curve was measured at one speed and the stick's g per
+    # unit grows with dynamic pressure, so the correction is a factor on the pull (an added g, learnt at 6 g,
+    # was wrong at 1 g: out of a turn the aircraft sank). A fast one (1.5 g per g-second, added) made the stick
+    # go from stop to stop in DCS (+3.4 to -1.5 g every 4 s: the g answers 0.23 s late and unloads in a second).
+    KI_NZ = 0.5            # per second, on the relative g error
+    NZ_GAIN_LIM = (0.5, 1.6)
+    NZ_TAU = 0.5           # s, the filter on the measured g
+    NZ_LEAD = 0.4          # s: the g that holds the flight path is for the bank this far ahead (DCS's g needs about a
+                           # second to unload: rolling out of 80 deg it still pulled 6 g at 50 and climbed 24 m/s)
     KP_V = 0.04            # throttle position per m/s of speed error
     KI_V = 0.002           # and per m/s of error and second
 
-    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0, vs_max=30.0):
+    def __init__(self, gains, bank_max=math.radians(45), nz_max=4.0, vs_max=30.0, airframe=None):
+        """airframe: a library airframe config (bvr_library.airframe_config, or a platform's .airframe). Given,
+        the g the wing can give and the bank that leaves enough of it to hold altitude are limited as the
+        simulator's autopilot limits them (f16_sim.F16Aircraft.step: nz_avail, BANK_NZ_MARGIN)."""
         self.g, self.bank_max, self.nz_max, self.vs_max = gains, bank_max, nz_max, vs_max
+        self.airframe = airframe
+        self.last = {}
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
+        self.nz_gain, self.t_nz = 1.0, None    # the g correction: a factor on the pull the stick curve gives
+        self.nz_f = self.nz_cmd_f = None       # the measured g and the demand, through the same filter
 
-    def axes(self, f, hdg, alt, v=None, thr=None):
+    # the simulator's altitude law (f16_sim.F16Cfg), used when the command carries its flight-path limits
+    K_ALT_GAM = 0.0003     # rad of flight-path angle per m of altitude error
+    K_GAM_NZ = 7.0         # g per rad of flight-path error
+
+    @staticmethod
+    def _rho(alt):
+        """ISA density, kg/m3 (as f16_sim.isa)."""
+        h = max(0.0, min(20000.0, alt))
+        if h <= 11000.0:
+            return 1.225 * (1.0 - 2.25577e-5 * h) ** 4.2559
+        return 0.36392 * math.exp(-(h - 11000.0) / 6341.62)
+
+    def nz_avail(self, f):
+        """The g the wing gives now: the simulator's nz_avail (dynamic pressure x wing area x CL_MAX / weight,
+        at most NZ_POS_MAX), from the airframe and DCS's fuel; without an airframe, nz_max."""
+        a = self.airframe
+        if a is None or f.tas is None or f.alt is None:
+            return self.nz_max
+        fuel = (f.raw.get("eng") or {}).get("fuel_internal") if hasattr(f, "raw") else None
+        frac = fuel if isinstance(fuel, (int, float)) and 0.0 <= fuel <= 1.0 else 0.6
+        w = (a.MASS_EMPTY + a.MASS_WPNS + frac * a.FUEL_FULL) * G
+        q = 0.5 * self._rho(f.alt) * f.tas ** 2
+        nz = a.NZ_POS_MAX if q <= 100.0 else min(a.NZ_POS_MAX, q * a.S_REF * a.CL_MAX / max(w, 1.0))
+        return min(self.nz_max, nz)
+
+    def axes(self, f, hdg, alt, v=None, thr=None, dive=None, climb=None):
+        """dive, climb (rad): the policy's flight-path limits (the simulator's altFPA and climbFPA). Given, the
+        altitude is flown with the simulator's law; without, with the stick tests' climb-rate law."""
         g = self.g
         vs = f.vs
         if vs is None:
             vs = 0.0 if self.prev is None or f.t <= self.prev[0] else (f.alt - self.prev[1]) / (f.t - self.prev[0])
         self.prev = (f.t, f.alt)
         tas = max(f.tas or 150.0, 80.0)
-        bank_cmd = max(-self.bank_max, min(self.bank_max, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
+        gam0 = math.asin(max(-0.9, min(0.9, vs / tas)))
+        nz_av = self.nz_avail(f)
+        # as the simulator: no more bank than leaves BANK_NZ_MARGIN of the available g to hold the flight path
+        # (at 7 km the Viper bled from 312 to 110 m/s in a turn held at 80 deg while the wing gave less and less)
+        margin = getattr(self.airframe, "BANK_NZ_MARGIN", 0.85) if self.airframe is not None else 0.85
+        bank_lim = min(self.bank_max, math.acos(min(1.0, math.cos(gam0) / max(margin * nz_av, 1e-3))))
+        self.last = {"nz_avail": nz_av, "bank_lim": bank_lim}
+        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
         if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
             inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
             self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s
@@ -356,16 +407,52 @@ class Hold:
         else:
             roll = g["roll_sign"] * rate_cmd / g["roll_rate"]
         gam = math.asin(max(-0.9, min(0.9, vs / tas)))
-        vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
-        gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
-        nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
-        nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
+        if dive is not None and climb is not None:
+            gam_cmd = max(-abs(dive), min(abs(climb), self.K_ALT_GAM * (alt - f.alt)))
+            bank_nz = f.bank + self.NZ_LEAD * self.roll_rate
+            if abs(bank_nz) < abs(f.bank):              # only the unloading side: rolling in, the g follows anyway
+                pass
+            else:
+                bank_nz = f.bank
+            nz_cmd = (math.cos(gam) + self.K_GAM_NZ * (gam_cmd - gam)) / max(math.cos(bank_nz), 0.1)
+        else:
+            vs_cmd = max(-self.vs_max, min(self.vs_max, 0.12 * (alt - f.alt)))
+            gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
+            nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
+        nz_cmd = max(-1.0, min(self.nz_max, nz_av, nz_cmd))
+        # The curve gives the stick for a g, measured at one speed; at another the same stick gives another g (in
+        # DCS, 7 g instead of 5.8 at 304 m/s and 80 deg of bank: the turn climbed and bled speed). The measured g
+        # closes the loop: its error is integrated into the demand (not while the stick is at its stop).
+        if f.nz is not None:
+            dt = 0.0 if self.t_nz is None else max(0.0, min(0.2, f.t - self.t_nz))
+            self.t_nz = f.t
+            k = min(1.0, dt / self.NZ_TAU)
+            self.nz_f = f.nz if self.nz_f is None else self.nz_f + (f.nz - self.nz_f) * k
+            self.nz_cmd_f = nz_cmd if self.nz_cmd_f is None else self.nz_cmd_f + (nz_cmd - self.nz_cmd_f) * k
+            err = self.nz_cmd_f - self.nz_f                    # both lag alike
+            sat = getattr(self, "_pitch_sat", 0)
+            # only in a steady pull: not while rolling, not on a large error (a transient), not against the stick's
+            # stop, not when the wing's limit is what holds the g down
+            steady = (abs(self.roll_rate) < math.radians(20) and abs(err) < 2.5 and nz_cmd < nz_av - 0.2
+                      and nz_cmd > 2.0                  # a real pull: the factor is about the pull
+                      and abs(nz_cmd - self.nz_cmd_f) < 1.0)    # and a steady one (not rolling out; at 80 deg
+                                                                # of bank half a degree of flight path is 0.35 g)
+            self.last.update(nz_cmd=nz_cmd, nz_f=self.nz_f, learning=bool(steady and not (sat > 0 and err > 0)
+                                                                         and not (sat < 0 and err < 0)))
+            if steady and not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
+                lo, hi = self.NZ_GAIN_LIM
+                self.nz_gain = max(lo, min(hi, self.nz_gain + self.KI_NZ * err / (self.nz_cmd_f - 1.0) * dt))
         if g.get("pitch_curve"):
             d = nz_cmd - 1.0                     # pull and push have their own curves
+            if d > 0:
+                d *= self.nz_gain
             cmd = inverse(g["pitch_curve"], d) if d >= 0 else -inverse(g.get("pitch_push_curve") or g["pitch_curve"], -d)
             pitch = g["pitch_sign"] * cmd
         else:
-            pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
+            d = nz_cmd - 1.0
+            pitch = g["pitch_sign"] * (d * self.nz_gain if d > 0 else d) / g["nz_per_cmd"]
+        self._pitch_sat = 1 if g["pitch_sign"] * pitch >= 1.0 else -1 if g["pitch_sign"] * pitch <= -1.0 else 0
+        self.last.update(nz_gain=self.nz_gain, pitch=pitch)
         if v is not None:
             # speed -> throttle position u (+1 = most thrust) by PI; the axis code is sign * u
             # (DCS's throttle code is inverted: -1 is afterburner, +1 idle)
@@ -843,9 +930,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("test", choices=["info", "rate", "pulses", "curve", "throttle", "hold", "all", "release", "raw",
-                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry", "cursormap"])
+                                        "click", "radar", "lock", "fire", "ind", "inddiff", "cursor", "cursortry", "cursormap",
+                                        "manoeuvre"])
     ap.add_argument("args", nargs="*", help="raw: CODE VALUE; click: NAME (group.CONTROL) or DEVICE COMMAND")
     ap.add_argument("--value", type=float, default=None, help="click: the value to send (a switch position, an axis)")
+    ap.add_argument("--platform", default="F-16C-DCS",
+                    help="manoeuvre: the library platform whose climb limits the program flies (default F-16C-DCS)")
     ap.add_argument("--mode", choices=["c", "s", "l"], default=None,
                     help="click: c = clickable element (mouse click), s = device SetCommand (key binding), l = LoSetCommand "
                          "(default: s for HOTAS controls, c for the rest)")
@@ -1026,6 +1116,11 @@ def main(argv=None):
                         gains.pop(stale, None)
                     save_gains(gains_path, gains)
                     summary["throttle"] = {k: gains[k] for k in ("thr_sign", "thr_u_trim", "thr_slope", "thr_map")}
+                elif name == "manoeuvre":
+                    import manoeuvre
+                    if not all(gains.get(k) for k in ("roll_curve", "pitch_curve", "thr_sign")):
+                        raise SystemExit("manoeuvre needs the measured gains: run stick_test.py all first")
+                    summary["manoeuvre"] = manoeuvre.stage_manoeuvre(run, gains, a.out, a.platform)
                 else:
                     summary["hold"] = stage_hold(run, gains, a.bank, a.nz, a.turn, speed=a.speed)
             finally:

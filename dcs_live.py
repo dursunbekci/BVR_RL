@@ -303,7 +303,8 @@ class StickLiveWorld(DcsLiveWorld):
         self.last_cmd = (round(math.degrees(hdg) % 360.0, 2), round(alt, 1), round(spd, 1))
         if self.shadow:
             return
-        self.pilot.command(hdg, alt, spd)
+        dive, climb = cmd.get("altFPA"), cmd.get("climbFPA")
+        self.pilot.command(hdg, alt, spd, None if dive is None else float(dive), None if climb is None else float(climb))
         if fire and self.fire_pending is None:
             self.pilot.fire()
             self.fire_pending = self.t
@@ -466,7 +467,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     pilot = None
     if getattr(args, "stick_link", None) is not None:
         from pilot import StickPilot
-        pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out)
+        from bvr_library import load_platform
+        pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out,
+                           airframe=load_platform(scen["platform"]).airframe)
         pilot.start()
         pilot.radar()
 
