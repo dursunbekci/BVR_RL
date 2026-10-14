@@ -2,13 +2,13 @@
 bvr_gui.py  —  BVR training and visualisation GUI server
 =========================================================
 
-    python bvr_gui.py [--port 5006] [--ws-port 5007] [--model-dir models_bvr]
+    python bvr_gui.py [--port 5006] [--ws-port 5010] [--model-dir models_bvr]
 
 Open http://localhost:5006 in a browser.
 
 Two concurrent services:
   HTTP :5006  — serves bvr_gui.html (the UI)
-  WS   :5007  — real-time push channel to the browser
+  WS   :5010  — real-time push channel to the browser
 
 Training mode:
   Spawns train_bvr.py as a subprocess. The training callback writes
@@ -49,6 +49,7 @@ HERE       = Path(__file__).parent
 METRICS_F  = HERE / "bvr_metrics.json"
 GUI_HTML   = HERE / "bvr_gui.html"
 MODEL_DIR  = HERE / "models_bvr"   # overwritten from --model-dir in main()
+WS_PORT    = 5010                  # overwritten from --ws-port in main()
 XPLAY_DIR  = HERE / "crossplay_results"
 
 RECORD_BUFFER_SIZE = 3000   # frames per recorded episode
@@ -154,7 +155,9 @@ class GUIHandler(SimpleHTTPRequestHandler):
             if not GUI_HTML.exists():
                 self.send_error(404, "bvr_gui.html not found next to bvr_gui.py")
                 return
-            data = GUI_HTML.read_bytes()
+            # The page's push channel is on --ws-port (the page names 5010, the default).
+            data = GUI_HTML.read_bytes().replace(b"${location.hostname}:5010",
+                                                 b"${location.hostname}:" + str(WS_PORT).encode())
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -1116,6 +1119,8 @@ def main():
     t = threading.Thread(target=run_http, args=(args.port,), daemon=True)
     t.start()
     print(f"[bvr_gui]  http://localhost:{args.port}")
+    global WS_PORT
+    WS_PORT = args.ws_port
     print(f"[bvr_gui]  ws://localhost:{args.ws_port}")
     print(f"[bvr_gui]  model dir: {args.model_dir}")
     if CODE_INFO.get("commit"):

@@ -565,3 +565,13 @@ DCS launches at whatever range the bugged track is then. It applies to the agent
 once). `dcs_live.py` sets it to 0 for itself, since DCS does the work. F-16C-DCSFIT has 3-7 s, an estimate from the pilot's
 fire job; `dcs_live.py --stick` now writes each request-to-launch time (`launch_delays_s`) and why each timed-out request did
 (`fire_timeout_reasons`) into `results.csv`, to replace it.
+
+**Measuring the launch delay (`fire_delay.py`).** `python dcs/stick/fire_delay.py measure [--trials 10] [--fire 1]` (DCS,
+stick-test mission, the target ahead, hands off) runs the live runner's own pilot (`StickPilot`): it flies so the target is
+0, +20, -20, +35, -35 deg off the nose in turn, and each time drops the bug (target management down) and times a new one
+exactly as a fire job does it (`StickPilot.time_bug`), so no missile is spent; `--fire N` ends with N real launches, which
+also time master arm, the held release and the launch seen (each fire job now records `bug_s` and `total_s`). Saved as
+`dcs_runs/fire_delay_<time>.json`. `python dcs/stick/fire_delay.py set F-16C-DCSFIT <files>` takes those and any
+`results.csv` from `dcs_live.py --stick` (its `launch_delays_s`, request to launch end to end, including a wait for a radar
+job: the best evidence, and the one used once there are five) and writes the 10th and 90th percentiles, to 0.5 s, as the
+platform's LAUNCH_DELAY_MIN / MAX (`--dry-run` only shows them). On the fake: bugs 3.2-3.7 s, a launch 3.0 s after its bug.
