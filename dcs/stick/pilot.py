@@ -78,6 +78,8 @@ class StickPilot(threading.Thread):
         self.aborts = 0
         self.armed = False
         self.center_az = None         # the bearing the cursor was last put on
+        # timings, DCS seconds: each fire job {"bug_s", "total_s", "ok"}, each timed bug {"s", "ok", ...} (fire_delay.py)
+        self.fire_times, self.bug_times = [], []
 
     # ── what the main thread calls ──────────────────────────────────────
     def command(self, hdg, alt, spd, dive=None, climb=None):
@@ -90,6 +92,10 @@ class StickPilot(threading.Thread):
 
     def fire(self):
         self.jobs.put("fire")
+
+    def time_bug(self):
+        """Drop the bug, then time a bug from there as a fire job does it, without a launch (fire_delay.py)."""
+        self.jobs.put("bugtime")
 
     def stop(self, timeout=5.0):
         self._halt.set()
@@ -128,6 +134,9 @@ class StickPilot(threading.Thread):
                     elif job == "fire":
                         self.busy = "fire"
                         self._fire()
+                    elif job == "bugtime":
+                        self.busy = "bugtime"
+                        self._bugtime()
                     else:
                         drive(self.r, 0.1, self.fn)
                 except Abort as e:
@@ -211,11 +220,31 @@ class StickPilot(threading.Thread):
                     return True
         return False
 
+    def _bugtime(self):
+        r, d, fn = self.r, self.defs, self.fn
+        for _ in range(2):                       # target management down drops the bug
+            if self._state() not in ("designated", "stt"):
+                break
+            cockpit.click(r, "hotas.STICK_TGT_MANAGE_DOWN", d, fn=fn, verbose=False)
+            cockpit.settle(r, 1.5, fn)
+        mode = self._page()["mode"]
+        az = self._target_az()
+        t0 = r.frames[-1].t
+        ok = self._bug()
+        dt = r.frames[-1].t - t0
+        self.bug_times.append({"s": round(dt, 2), "ok": ok, "mode_before": mode,
+                               "az": None if az is None else round(az, 1)})
+        self.events.put(("bug", "ok" if ok else "timeout", f"{dt:.1f} s (radar {mode} before, target at "
+                                                            f"{'?' if az is None else f'{az:+.0f}'} deg)"))
+
     def _fire(self):
         r, d, fn = self.r, self.defs, self.fn
+        t0 = r.frames[-1].t
         if not self._bug():
+            self.fire_times.append({"bug_s": None, "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
             self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"))
             return
+        t_bug = r.frames[-1].t
         mrm0 = cockpit.hud_mrm(r, self.link)
         fo = cockpit.last_with(r.frames[-200:], "obj")
         ids0 = cockpit._ids(fo, "obj")
@@ -232,6 +261,9 @@ class StickPilot(threading.Thread):
                    if o.get("id") not in ids0 and o.get("l1") == 4]
             mrm1 = cockpit.hud_mrm(r, self.link)
             if new or (mrm0 is not None and mrm1 is not None and mrm1 < mrm0):
+                self.fire_times.append({"bug_s": round(t_bug - t0, 2), "total_s": round(r.frames[-1].t - t0, 2),
+                                        "ok": True})
                 self.events.put(("fire", "launched", f"HUD {mrm0} -> {mrm1} MRM"))
                 return
+        self.fire_times.append({"bug_s": round(t_bug - t0, 2), "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
         self.events.put(("fire", "timeout", f"no missile left the rail (HUD {mrm0} MRM)"))

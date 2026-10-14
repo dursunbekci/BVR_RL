@@ -717,6 +717,46 @@ def test_sim_g_lag():
           f"altitude lost {sink0:.0f} against {sink1:.0f} m)")
 
 
+def test_fire_delay():
+    """fire_delay.py: timed bugs (target 0, +-20 deg off the nose) and a launch with the live runner's pilot on the fake
+    cockpit, and the platform range from them and from live request-to-launch times."""
+    import io
+    import contextlib
+    import time as _time
+    import fire_delay as FD
+    import cockpit
+    from fake_export import FakeLink
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+
+    class Slow(FakeLink):
+        def next(self, timeout=1.0):
+            _time.sleep(0.001)
+            return super().next(timeout)
+    with tempfile.TemporaryDirectory() as d:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rec = FD.measure(Slow(cockpit_defs=cockpit.load_defs(), scan_needed=999), gains=gains, trials=3, fire=1,
+                             out_dir=d, log=print)
+        bugs, fires = rec["bug_times"], rec["fire_times"]
+        assert len(bugs) == 3 and all(b["ok"] and b["s"] > 0.5 for b in bugs), (bugs, buf.getvalue()[-800:])
+        assert len(fires) == 1 and fires[0]["ok"], (fires, buf.getvalue()[-800:])
+        assert sorted(round(abs(b["az"]) / 10) for b in bugs) == [0, 2, 2], bugs     # 0, +20, -20 deg
+        dd = FD.delays_from([rec["path"]])
+        assert dd["release_measured"] and len(dd["measured"]) == 4
+        # live request-to-launch times decide once there are five
+        csvp = os.path.join(d, "results.csv")
+        with open(csvp, "w") as fh:
+            fh.write("episode,mode,launch_delays_s\n1,stick,4.0;5.5\n2,stick,6.0;4.5;7.5\n3,live,99\n")
+        dd = FD.delays_from([rec["path"], csvp])
+        assert dd["live"] == [4.0, 5.5, 6.0, 4.5, 7.5], dd["live"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            rng, src = FD.summarise(dd, log=print)
+    assert src.startswith("dcs_live") and rng == (4.0, 7.0), (rng, src)
+    print(f"  fire delay .................. OK  (fake: bugs {', '.join(f'{b[chr(115)]:.1f}' for b in bugs)} s, "
+          f"a launch {fires[0]['total_s']:.1f} s; live times 4.0-7.5 s give 4.0-7.0)")
+
+
 def test_course():
     """The pilot steers by the course (the velocity vector), as the simulator's autopilot, not by the nose: in a hard
     turn DCS's nose is 15-22 deg inside the flight path."""
@@ -1098,6 +1138,7 @@ if __name__ == "__main__":
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
+    test_fire_delay()
     test_stall_message()
     test_install()
-    print("16/16 passed")
+    print("17/17 passed")
