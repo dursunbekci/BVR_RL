@@ -201,7 +201,7 @@ SCHEMA = {
                "these for each shot: the cockpit work of a real launch (in DCS the stick pilot bugs the "
                "TWS track and holds the weapon release). The shot goes only if the target is still "
                "tracked and within the fire cone then. 0 and 0: at once (items saved before this "
-               "parameter existed). 1v1 only."),
+               "parameter existed). Also the 2v1 blue aircraft and a policy-flown 2v1 red."),
         P("LAUNCH_DELAY_MAX", "Launch delay, longest", "s", "Agent commands", 0, 30, default=0.0),
     ],
 }

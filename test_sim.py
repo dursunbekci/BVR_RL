@@ -958,6 +958,77 @@ def test_eval_2v1_stats():
     print("  eval_2v1 statistics ......... OK")
 
 
+def test_team_launch_delay():
+    """2v1 launch delay (platform LAUNCH_DELAY_MIN/MAX): a blue aircraft's shot
+    leaves that long after the decision with its fire mask shut meanwhile, and
+    a policy-flown red's delayed shot goes at the aircraft it chose."""
+    from bvr_team import TeamBvrEnv, TeamPolicyRed
+    from bvr_opponents import BvrOpponentType as T
+    P = "F-16C-DCSFIT"
+    e = TeamBvrEnv(opponent_type=T.STRAIGHT, seed=4, doctrine="AGGRESSIVE",
+                   blue_platforms=(P, P), red_platform=P)
+    assert e._obs[0]._launch_delay[1] > 0, "F-16C-DCSFIT has no launch delay"
+    for o in e._obs:
+        o._launch_delay = (3.0, 3.0)
+    requests, launches, shut, logged = [], [], 0, 0
+    for ep in range(3):
+        e.reset()
+        w, launch = e._world, e._world._launch
+        def spy(owner, cmd, launch=launch, w=w):
+            if owner == 1 and w.wpn[0] > 0:
+                launches.append(w.t_sim)
+            return launch(owner, cmd)
+        w._launch = spy
+        done = False
+        while not done:
+            m = e.action_masks()
+            fire = int(m[0][-1])
+            if fire:
+                requests.append(e._t_sim)
+            _, _, t, tr, info = e.step([[0, 2, 3, fire], [0, 2, 3, 0]])
+            done = t or tr
+            if fire and not done and e._obs[0]._fire_due is not None:
+                shut += not e.action_masks()[0][-1]
+        logged += info[0]["fire_requests"]
+    assert requests and launches, (requests, launches)
+    for tl in launches:                   # every launch is 3 s after a request, none at once
+        assert any(abs(tl - (tr + 3.0)) <= 0.05 for tr in requests), (tl, requests)
+    assert shut >= 1 and logged == len(requests), (shut, logged, len(requests))
+
+    # Policy-flown red: its delayed launch goes at the aircraft it decided on.
+    class Model:
+        def predict(self, obs, action_masks=None, deterministic=False):
+            return np.array([0, 2, 3, int(action_masks[-1])]), None
+    e = TeamBvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=7, doctrine="AGGRESSIVE",
+                   blue_platforms=(P, P), red_platform=P)
+    e._opponent_factory = lambda env: TeamPolicyRed(env, Model(), False, "policy:test")
+    for r in e._red_obs:
+        r._launch_delay = (2.0, 2.0)
+    asked, red_launch = [], []
+    for k, r in enumerate(e._red_obs, start=1):
+        req = r._request_fire
+        r._request_fire = lambda t, req=req, k=k: asked.append((t, k)) or req(t)
+    for ep in range(8):                   # some starts are tail chases with no shot for red
+        if len(red_launch) >= 2:
+            break
+        e.reset()
+        w, launch = e._world, e._world._launch
+        def spy(owner, cmd, launch=launch, w=w):
+            if owner == e.RED and w.wpn[e.RED - 1] > 0:
+                red_launch.append((w.t_sim, cmd.get("target")))
+            return launch(owner, cmd)
+        w._launch = spy
+        done = False
+        while not done:
+            _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+    assert red_launch, "the policy red never launched"
+    for tl, k in red_launch:
+        assert any(abs(tl - (ta + 2.0)) <= 0.05 and ka == k for ta, ka in asked), (tl, k, asked)
+    print(f"  2v1 launch delay ............ OK  ({len(launches)} blue launches 3 s after the decision; "
+          f"{len(red_launch)} red launches 2 s after, at the chosen aircraft)")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -1924,6 +1995,7 @@ if __name__ == "__main__":
         ("2v1 red opening rules",   test_team_open_rules),
         ("2v1 policy red",          test_team_policy_red),
         ("eval_2v1 statistics",     test_eval_2v1_stats),
+        ("2v1 launch delay",        test_team_launch_delay),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS live stick",          test_dcs_live_stick),

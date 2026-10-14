@@ -36,6 +36,12 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
     action (so it adds no policy gradient), no shaping, and the team's
     rewards (so its value keeps learning what the team goes on to do).
 
+Launch delay. A blue platform with LAUNCH_DELAY_MIN/MAX (F-16C-DCSFIT) fires
+as in 1v1: the launch goes that many seconds after the decision, only if
+the aircraft still tracks red within the fire cone then, and its fire mask
+is shut meanwhile. A policy-flown red on such a platform does the same; a
+scripted red (the DCS AI's stand-in) fires at once.
+
 Red flown by a policy (red_policies). In a share of the episodes at the last
 scripted stage (ADAPTIVE_SHOOTER), red is a frozen 1v1 checkpoint instead
 (TeamPolicyRed): it sees the fight as a 1v1 against its current target,
@@ -263,6 +269,9 @@ class TeamBvrEnv:
             i_hdg, i_alt, i_spd, i_fire = (int(x) for x in acts[k])
             if o._alive:
                 fire = bool(FIRE_OPTIONS[i_fire]) and o._can_fire()
+                # Platform launch delay (as in 1v1): a delayed shot is queued and
+                # goes, or is dropped, in the frame _due_fire() says.
+                fire = fire and o._request_fire(self._t_sim)
                 cmds.append(o._encode_cmd(i_hdg, i_alt, i_spd, i_fire))
                 hdg_cost.append(o._heading_choice(HDG_OFFSETS_DEG[i_hdg]))
             else:
@@ -326,6 +335,8 @@ class TeamBvrEnv:
                 "terminal_outcome": self._outcome,
                 "blue_losses": len(self._lost),
                 "shots_fired": sum(o._shots_fired for o in self._obs),
+                "fire_requests": sum(o._fire_requests for o in self._obs),
+                "fire_dropped": sum(o._fire_dropped for o in self._obs),
                 "misses": sum(o._misses for o in self._obs),
                 "support_losses": sum(o._support_losses for o in self._obs),
                 "launch_log": sorted(launch_log, key=lambda l: l["t_sim"]),
@@ -380,7 +391,7 @@ class TeamBvrEnv:
             for k, o in enumerate(self._obs):
                 if o._alive and cmds[k] is not None:
                     p = dict(cmds[k])
-                    p["fire"] = 1 if (fires[k] and f == 1) else 0
+                    p["fire"] = 1 if ((fires[k] and f == 1) or o._due_fire(self._t_sim)) else 0
                     p["msl_guidance"] = o._guidance_packet()
                     p["target"] = self.RED
                 else:
@@ -398,7 +409,8 @@ class TeamBvrEnv:
             except Exception as e:
                 from bvr_env import OpponentError
                 raise OpponentError(self, e) from e
-            opp["target"] = self._red_tgt
+            # A policy-flown red names the target of a delayed launch itself.
+            opp.setdefault("target", self._red_tgt)
             if opp.pop("target_other", 0) and self._red_other is not None:
                 opp["target"] = 3 - self._red_tgt
                 self._red_other = dict(self._red_other, targeted=True)
@@ -642,12 +654,14 @@ def _red_observer_reset(r: BvrEnv) -> None:
         r._radar.reset()
     r._state = {}; r._t_sim = 0.0
     r._last_shot_t = -999.0; r._last_convert_t = -1e9
+    r._fire_due = None; r._fire_requests = 0; r._fire_dropped = 0
 
 
 def _observer_reset(o: BvrEnv) -> None:
     """Start-of-episode state for a BvrEnv used as a team member's observer."""
     o._step_num = 0; o._t_sim = 0.0; o._ready = True; o._outcome = None
     o._last_shot_t = -999.0; o._shots_fired = 0; o._misses = 0
+    o._fire_due = None; o._fire_requests = 0; o._fire_dropped = 0
     o._support_losses = 0; o._events_seen.clear(); o._launch_log = []
     o._state = {}; o._last_convert_t = -1e9
     o._prev_hdg_off = 0.0; o._bank_revs = 0; o._bank_sign = 0
@@ -702,6 +716,7 @@ class TeamPolicyRed:
         for r in rs[1:]:
             r._doctrine, r._shot_cost = a._doctrine, a._shot_cost
         self._tgt = None
+        self._pending = None        # (observer, target) of a launch waiting out its delay
         self._next_decision = -1.0
         self._started = False
         self._cmd = None
@@ -715,7 +730,15 @@ class TeamPolicyRed:
         env = self._env
         w, tgt = env._world, env._red_tgt
         o = env._red_obs[tgt - 1]
-        fire = 0
+        fire, fire_at = 0, None
+        if self._pending is not None:
+            po, pk = self._pending
+            if not env._obs[pk - 1]._alive:
+                po._fire_due = None; po._fire_dropped += 1; self._pending = None
+            elif po._due_fire(t_sim):           # a launch decided earlier (launch delay)
+                fire, fire_at, self._pending = 1, pk, None
+            elif po._fire_due is None:          # dropped by _due_fire
+                self._pending = None
         if t_sim >= self._next_decision:
             if self._tgt is not None and self._tgt != tgt:
                 self._handover(env._red_obs[self._tgt - 1], o)
@@ -727,15 +750,22 @@ class TeamPolicyRed:
             obs = self._stack.update(raw) if self._started else self._stack.reset(raw)
             self._started = True
             mask = o.action_masks()
+            if self._pending is not None or fire:
+                mask = mask.copy(); mask[-1] = False   # one launch on its way at a time
             a, _ = self._model.predict(obs, action_masks=mask, deterministic=self._deterministic)
             a = [int(x) for x in np.asarray(a).reshape(-1)]
             self._cmd = o._encode_cmd(a[0], a[1], a[2], 0)
             o._heading_choice(HDG_OFFSETS_DEG[a[0]])
             if a[3] == 1 and mask[-1]:
-                fire = 1
+                if o._request_fire(t_sim):
+                    fire, fire_at = 1, tgt
+                else:
+                    self._pending = (o, tgt)
             self._next_decision = t_sim + 1.0 / env.DECISION_HZ
         cmd = dict(self._cmd)
         cmd["fire"] = fire
+        if fire_at is not None:
+            cmd["target"] = fire_at
         return cmd
 
 
