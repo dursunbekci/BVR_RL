@@ -1029,6 +1029,50 @@ def test_team_launch_delay():
           f"{len(red_launch)} red launches 2 s after, at the chosen aircraft)")
 
 
+def test_team_ucav_options():
+    """2 UCAV v 1 manned: the UCAV platform loads on the DCS-fitted missile;
+    blue_loss_cost sets the cost of a lost blue aircraft; with red_awareness
+    "radar" scripted red steers on its own track, so before it detects a
+    low-RCS aircraft that turns away its belief drifts from the truth, and
+    once tracked it is close."""
+    from bvr_team import TeamBvrEnv
+    from bvr_library import load_platform
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+    from bvr_env import HDG_OFFSETS_DEG
+    u = load_platform("GENERIC-UCAV-DCS")
+    assert u.missile.id == "AIM-120C-DCS" and u.rcs < 0.5 and u.launch_delay_max > 0
+    U, F = "GENERIC-UCAV-DCS", "F-16C-DCSFIT"
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=3, blue_platforms=(U, U), red_platform=F,
+                   blue_loss_cost=0.5)
+    assert e.R_LOST == -0.5 and TeamBvrEnv.R_LOST == -1.0
+    for bad in ({"blue_loss_cost": 3.0}, {"red_awareness": "psychic"}):
+        try:
+            TeamBvrEnv(opponent_type=T.SHOOTER, seed=3, **bad)
+            assert False, bad
+        except ValueError:
+            pass
+    e = TeamBvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=3, blue_platforms=(U, U), red_platform=F,
+                   red_awareness="radar")
+    i90 = HDG_OFFSETS_DEG.index(90.0)
+    blind, tracked = [], []
+    for ep in range(2):
+        e.reset()
+        for _ in range(150):
+            k = e._red_tgt
+            truth = float(np.linalg.norm(e._world.pos(k) - e._world.pos(e.RED)))
+            err = abs(e._red_believed_view({})["range"] - truth)
+            (tracked if e._red_obs[k - 1]._track.state == TrackState.TRACK else blind).append(err)
+            _, _, t, tr, info = e.step([[i90, 2, 3, 0], [i90, 2, 3, 0]])
+            if t or tr:
+                break
+    assert e._red_awareness == "radar"
+    assert blind and max(blind) > 5000.0, "red's belief never drifted before detection"
+    assert not tracked or float(np.median(tracked)) < 500.0, np.median(tracked)
+    print(f"  2v1 UCAV options ............ OK  (red's belief off by up to {max(blind) / 1000:.0f} km "
+          f"before detection{'' if not tracked else f', {np.median(tracked):.0f} m on a track'})")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -1701,8 +1745,9 @@ def test_fire_off_boresight():
 
 
 def test_launch_delay():
-    """A platform's launch delay (LAUNCH_DELAY_MIN/MAX): the missile leaves 3-7 s
-    after the fire decision on F-16C-DCSFIT, the fire mask is shut meanwhile, and
+    """A platform's launch delay (LAUNCH_DELAY_MIN/MAX): the missile leaves that
+    long after the fire decision on F-16C-DCSFIT (its measured range, read from
+    the platform), the fire mask is shut meanwhile, and
     a launch whose target has left the fire cone by then is dropped; a platform
     without one launches in the decision's own step, as before."""
     import math
@@ -1732,7 +1777,9 @@ def test_launch_delay():
     assert env.action_masks()[-1]
     env.step(np.array([k0, 2, 3, 1]))
     assert env._shots_fired == 1 and env._fire_due is None, env._shots_fired
-    # with one: 3-7 s later, the mask shut until then
+    # with one: LAUNCH_DELAY_MIN..MAX s later, the mask shut until then
+    lo, hi = rig("F-16C-DCSFIT")[0]._launch_delay
+    assert hi > 0, "F-16C-DCSFIT has no launch delay"
     waits = []
     for seed in range(6):
         env, _ = rig("F-16C-DCSFIT")
@@ -1742,15 +1789,15 @@ def test_launch_delay():
         while env._shots_fired == 0:
             assert env._fire_due is not None and not env.action_masks()[-1]
             env.step(np.array([k0, 2, 3, 1])); n += 1
-            assert n < 12, n
+            assert n <= math.ceil(hi) + 2, n
         waits.append(n)
         assert env._fire_requests == 1 and env._fire_dropped == 0
-    assert all(3 <= w <= 8 for w in waits) and len(set(waits)) > 1, waits
+    assert all(math.floor(lo) <= w <= math.ceil(hi) + 1 for w in waits) and len(set(waits)) > 1, waits
     # the target leaves the fire cone during the wait: the launch is dropped
     env, off = rig("F-16C-DCSFIT")
     env.step(np.array([k0, 2, 3, 1]))
     off["az"] = 80.0
-    for _ in range(9):
+    for _ in range(int(math.ceil(hi)) + 2):
         env.step(np.array([k0, 2, 3, 0]))
     assert env._shots_fired == 0 and env._fire_dropped == 1 and env._fire_due is None
     print(f"  launch delay ................ OK  (F-16C-DCSFIT: launched {min(waits)}-{max(waits)} decisions after "
@@ -1996,6 +2043,7 @@ if __name__ == "__main__":
         ("2v1 policy red",          test_team_policy_red),
         ("eval_2v1 statistics",     test_eval_2v1_stats),
         ("2v1 launch delay",        test_team_launch_delay),
+        ("2v1 UCAV options",        test_team_ucav_options),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS live stick",          test_dcs_live_stick),

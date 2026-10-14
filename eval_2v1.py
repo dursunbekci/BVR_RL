@@ -91,19 +91,20 @@ def _play(task):
     from bvr_selfplay import FrameStacker, N_STACK, load_policy
     from bvr_team import TeamBvrEnv, make_policy_red
 
-    ckpt, col, first, count, seed, doctrine, deterministic, red_platform, max_steps = task
+    ckpt, col, first, count, seed, doctrine, deterministic, red_platform, max_steps, awareness = task
     model, _ = load_policy(ckpt)
     privileged = isinstance(model.observation_space, spaces.Dict)
     sc = scenario_of(model)
     blue = (sc["platform"], sc.get("wingman_platform") or sc["platform"])
     red = red_platform or sc["opponent_platform"]
-    key = (ckpt, col, doctrine, red)
+    key = (ckpt, col, doctrine, red, awareness)
     env = _ENVS.get(key)
     if env is None:
         scripted = col.startswith(SCRIPTED)
         opp = BvrOpponentType[col[len(SCRIPTED):]] if scripted else BvrOpponentType.ADAPTIVE_SHOOTER
         env = TeamBvrEnv(opponent_type=opp, seed=seed, privileged_critic=privileged,
-                         doctrine=doctrine, blue_platforms=blue, red_platform=red)
+                         doctrine=doctrine, blue_platforms=blue, red_platform=red,
+                         red_awareness=awareness)
         if max_steps:
             env.MAX_STEPS = int(max_steps)
             for o in env._obs:
@@ -186,6 +187,8 @@ def main():
                     help="blue's doctrine: MIXED (drawn per episode, default) or one of them")
     ap.add_argument("--red-platform", help="red's platform (default: each checkpoint's opponent)")
     ap.add_argument("--max-steps", type=int, help="episode length in decisions")
+    ap.add_argument("--red-awareness", default="gci", choices=["gci", "radar"],
+                    help="what scripted red steers on: true positions (gci, default) or its own radar track")
     ap.add_argument("--stochastic", action="store_true", help="sample actions instead of the most likely")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1),
                     help="parallel worker processes (default: CPU cores - 1)")
@@ -216,7 +219,7 @@ def main():
         raise SystemExit("no red to play against: give --scripted and/or --red-policies")
 
     tasks = [(c, col, first, min(CHUNK, args.episodes - first), args.seed, args.doctrine.upper(),
-              not args.stochastic, args.red_platform, args.max_steps)
+              not args.stochastic, args.red_platform, args.max_steps, args.red_awareness)
              for c in ckpts for col in cols for first in range(0, args.episodes, CHUNK)]
     workers = max(1, min(args.workers, len(tasks)))
     print(f"{len(ckpts)} checkpoint(s) x {len(cols)} red(s) x {args.episodes} episodes "

@@ -42,6 +42,20 @@ the aircraft still tracks red within the fire cone then, and its fire mask
 is shut meanwhile. A policy-flown red on such a platform does the same; a
 scripted red (the DCS AI's stand-in) fires at once.
 
+What red knows (red_awareness). "gci" (the default, as 1v1): scripted red
+steers on the blue aircraft's true positions, as if a ground controller or
+AWACS gave it the picture; only its shots and missile guidance depend on its
+own radar. "radar": it steers on its own radar track of its target, coasting
+its last estimate when the track drops, and before it first detects that
+aircraft, on the position and velocity it had at the start, dead-reckoned (a
+controller's initial vector, never updated). Against a low-RCS blue team
+(GENERIC-UCAV-DCS) that is the difference stealth makes to red's manoeuvring,
+not only to when it can shoot.
+
+The cost of losing a blue aircraft (blue_loss_cost, default 1.0): a smaller
+cost for an attritable UCAV makes trading one for the kill worth more than
+a timeout (see R_LOST).
+
 Red flown by a policy (red_policies). In a share of the episodes at the last
 scripted stage (ADAPTIVE_SHOOTER), red is a frozen 1v1 checkpoint instead
 (TeamPolicyRed): it sees the fight as a 1v1 against its current target,
@@ -120,6 +134,8 @@ class TeamBvrEnv:
     # the choice until red's first launch, then red picks targets as usual.
     OPEN_RULES = (("nearer", 0.5), ("farther", 0.25), ("random", 0.25))
 
+    RED_AWARENESS = ("gci", "radar")
+
     # Scripted red fights on its own radar tracks (see the module notes).
     # False: the pre-SIM_REV 16 red, truth-guided with the old cranks.
     RED_RADAR = True
@@ -128,7 +144,8 @@ class TeamBvrEnv:
                  seed=42, instance_id=0, privileged_critic=True, envelope_table="library",
                  radar_model="sim", doctrine=DOCTRINE_MIXED,
                  blue_platforms=(DEFAULT_PLATFORM, DEFAULT_PLATFORM),
-                 red_platform=DEFAULT_PLATFORM, red_policies=(), red_policy_frac=0.5):
+                 red_platform=DEFAULT_PLATFORM, red_policies=(), red_policy_frac=0.5,
+                 blue_loss_cost=None, red_awareness="gci"):
         if opponent_type == BvrOpponentType.SELF_PLAY:
             raise ValueError("2v1 has no self-play stage yet: red is a scripted opponent")
         if len(blue_platforms) != self.n_agents:
@@ -148,6 +165,13 @@ class TeamBvrEnv:
         # of ADAPTIVE_SHOOTER episodes they fly.
         self._red_policies = tuple(red_policies or ())
         self._red_policy_frac = float(red_policy_frac)
+        if blue_loss_cost is not None:
+            if not 0.0 <= float(blue_loss_cost) <= 2.0:
+                raise ValueError(f"blue_loss_cost {blue_loss_cost}: choose 0-2")
+            self.R_LOST = -float(blue_loss_cost)
+        if red_awareness not in self.RED_AWARENESS:
+            raise ValueError(f"red_awareness {red_awareness!r}: choose {' or '.join(self.RED_AWARENESS)}")
+        self._red_awareness = red_awareness
 
         self._obs = [BvrEnv(opponent_type=BvrOpponentType.STRAIGHT, gamma_discount=gamma_discount,
                             seed=seed + 97 * k, instance_id=instance_id,
@@ -244,6 +268,9 @@ class TeamBvrEnv:
         else:
             self._red_tgt = min((1, 2), key=dist.get)
         self._open_hold = self._open_rule != "nearer"
+        # red_awareness "radar": what red believes of each blue aircraft, as
+        # (position, velocity, sim time); the start is the controller's vector.
+        self._red_belief = {i: (w.pos(i).copy(), w.acs[i - 1].vel_enu.copy(), 0.0) for i in (1, 2)}
         self._red_wpn0 = w.wpn[self.RED - 1]
         self._red_other = None
         for k, o in enumerate(self._obs, start=1):
@@ -346,7 +373,8 @@ class TeamBvrEnv:
                 "flight_time": sum(o._t_sim for o in self._obs),
                 "wpn_remaining": sum(self._world.wpn[:self.n_agents]),
                 "killer": self._killer,
-                "red_open_rule": self._open_rule})
+                "red_open_rule": self._open_rule,
+                "red_awareness": self._red_awareness})
             self._ready = False
         return obs, np.array(rewards, dtype=np.float32), terminated, truncated, infos
 
@@ -402,6 +430,8 @@ class TeamBvrEnv:
                 self._retarget()
                 self._red_other = self._other_info()
             red_view = w.telemetry(self._red_tgt, self.RED, view="team")
+            if self._red_awareness == "radar" and self._red_radar:
+                red_view = self._red_believed_view(red_view)
             if self._red_other is not None:
                 red_view["other"] = self._red_other
             try:
@@ -522,6 +552,24 @@ class TeamBvrEnv:
         """Whether red may fire at blue aircraft k now: the agent's fire mask
         applied to red's own track of it."""
         return bool(self._obs[k - 1]._alive and self._red_obs[k - 1]._can_fire())
+
+    def _red_believed_view(self, view: dict) -> dict:
+        """red_awareness "radar": red's packet with its target's position and
+        range taken from red's own track (or its coasted / dead-reckoned
+        belief) instead of the truth. Scripted red reads only these of the
+        target (its bearing and range); its own state stays true."""
+        from sim_world import _enu_to_latlon
+        k = self._red_tgt
+        r = self._red_obs[k - 1]
+        est = r._est() if r._track.state != TrackState.NONE else {"valid": False}
+        if est["valid"]:
+            self._red_belief[k] = (np.asarray(est["pos"], float).copy(),
+                                   np.asarray(est["vel"], float).copy(), self._t_sim)
+        pos, vel, t0 = self._red_belief[k]
+        pos = pos + vel * (self._t_sim - t0)
+        lat, lon, alt = _enu_to_latlon(*pos)
+        rng = float(np.linalg.norm(pos - self._world.pos(self.RED)))
+        return {**view, "lat": lat, "lon": lon, "alt": alt, "range": max(rng, 1.0)}
 
     def _red_gate_target(self) -> bool:
         return self._red_can_fire(self._red_tgt)

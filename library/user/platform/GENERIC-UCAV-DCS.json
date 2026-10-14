@@ -1,0 +1,44 @@
+{
+  "id": "GENERIC-UCAV-DCS",
+  "kind": "platform",
+  "name": "Generic jet UCAV with 2 × AIM-120 (AIM-120C-DCS), illustrative",
+  "description": "GENERIC-UCAV carrying the DCS-fitted AIM-120C-DCS, the missile of F-16C-DCSFIT, so a 2 UCAV v 1 manned fight uses one missile model on both sides; with a short launch delay for an operator's consent over the datalink (the UCAV has no cockpit work). Illustrative values, not data for any real aircraft.",
+  "params": {
+    "airframe": "GENERIC-UCAV",
+    "radar": "GENERIC-UCAV-RADAR",
+    "missile": "AIM-120C-DCS",
+    "WPN_COUNT": 2,
+    "RCS_M2": 0.1,
+    "SPEED_CMDS": [
+      150.0,
+      170.0,
+      200.0,
+      225.0,
+      250.0
+    ],
+    "ALT_MIN_OP": 1000.0,
+    "ALT_MAX_OP": 12500.0,
+    "CLIMB_FPA_LO": 12.0,
+    "CLIMB_FPA_HI": 6.0,
+    "CLIMB_FPA_ALT_LO": 3000.0,
+    "CLIMB_FPA_ALT_HI": 10000.0,
+    "LAUNCH_DELAY_MIN": 2.0,
+    "LAUNCH_DELAY_MAX": 5.0
+  },
+  "sources": {
+    "airframe": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "radar": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "missile": "AIM-120C-DCS, the missile fitted to DCS (dcs/missile_fit.py), as on F-16C-DCSFIT",
+    "WPN_COUNT": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "RCS_M2": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "SPEED_CMDS": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "ALT_MIN_OP": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "ALT_MAX_OP": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_LO": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_HI": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_ALT_LO": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "CLIMB_FPA_ALT_HI": "illustrative value for a generic loyal-wingman-class jet UCAV; not data for any real aircraft",
+    "LAUNCH_DELAY_MIN": "illustrative: an automated fire-control solution plus an operator's consent over the datalink, 2-5 s; F-16C-DCSFIT's measured cockpit delay is 7-14 s. Replace with the concept's own figure",
+    "LAUNCH_DELAY_MAX": "illustrative: an automated fire-control solution plus an operator's consent over the datalink, 2-5 s; F-16C-DCSFIT's measured cockpit delay is 7-14 s. Replace with the concept's own figure"
+  }
+}

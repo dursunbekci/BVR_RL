@@ -21,7 +21,11 @@ scripted curriculum opponent (self-play is 1v1 only for now). --platform is
 the lead's aircraft, --wingman-platform the wingman's (default: the same).
 With --n-envs N there are N fights and 2N agent slots. --red-policies A.zip
 B.zip lets 1v1 checkpoints fly red in a share (--red-policy-frac, default 0.5)
-of the ADAPTIVE_SHOOTER episodes, the last 2v1 stage:
+of the ADAPTIVE_SHOOTER episodes, the last 2v1 stage. Two UCAVs against a
+manned fighter: --platform GENERIC-UCAV-DCS --opponent-platform F-16C-DCSFIT,
+with --red-awareness radar (red steers on its own radar track, so the UCAVs'
+small radar cross-section counts) and --blue-loss-cost (less for an
+attritable UCAV):
 
     python train_bvr.py --format 2v1 --platform F-16C-DCS --opponent-platform F-16C-DCS \
         --opponent adaptive_shooter --resume models_bvr/<1v1 model>.zip \
@@ -525,13 +529,14 @@ def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfpl
 
 def make_team_env(idx, opponent, seed, privileged, envelope_table, gamma, doctrine,
                   blue_platforms, red_platform, max_steps=None, red_policies=(),
-                  red_policy_frac=0.5):
+                  red_policy_frac=0.5, blue_loss_cost=None, red_awareness="gci"):
     def _init():
         env = TeamBvrEnv(opponent_type=opponent, gamma_discount=gamma, seed=seed + idx,
                          instance_id=idx, privileged_critic=privileged,
                          envelope_table=envelope_table, doctrine=doctrine,
                          blue_platforms=blue_platforms, red_platform=red_platform,
-                         red_policies=red_policies, red_policy_frac=red_policy_frac)
+                         red_policies=red_policies, red_policy_frac=red_policy_frac,
+                         blue_loss_cost=blue_loss_cost, red_awareness=red_awareness)
         if max_steps:
             env.MAX_STEPS = int(max_steps)
         return env
@@ -593,6 +598,12 @@ def main():
     ap.add_argument("--red-policies", nargs="+", default=[], metavar="ZIP",
                     help="2v1: 1v1 checkpoints that fly red in a share of the ADAPTIVE_SHOOTER "
                          "episodes (the last 2v1 stage), one drawn per episode")
+    ap.add_argument("--blue-loss-cost", type=float, default=None,
+                    help="2v1: the cost of losing a blue aircraft, 0-2 (default 1.0, as a kill is worth "
+                         "1.0); less for an attritable UCAV, e.g. 0.5")
+    ap.add_argument("--red-awareness", default="gci", choices=["gci", "radar"],
+                    help="2v1: what scripted red steers on: gci, the blue aircraft's true positions "
+                         "(a controller's picture; default), or radar, its own radar track only")
     ap.add_argument("--red-policy-frac", type=float, default=0.5,
                     help="2v1: share of ADAPTIVE_SHOOTER episodes flown by a --red-policies "
                          "checkpoint, 0-1 (default %(default)s)")
@@ -632,6 +643,14 @@ def main():
         run_notes.append(msg)
     if args.wingman_platform and not team:
         ap.error("--wingman-platform needs --format 2v1")
+    if (args.blue_loss_cost is not None or args.red_awareness != "gci") and not team:
+        ap.error("--blue-loss-cost and --red-awareness need --format 2v1")
+    if args.blue_loss_cost is not None and not 0.0 <= args.blue_loss_cost <= 2.0:
+        ap.error("--blue-loss-cost must be within 0-2")
+    if team and (args.blue_loss_cost is not None or args.red_awareness != "gci"):
+        note(f"2v1: losing a blue aircraft costs "
+             f"{1.0 if args.blue_loss_cost is None else args.blue_loss_cost:g}; "
+             f"scripted red steers on {'its own radar track' if args.red_awareness == 'radar' else 'true positions (GCI)'}")
     if args.red_policies and not team:
         ap.error("--red-policies needs --format 2v1 (1v1 has self-play)")
     if not 0.0 <= args.red_policy_frac <= 1.0:
@@ -706,7 +725,8 @@ def main():
     if team:
         fns = [make_team_env(i, opponent, args.seed, privileged, envelope_table, args.gamma,
                              args.doctrine.upper(), (args.platform, wingman), args.opponent_platform,
-                             args.max_steps, tuple(args.red_policies), args.red_policy_frac)
+                             args.max_steps, tuple(args.red_policies), args.red_policy_frac,
+                             args.blue_loss_cost, args.red_awareness)
                for i in range(args.n_envs)]
         vec = TeamVecEnv(fns, in_process=(args.n_envs == 1))
     else:
