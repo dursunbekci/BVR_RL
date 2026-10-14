@@ -201,6 +201,7 @@ class PolicyOpponent:
         o._state = {}
         o._last_shot_t = -999.0
         o._last_convert_t = -1e9
+        o._fire_due = None
         if self._doctrine is not None:
             o._doctrine_cfg = str(self._doctrine).upper()
         o._pick_doctrine()          # the snapshot fights under its own doctrine
@@ -227,6 +228,9 @@ class PolicyOpponent:
 
         from bvr_env import HDG_OFFSETS_DEG
         fire = 0
+        if o._due_fire(t_sim):          # a launch it decided on earlier (platform launch delay)
+            fire = 1
+            o._last_shot_t = t_sim
         if t_sim >= self._next_decision:
             o._state = world.telemetry(2)
             o._t_sim = t_sim
@@ -243,7 +247,7 @@ class PolicyOpponent:
             # "previous heading" inputs (HDG_OBS_LABELS) read it, and without
             # this they always showed 0 to the snapshot.
             o._heading_choice(HDG_OFFSETS_DEG[a[0]])
-            if a[3] == 1 and mask[-1]:
+            if a[3] == 1 and mask[-1] and o._request_fire(t_sim):
                 fire = 1
                 o._last_shot_t = t_sim
             self._next_decision = t_sim + 1.0 / env.DECISION_HZ

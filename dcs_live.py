@@ -296,6 +296,7 @@ class StickLiveWorld(DcsLiveWorld):
         super().__init__(link, rec, blue, red, **kw)
         self.pilot = pilot
         self.t_radar = -math.inf
+        self.fire_why = []          # why each fire request that timed out did (e.g. no TWS track bugged)
 
     def send_command(self, cmd, fire):
         hdg = float(cmd["hdgCmd"])
@@ -315,6 +316,8 @@ class StickLiveWorld(DcsLiveWorld):
             if kind == "fire":
                 self.fire_log.append((round(self.t - self.t0, 1), status))
                 self.fire_pending = None
+                if status != "launched":
+                    self.fire_why.append(why)
                 self.log(f"  fire {status} at {self.t - self.t0:.1f} s: {why}")
             else:
                 self.log(f"  radar: {why}")
@@ -347,6 +350,9 @@ class DcsLiveEnv(BvrEnv):
         if max_steps is not None:
             self.MAX_STEPS = int(max_steps)
         self._world = world_factory(self._plat, self._opp_plat)
+        # The platform's launch delay stands in for DCS's cockpit work; here DCS
+        # does that work itself, so the request goes out at once.
+        self._launch_delay = (0.0, 0.0)
 
     def _random_ic(self, blue_top_speed=None) -> dict:
         return self._world.initial_ic()
@@ -373,6 +379,20 @@ class DcsLiveEnv(BvrEnv):
             info["terminal_outcome"] = self._outcome or "MISSION_END"
             self._ready = False
         return obs, reward, terminated, truncated, info
+
+
+def launch_delays(fire_log) -> list:
+    """Seconds from each fire request to its launch, from a world's fire log [(t, status)]."""
+    out, t_req = [], None
+    for t, st in fire_log:
+        if st == "requested":
+            t_req = t
+        elif st == "launched" and t_req is not None:
+            out.append(t - t_req)
+            t_req = None
+        elif st in ("timeout", "refused"):
+            t_req = None
+    return out
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -537,6 +557,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            "shots": info.get("shots_fired", 0),
            "fire_requests": sum(1 for _, s in world.fire_log if s == "requested"),
            "fire_timeouts": sum(1 for _, s in world.fire_log if s in ("timeout", "refused")),
+           # request to launch, s, per shot: what the platform's LAUNCH_DELAY_MIN/MAX stands for in training
+           "launch_delays_s": ";".join(f"{d:.1f}" for d in launch_delays(world.fire_log)),
+           "fire_timeout_reasons": ";".join(getattr(world, "fire_why", [])),
            "missiles_removed": sum(1 for *_, st in world.support_log if st == "destroyed"),
            "support_losses": info.get("support_losses", 0)}
     # How often BLUE-1 flew well below the speed the policy asked for. The DCS
@@ -552,7 +575,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                if spd and world.speed_boost else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
     log(f"episode {ep}: {outcome} after {env._t_sim:.0f} s, {row['shots']} shots "
-        f"({row['fire_timeouts']} fire requests not answered by a launch)")
+        f"({row['fire_timeouts']} fire requests not answered by a launch)"
+        + (f"; request to launch {row['launch_delays_s'].replace(';', ', ')} s" if row["launch_delays_s"] else ""))
     if short and not args.shadow:
         log(f"  speed: asked for {row['speed_cmd_mean']:.0f} m/s on average, flew "
             f"{row['speed_flown_mean']:.0f}; more than {SPEED_SHORT_MPS:.0f} m/s short "

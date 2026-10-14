@@ -280,6 +280,12 @@ class BvrEnv(gym.Env):
         if self._gamma < 0.99:
             print(f"[bvr_env] WARNING: gamma={self._gamma} too low — use >=0.995")
         self._rng       = np.random.default_rng(seed + instance_id*1000)
+        # Launch delay (platform LAUNCH_DELAY_MIN/MAX): its own random stream, so
+        # a platform without one draws nothing and flies exactly as before.
+        self._launch_delay = (self._plat.launch_delay_min, self._plat.launch_delay_max)
+        self._launch_rng = np.random.default_rng(seed + instance_id*1000 + 7777)
+        self._fire_due = None        # sim time a requested launch goes, or None
+        self._fire_requests = 0; self._fire_dropped = 0
         self._instance  = int(instance_id)
         self._privileged = bool(privileged_critic)
 
@@ -345,6 +351,7 @@ class BvrEnv(gym.Env):
         self._done=False; self._frozen_phi=None
         self._last_shot_t=-999.0; self._shots_fired=0; self._misses=0
         self._support_losses=0; self._events_seen.clear(); self._launch_log=[]
+        self._fire_due=None; self._fire_requests=0; self._fire_dropped=0
         self._state={}; self._last_convert_t=-1e9
         self._pick_doctrine()
         self._prev_hdg_off=0.0; self._bank_revs=0; self._bank_sign=0
@@ -385,11 +392,12 @@ class BvrEnv(gym.Env):
         i_hdg,i_alt,i_spd,i_fire = int(action[0]),int(action[1]),int(action[2]),int(action[3])
         self._step_num += 1
         want_fire = bool(FIRE_OPTIONS[i_fire]) and self._can_fire()
+        fire_now = want_fire and self._request_fire(self._t_sim)
         cmd = self._encode_cmd(i_hdg,i_alt,i_spd,i_fire)
         hdg_cost = self._heading_choice(HDG_OFFSETS_DEG[i_hdg])
         shots_before = self._shots_fired
         was_resolving = self._frozen_phi is not None
-        self._advance(1.0/self.DECISION_HZ, cmd, fire=want_fire)
+        self._advance(1.0/self.DECISION_HZ, cmd, fire=fire_now)
         shot_cost = self._shot_cost*(self._shots_fired-shots_before)
 
         obs   = self._build_obs()
@@ -428,6 +436,8 @@ class BvrEnv(gym.Env):
             reward += self._terminal_reward(self._outcome)
             info.update({"terminal_outcome":self._outcome,
                          "shots_fired":self._shots_fired,
+                         "fire_requests":self._fire_requests,
+                         "fire_dropped":self._fire_dropped,
                          "misses":self._misses,
                          "support_losses":self._support_losses,
                          "launch_log":list(self._launch_log),
@@ -474,7 +484,36 @@ class BvrEnv(gym.Env):
         if n<1.0: return 0.0
         return math.degrees(math.acos(float(np.clip(np.dot(nose,d)/n,-1.0,1.0))))
 
+    # ── launch delay ──────────────────────────────────────────────────
+    def _request_fire(self, t:float) -> bool:
+        """A fire decision at sim time t. True: launch now (no delay on this
+        platform). False: the launch is queued for LAUNCH_DELAY_MIN..MAX s on,
+        when _due_fire() lets it go, and the fire mask is shut meanwhile."""
+        self._fire_requests += 1
+        lo, hi = self._launch_delay
+        if hi <= 0.0:
+            return True
+        self._fire_due = t + float(self._launch_rng.uniform(lo, max(lo, hi)))
+        return False
+
+    def _due_fire(self, t:float) -> bool:
+        """True in the frame a queued launch goes. It goes only if a missile is
+        left and the target is still tracked within the fire cone, as DCS
+        launches only at a bugged track; the range is not checked again (DCS
+        launches at whatever range the track is then). Otherwise it is dropped,
+        as a DCS fire request that times out."""
+        if self._fire_due is None or t < self._fire_due:
+            return False
+        self._fire_due = None
+        est = self._est() if self._trk_state()==TrackState.TRACK else None
+        if (self._state.get("wpn_remaining",0) > 0 and est is not None and est["valid"]
+                and self._off_boresight_deg(est) <= self.MAX_OFF_BORESIGHT_DEG):
+            return True
+        self._fire_dropped += 1
+        return False
+
     def _can_fire(self) -> bool:
+        if self._fire_due is not None: return False     # a launch is on its way
         if self._state.get("wpn_remaining",0)<=0: return False
         if self._trk_state()!=TrackState.TRACK:   return False
         if (self._t_sim-self._last_shot_t)<3.0:   return False
@@ -516,7 +555,7 @@ class BvrEnv(gym.Env):
             if k >= n_frames and k % n_frames == 0 and self.resolve_hook is not None:
                 self.resolve_hook(self)
             pkt = dict(cmd)
-            pkt["fire"]         = 1 if k<fire_frames else 0
+            pkt["fire"]         = 1 if (k<fire_frames or self._due_fire(self._t_sim)) else 0
             pkt["msl_guidance"] = self._guidance_packet()
 
             # An opponent that fails must stop the run. This used to print and

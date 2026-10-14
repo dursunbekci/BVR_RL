@@ -547,3 +547,21 @@ about 20% faster (-3.30 against -2.75 m/s2). **F-16C-DCSFIT is the platform to t
 turns but learnt 0.69 in the pull-up into the climb at 300 m/s, and that one factor then under-pulled the last turn at 176
 m/s (4.05 g asked, 3.24 flown): it is now learnt per speed (150-450 m/s in 50 m/s bands, interpolated), so what is learnt at
 one speed stays there.
+
+## F-16C-DCSFIT in the library, and the launch delay (14 October)
+
+`library/user/airframe/F-16C-DCSFIT.json` (the `--fit` of `manoeuvre_20261014_104111`, with the sources of the fitted and
+measured values) and `library/user/platform/F-16C-DCSFIT.json` (F-16C-DCS with that airframe) are now in git. The missile is
+AIM-120C-DCS, whose envelope (`library/envelopes/AIM-120C-DCS-b8a3b10542.npz`) is already there: nothing to recalibrate.
+
+**Launch delay.** In DCS the fire decision is followed by cockpit work: the cursor to the target's bearing, target management
+right until the TWS track is bugged, master arm, the weapon release held 1.5 s. Seconds pass, the aircraft keeps flying the
+policy's commands, and if the track is lost meanwhile nothing launches. The simulator launched in the decision's own step.
+Platforms now have `LAUNCH_DELAY_MIN` / `LAUNCH_DELAY_MAX` (s, 0 by default: every existing platform fires as before): the
+launch goes a uniformly drawn time after the decision, the fire mask is shut meanwhile (as `dcs_live.py` shuts it while a
+request is pending), and at launch time it goes only if a missile is left and the target is still tracked within the 60 deg
+fire cone, else it is dropped (`fire_dropped` in the episode info), as a DCS request times out. The range is not checked again:
+DCS launches at whatever range the bugged track is then. It applies to the agent and to self-play snapshots (1v1; 2v1 fires at
+once). `dcs_live.py` sets it to 0 for itself, since DCS does the work. F-16C-DCSFIT has 3-7 s, an estimate from the pilot's
+fire job; `dcs_live.py --stick` now writes each request-to-launch time (`launch_delays_s`) and why each timed-out request did
+(`fire_timeout_reasons`) into `results.csv`, to replace it.

@@ -196,6 +196,13 @@ SCHEMA = {
         P("CLIMB_FPA_ALT_LO", "Low-altitude band ends", "m", "Agent commands", 0, 25_000),
         P("CLIMB_FPA_ALT_HI", "High-altitude band starts", "m", "Agent commands", 0, 25_000,
           help="The climb angle eases linearly from the low to the high value between these."),
+        P("LAUNCH_DELAY_MIN", "Launch delay, shortest", "s", "Agent commands", 0, 30, default=0.0,
+          help="Seconds from the fire decision to the missile leaving the rail, drawn uniformly between "
+               "these for each shot: the cockpit work of a real launch (in DCS the stick pilot bugs the "
+               "TWS track and holds the weapon release). The shot goes only if the target is still "
+               "tracked and within the fire cone then. 0 and 0: at once (items saved before this "
+               "parameter existed). 1v1 only."),
+        P("LAUNCH_DELAY_MAX", "Launch delay, longest", "s", "Agent commands", 0, 30, default=0.0),
     ],
 }
 
@@ -566,6 +573,8 @@ class Platform:
     climb_alt_lo: float
     climb_alt_hi: float
     items: dict = field(default_factory=dict)   # every item used, for run snapshots
+    launch_delay_min: float = 0.0  # s, fire decision to launch (LAUNCH_DELAY_MIN/MAX)
+    launch_delay_max: float = 0.0
 
     def climb_fpa(self, alt: float) -> float:
         """Climb-angle limit (rad) at this altitude."""
@@ -597,7 +606,9 @@ def load_platform(item_id: str) -> Platform:
         alt_min=float(pr["ALT_MIN_OP"]), alt_max=float(pr["ALT_MAX_OP"]),
         climb_fpa_lo=float(pr["CLIMB_FPA_LO"]), climb_fpa_hi=float(pr["CLIMB_FPA_HI"]),
         climb_alt_lo=float(pr["CLIMB_FPA_ALT_LO"]), climb_alt_hi=float(pr["CLIMB_FPA_ALT_HI"]),
-        items={"platform": it, **parts})
+        items={"platform": it, **parts},
+        launch_delay_min=float(pr.get("LAUNCH_DELAY_MIN", 0.0)),
+        launch_delay_max=float(pr.get("LAUNCH_DELAY_MAX", 0.0)))
     _PLATFORM_CACHE[key] = p
     return p
 

@@ -947,8 +947,12 @@ def test_dcs_live_stick():
     launched = [m for m in logs if "fire launched" in m]
     assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
     assert not stick.controlling, "the axes were not released at the end"
+    delays = [float(x) for x in row["launch_delays_s"].split(";") if x]
+    assert delays and all(d > 0 for d in delays), row
+    assert dcs_live.launch_delays([(1.0, "requested"), (5.5, "launched"), (9.0, "requested"), (19.0, "timeout"),
+                                   (20.0, "requested"), (23.0, "launched")]) == [4.5, 3.0]
     print(f"  DCS live stick .............. OK  ({row['fire_requests']} fire requests, first launch "
-          f"{launched[0].strip()}; the bridge got no command)")
+          f"{launched[0].strip()}, {delays[0]:.1f} s after its request; the bridge got no command)")
 
 
 def test_dcs_support_rule():
@@ -1447,6 +1451,63 @@ def test_fire_off_boresight():
     print("  fire off-boresight gate ..... OK")
 
 
+def test_launch_delay():
+    """A platform's launch delay (LAUNCH_DELAY_MIN/MAX): the missile leaves 3-7 s
+    after the fire decision on F-16C-DCSFIT, the fire mask is shut meanwhile, and
+    a launch whose target has left the fire cone by then is dropped; a platform
+    without one launches in the decision's own step, as before."""
+    import math
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+
+    def rig(plat, az_deg=0.0):
+        env = BvrEnv(opponent_type=T.STRAIGHT, seed=1, privileged_critic=False,
+                     platform=plat, opponent_platform=plat)
+        env.reset()
+        env._trk_state = lambda: TrackState.TRACK
+        env._own_envelope = lambda est: (60_000.0, 20_000.0)
+        off = {"az": az_deg}
+
+        def est():                     # a target 20 km out, az_deg off the nose
+            s = env._state; a = s.get("psi", 0.0) + math.radians(off["az"])
+            pos = env._own_pos_enu() + 20_000.0 * np.array([math.sin(a), math.cos(a), 0.0])
+            return {"valid": True, "pos": pos, "vel": np.zeros(3), "speed": 250.0, "age": 0.0,
+                    "pos_sigma": 50.0, "vel_sigma": 5.0}
+        env._est = est
+        return env, off
+
+    k0 = HDG_OFFSETS_DEG.index(0.0)
+    # without a delay: the shot goes in the decision's own step
+    env, _ = rig("F-16C-DCS")
+    assert env.action_masks()[-1]
+    env.step(np.array([k0, 2, 3, 1]))
+    assert env._shots_fired == 1 and env._fire_due is None, env._shots_fired
+    # with one: 3-7 s later, the mask shut until then
+    waits = []
+    for seed in range(6):
+        env, _ = rig("F-16C-DCSFIT")
+        env._launch_rng = np.random.default_rng(seed)
+        env.step(np.array([k0, 2, 3, 1]))
+        n = 1
+        while env._shots_fired == 0:
+            assert env._fire_due is not None and not env.action_masks()[-1]
+            env.step(np.array([k0, 2, 3, 1])); n += 1
+            assert n < 12, n
+        waits.append(n)
+        assert env._fire_requests == 1 and env._fire_dropped == 0
+    assert all(3 <= w <= 8 for w in waits) and len(set(waits)) > 1, waits
+    # the target leaves the fire cone during the wait: the launch is dropped
+    env, off = rig("F-16C-DCSFIT")
+    env.step(np.array([k0, 2, 3, 1]))
+    off["az"] = 80.0
+    for _ in range(9):
+        env.step(np.array([k0, 2, 3, 0]))
+    assert env._shots_fired == 0 and env._fire_dropped == 1 and env._fire_due is None
+    print(f"  launch delay ................ OK  (F-16C-DCSFIT: launched {min(waits)}-{max(waits)} decisions after "
+          f"the request; dropped when the target left the cone; F-16C-DCS at once)")
+
+
 def test_heading_switches():
     """Heading-choice changes are charged and counted, and the rocking pair is found."""
     from bvr_env import BvrEnv, HDG_OFFSETS_DEG
@@ -1690,6 +1751,7 @@ if __name__ == "__main__":
         ("missile loft",            test_missile_loft),
         ("self-play mix",           test_selfplay_mix),
         ("self-play heading history", test_selfplay_heading_history),
+        ("launch delay", test_launch_delay),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),
