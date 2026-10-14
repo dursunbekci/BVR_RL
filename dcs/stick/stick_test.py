@@ -121,6 +121,12 @@ class Frame:
         self.fuel_flow = _both(d.get("eng"), "FuelConsumption")
         self.x, self.z = _num(me.get("x")), _num(me.get("z"))
         self.vel = d.get("vel") or {}
+        # the course: where the aircraft goes (the velocity vector; DCS x north, z east), not where the nose points.
+        # In a 6 g turn the nose is 15-22 deg inside the flight path (the angle of attack, banked); the simulator's
+        # heading, and the policy's, is the course.
+        vx, vz = _num(self.vel.get("x")), _num(self.vel.get("z"))
+        self.crs = (math.atan2(vz, vx) % (2 * math.pi) if vx is not None and vz is not None
+                    and math.hypot(vx, vz) > 30.0 else self.hdg)
         self.ax = ax
         self.ax_seq = ax.get("seq")
 
@@ -336,6 +342,21 @@ class Hold:
     KI_NZ = 0.5            # per second, on the relative g error
     NZ_GAIN_LIM = (0.5, 1.6)
     NZ_TAU = 0.5           # s, the filter on the measured g
+    LAG_ON, LAG_OFF = 0.9, 2.0   # s, DCS's g response when the airframe does not give one
+    # The stick's g per unit depends on the speed: on 14 October the factor learnt 0.69 pulling up at 300 m/s, and that
+    # one factor then under-pulled a turn at 176 m/s (4.05 g asked, 3.24 flown). So it is learnt per speed, in these
+    # bands (m/s, linear between them, flat beyond the ends).
+    FACTOR_TAS = (150.0, 200.0, 250.0, 300.0, 350.0, 400.0, 450.0)
+
+    def _band(self, tas):
+        """(lower band index, weight of the upper one) for a speed."""
+        b = self.FACTOR_TAS
+        if tas <= b[0]:
+            return 0, 0.0
+        if tas >= b[-1]:
+            return len(b) - 2, 1.0
+        i = max(k for k in range(len(b) - 1) if b[k] <= tas)
+        return i, (tas - b[i]) / (b[i + 1] - b[i])
     NZ_LEAD = 0.4          # s: the g that holds the flight path is for the bank this far ahead (DCS's g needs about a
                            # second to unload: rolling out of 80 deg it still pulled 6 g at 50 and climbed 24 m/s)
     KP_V = 0.04            # throttle position per m/s of speed error
@@ -351,8 +372,17 @@ class Hold:
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
-        self.nz_gain, self.t_nz = 1.0, None    # the g correction: a factor on the pull the stick curve gives
+        self.nz_gain, self.t_nz = 1.0, None    # the g correction: a factor on the pull the stick curve gives, at this speed
+        self.nz_gains = [1.0] * len(self.FACTOR_TAS)   # learnt per speed (interpolated between these)
         self.nz_f = self.nz_cmd_f = None       # the measured g and the demand, through the same filter
+        # DCS's g follows the stick with a lag (measured 14 October: about 0.9 s building up, 2.0 s coming off; the
+        # airframe's NZ_TAU_ON/OFF when it has them). The factor learns only from what the lag does not explain: on
+        # the roll-out of a 180 deg turn the lagging g read as a stick too strong and the factor fell from 1.0 to 0.54
+        # in 4 s; the next turn then asked 7 g with the stick at 0.6.
+        on = getattr(airframe, "NZ_TAU_ON", 0.0) if airframe is not None else 0.0
+        off = getattr(airframe, "NZ_TAU_OFF", 0.0) if airframe is not None else 0.0
+        self.lag = (on if on > 0.0 else self.LAG_ON, off if off > 0.0 else self.LAG_OFF)
+        self.nz_pred = None                    # the g the demand should give by now, through that lag
 
     # the simulator's altitude law (f16_sim.F16Cfg), used when the command carries its flight-path limits
     K_ALT_GAM = 0.0003     # rad of flight-path angle per m of altitude error
@@ -395,7 +425,9 @@ class Hold:
         margin = getattr(self.airframe, "BANK_NZ_MARGIN", 0.85) if self.airframe is not None else 0.85
         bank_lim = min(self.bank_max, math.acos(min(1.0, math.cos(gam0) / max(margin * nz_av, 1e-3))))
         self.last = {"nz_avail": nz_av, "bank_lim": bank_lim}
-        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - f.hdg)))
+        trk = getattr(f, "crs", None)
+        trk = f.hdg if trk is None else trk        # the course, as the simulator's autopilot (its chi)
+        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - trk)))
         if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
             inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
             self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s
@@ -429,19 +461,31 @@ class Hold:
             k = min(1.0, dt / self.NZ_TAU)
             self.nz_f = f.nz if self.nz_f is None else self.nz_f + (f.nz - self.nz_f) * k
             self.nz_cmd_f = nz_cmd if self.nz_cmd_f is None else self.nz_cmd_f + (nz_cmd - self.nz_cmd_f) * k
-            err = self.nz_cmd_f - self.nz_f                    # both lag alike
             sat = getattr(self, "_pitch_sat", 0)
+            # the g the demand should give by now through DCS's lag (back on the measured g at the stick's stop,
+            # where the demand is not what the aircraft is asked)
+            if self.nz_pred is None or sat != 0:
+                self.nz_pred = f.nz
+            else:
+                tau = self.lag[0] if (nz_cmd - self.nz_pred) * (self.nz_pred - 1.0) >= 0.0 else self.lag[1]
+                self.nz_pred += (nz_cmd - self.nz_pred) * min(1.0, dt / tau)
+            err = self.nz_pred - self.nz_f
             # only in a steady pull: not while rolling, not on a large error (a transient), not against the stick's
             # stop, not when the wing's limit is what holds the g down
             steady = (abs(self.roll_rate) < math.radians(20) and abs(err) < 2.5 and nz_cmd < nz_av - 0.2
                       and nz_cmd > 2.0                  # a real pull: the factor is about the pull
-                      and abs(nz_cmd - self.nz_cmd_f) < 1.0)    # and a steady one (not rolling out; at 80 deg
+                      and abs(nz_cmd - self.nz_cmd_f) < 1.0     # and a steady one (not rolling out; at 80 deg
                                                                 # of bank half a degree of flight path is 0.35 g)
+                      and abs(nz_cmd - self.nz_pred) < 0.5)     # the lag has caught up with the demand
             self.last.update(nz_cmd=nz_cmd, nz_f=self.nz_f, learning=bool(steady and not (sat > 0 and err > 0)
                                                                          and not (sat < 0 and err < 0)))
+            i, w = self._band(tas)
             if steady and not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
                 lo, hi = self.NZ_GAIN_LIM
-                self.nz_gain = max(lo, min(hi, self.nz_gain + self.KI_NZ * err / (self.nz_cmd_f - 1.0) * dt))
+                step = self.KI_NZ * err / (self.nz_pred - 1.0) * dt
+                for j, wj in ((i, 1.0 - w), (i + 1, w)):
+                    self.nz_gains[j] = max(lo, min(hi, self.nz_gains[j] + step * wj))
+            self.nz_gain = self.nz_gains[i] * (1.0 - w) + self.nz_gains[i + 1] * w
         if g.get("pitch_curve"):
             d = nz_cmd - 1.0                     # pull and push have their own curves
             if d > 0:
