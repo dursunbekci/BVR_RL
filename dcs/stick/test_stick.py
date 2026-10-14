@@ -548,6 +548,30 @@ def test_roll_lead():
           f"{peaks[0.25]:.0f} with, for a 60 deg limit)")
 
 
+def test_g_loop():
+    """At 80 deg of bank on the simulator's altitude law the pilot must fly the g that holds altitude (5.8), even
+    when the stick gives more g than the measured curve says (DCS: 7 g at 304 m/s, the turn climbed 150 m)."""
+    import stick_test
+    from fake_export import FakeLink
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    link = FakeLink(nz_per_cmd=8.5)           # 40% more g per stick than the curve
+    run = stick_test.Run(link, None, "g", stick_test.Limits(min_agl=0, min_alt=0))
+    f0 = run.next()
+    hold = stick_test.Hold(gains, bank_max=math.radians(80), nz_max=8.0)
+    hdg, alt = f0.hdg + math.radians(150), f0.alt
+    frames = stick_test.drive(run, 14.0, lambda f, tau: hold.axes(f, hdg, alt, v=None, dive=math.radians(25),
+                                                                     climb=math.radians(15)))
+    turning = [f for f in frames if abs(f.bank) > math.radians(75)]
+    peak = max(f.nz for f in turning)
+    climb = max(abs(f.alt - f0.alt) for f in frames)
+    late = [f.nz for f in turning[len(turning) // 2:]]
+    mean_late = sum(late) / len(late)
+    assert len(turning) > 100 and abs(mean_late - 5.76) < 0.5 and climb < 30.0, (peak, mean_late, climb, len(turning))
+    print(f"  g loop ...................... OK  (80 deg of bank, the stick 40% stronger than its curve: {mean_late:.2f} g "
+          f"held (5.76 holds altitude), altitude within {climb:.0f} m)")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -937,7 +961,8 @@ if __name__ == "__main__":
     test_fake_nonlinear()
     test_roll_lead()
     test_cockpit()
+    test_g_loop()
     test_manoeuvre()
     test_stall_message()
     test_install()
-    print("13/13 passed")
+    print("14/14 passed")

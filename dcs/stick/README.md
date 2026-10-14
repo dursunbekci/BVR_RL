@@ -441,3 +441,15 @@ already alike. What is left to differ is the aircraft:
    recalculating. Checked on a record the simulator made with thrust x0.85, CD0 x1.3, CL_MAX x0.9: the fit took the
    mismatch from 2.19 to 0.17 and found CL_MAX x0.90 exactly, thrust x0.885 and CD0 x1.20 (thrust and drag trade against
    each other in one record; the flight is what has to match).
+
+**First DCS comparison (14 October, `manoeuvre_20261014_084543`, 6.3 km, 304 m/s, fuel 0.86)**: climbs and descents matched
+(vertical speed 81 against 79 and -114 against -103 m/s, the same times to 90%), and so did the bank (80 deg both). The turns
+did not, and the cause was the DCS pilot, not the airframe: it pulled 7.0 g at 80 deg of bank where holding altitude takes
+1/cos 80 = 5.76 g (the simulator's autopilot flies exactly that), so DCS's turns climbed 80-340 m, turned faster (12-13
+against 8.5-10 deg/s) and bled more speed (49 against 15 m/s in 90 deg, 121 against 41 in 180). The pitch stick came from
+the curve measured at 243 m/s, open loop; at 304 m/s the same stick gives more g. The fit then blamed drag (K_IND x1.82, CD0
+x2.0 at its bound), which the turn rates did not support: that F-16C-DCSFIT is not to be used. Real differences: DCS
+accelerated faster (2.84 against 2.19 m/s2) and also slowed faster (-2.97 against -2.20), more thrust and more drag (four
+AIM-120s on pylons). Fix: `Hold` closes the loop on the measured g (an integrator, 1.5 g per g-second, up to 3 g, not while
+the stick is at its stop); on the fake with a stick 40% stronger than its curve it holds 5.6 g at 80 deg and the altitude
+within 6 m (63 m without the loop). The fit's bounds were widened (CD0 up to x3.5, K_IND to x2.5).

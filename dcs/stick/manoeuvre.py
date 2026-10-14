@@ -274,8 +274,8 @@ def advice(rows):
 
 FIT_PARAMS = [                      # (name, how it is applied, bounds as a factor of the start value)
     ("thrust", "factor on T_MIL_SL and T_AB_SL", (0.6, 1.6)),
-    ("CD0", "zero-lift drag", (0.5, 2.0)),
-    ("K_IND", "induced drag", (0.5, 2.0)),
+    ("CD0", "zero-lift drag", (0.5, 3.5)),
+    ("K_IND", "induced drag", (0.5, 2.5)),
     ("CL_MAX", "maximum lift (the g the wing gives)", (0.6, 1.5)),
     ("DRAG_RISE_PEAK", "transonic drag", (0.3, 3.0)),
 ]

@@ -329,6 +329,8 @@ class Hold:
 
     T_LEAD = 0.25          # s: the bank error is taken against the bank the roll rate will reach in this time
                            # (DCS rolls 140 deg/s at a 0.6 command and needs about 0.4 s to stop)
+    KI_NZ = 1.5            # g of stick demand per g of error and second: the measured g closes the loop
+    NZ_INT_MAX = 3.0       # g the correction may add or take away
     KP_V = 0.04            # throttle position per m/s of speed error
     KI_V = 0.002           # and per m/s of error and second
 
@@ -337,6 +339,7 @@ class Hold:
         self.prev = None
         self.integral, self.t_speed = 0.0, None
         self.prev_bank, self.roll_rate = None, 0.0
+        self.nz_int, self.t_nz = 0.0, None     # the g correction: the stick curve was measured at one speed
 
     # the simulator's altitude law (f16_sim.F16Cfg), used when the command carries its flight-path limits
     K_ALT_GAM = 0.0003     # rad of flight-path angle per m of altitude error
@@ -371,12 +374,25 @@ class Hold:
             gam_cmd = math.asin(max(-0.9, min(0.9, vs_cmd / tas)))
             nz_cmd = (math.cos(gam) + tas / (G * self.TAU_GAMMA) * (gam_cmd - gam)) / max(math.cos(f.bank), 0.3)
         nz_cmd = max(-1.0, min(self.nz_max, nz_cmd))
+        # The curve gives the stick for a g, measured at one speed; at another the same stick gives another g (in
+        # DCS, 7 g instead of 5.8 at 304 m/s and 80 deg of bank: the turn climbed and bled speed). The measured g
+        # closes the loop: its error is integrated into the demand (not while the stick is at its stop).
+        d_corr = 0.0
+        if f.nz is not None:
+            dt = 0.0 if self.t_nz is None else max(0.0, min(0.2, f.t - self.t_nz))
+            self.t_nz = f.t
+            err = nz_cmd - f.nz
+            sat = getattr(self, "_pitch_sat", 0)
+            if not (sat > 0 and err > 0) and not (sat < 0 and err < 0):
+                self.nz_int = max(-self.NZ_INT_MAX, min(self.NZ_INT_MAX, self.nz_int + self.KI_NZ * err * dt))
+            d_corr = self.nz_int
         if g.get("pitch_curve"):
-            d = nz_cmd - 1.0                     # pull and push have their own curves
+            d = nz_cmd - 1.0 + d_corr            # pull and push have their own curves
             cmd = inverse(g["pitch_curve"], d) if d >= 0 else -inverse(g.get("pitch_push_curve") or g["pitch_curve"], -d)
             pitch = g["pitch_sign"] * cmd
         else:
-            pitch = g["pitch_sign"] * (nz_cmd - 1.0) / g["nz_per_cmd"]
+            pitch = g["pitch_sign"] * (nz_cmd - 1.0 + d_corr) / g["nz_per_cmd"]
+        self._pitch_sat = 1 if g["pitch_sign"] * pitch >= 1.0 else -1 if g["pitch_sign"] * pitch <= -1.0 else 0
         if v is not None:
             # speed -> throttle position u (+1 = most thrust) by PI; the axis code is sign * u
             # (DCS's throttle code is inverted: -1 is afterburner, +1 idle)
