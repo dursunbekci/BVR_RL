@@ -283,6 +283,8 @@ class BvrEnv(gym.Env):
         # Launch delay (platform LAUNCH_DELAY_MIN/MAX): its own random stream, so
         # a platform without one draws nothing and flies exactly as before.
         self._launch_delay = (self._plat.launch_delay_min, self._plat.launch_delay_max)
+        # extra delay when the track is too young to have been bugged already (lo, hi, ready s)
+        self._launch_bug = (self._plat.launch_bug_min, self._plat.launch_bug_max, self._plat.launch_bug_ready)
         self._launch_rng = np.random.default_rng(seed + instance_id*1000 + 7777)
         self._fire_due = None        # sim time a requested launch goes, or None
         self._fire_requests = 0; self._fire_dropped = 0
@@ -487,13 +489,22 @@ class BvrEnv(gym.Env):
     # ── launch delay ──────────────────────────────────────────────────
     def _request_fire(self, t:float) -> bool:
         """A fire decision at sim time t. True: launch now (no delay on this
-        platform). False: the launch is queued for LAUNCH_DELAY_MIN..MAX s on,
-        when _due_fire() lets it go, and the fire mask is shut meanwhile."""
+        platform). False: the launch is queued for LAUNCH_DELAY_MIN..MAX s on
+        (the release), plus LAUNCH_BUG_MIN..MAX s when the track is younger than
+        LAUNCH_BUG_READY_S (the bug first); _due_fire() lets it go, and the
+        fire mask is shut meanwhile."""
         self._fire_requests += 1
         lo, hi = self._launch_delay
-        if hi <= 0.0:
+        blo, bhi, ready = getattr(self, "_launch_bug", (0.0, 0.0, 0.0))
+        if hi <= 0.0 and bhi <= 0.0:
             return True
-        self._fire_due = t + float(self._launch_rng.uniform(lo, max(lo, hi)))
+        d = float(self._launch_rng.uniform(lo, max(lo, hi))) if hi > 0.0 else 0.0
+        # How long the track has been held without a gap: the pilot bugs a held track during its
+        # radar job, so a young one still has to be bugged before the release.
+        held = self._track.n_hits / self.TRACK_CONVERT_HZ
+        if bhi > 0.0 and held < ready:
+            d += float(self._launch_rng.uniform(blo, max(blo, bhi)))
+        self._fire_due = t + d
         return False
 
     def _due_fire(self, t:float) -> bool:

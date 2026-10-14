@@ -203,6 +203,16 @@ SCHEMA = {
                "tracked and within the fire cone then. 0 and 0: at once (items saved before this "
                "parameter existed). 1v1 only."),
         P("LAUNCH_DELAY_MAX", "Launch delay, longest", "s", "Agent commands", 0, 30, default=0.0),
+        P("LAUNCH_BUG_MIN", "Launch delay, bugging first: shortest extra", "s", "Agent commands", 0, 30,
+          default=0.0,
+          help="Extra seconds, drawn uniformly between these, when the target has not been tracked for "
+               "LAUNCH_BUG_READY_S: the pilot has not had the time to bug it before the decision (in DCS "
+               "the stick pilot bugs a track during its radar job, every 15 s), so the shot waits for "
+               "the bug as well as the release. 0 and 0: no extra (items saved before this parameter)."),
+        P("LAUNCH_BUG_MAX", "Launch delay, bugging first: longest extra", "s", "Agent commands", 0, 30,
+          default=0.0),
+        P("LAUNCH_BUG_READY_S", "Track held before the target counts as bugged", "s", "Agent commands", 0, 120,
+          default=0.0),
     ],
 }
 
@@ -575,6 +585,9 @@ class Platform:
     items: dict = field(default_factory=dict)   # every item used, for run snapshots
     launch_delay_min: float = 0.0  # s, fire decision to launch (LAUNCH_DELAY_MIN/MAX)
     launch_delay_max: float = 0.0
+    launch_bug_min: float = 0.0    # s, added when the track is younger than launch_bug_ready
+    launch_bug_max: float = 0.0
+    launch_bug_ready: float = 0.0
 
     def climb_fpa(self, alt: float) -> float:
         """Climb-angle limit (rad) at this altitude."""
@@ -608,7 +621,10 @@ def load_platform(item_id: str) -> Platform:
         climb_alt_lo=float(pr["CLIMB_FPA_ALT_LO"]), climb_alt_hi=float(pr["CLIMB_FPA_ALT_HI"]),
         items={"platform": it, **parts},
         launch_delay_min=float(pr.get("LAUNCH_DELAY_MIN", 0.0)),
-        launch_delay_max=float(pr.get("LAUNCH_DELAY_MAX", 0.0)))
+        launch_delay_max=float(pr.get("LAUNCH_DELAY_MAX", 0.0)),
+        launch_bug_min=float(pr.get("LAUNCH_BUG_MIN", 0.0)),
+        launch_bug_max=float(pr.get("LAUNCH_BUG_MAX", 0.0)),
+        launch_bug_ready=float(pr.get("LAUNCH_BUG_READY_S", 0.0)))
     _PLATFORM_CACHE[key] = p
     return p
 

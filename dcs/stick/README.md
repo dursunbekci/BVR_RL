@@ -575,3 +575,15 @@ also time master arm, the held release and the launch seen (each fire job now re
 `results.csv` from `dcs_live.py --stick` (its `launch_delays_s`, request to launch end to end, including a wait for a radar
 job: the best evidence, and the one used once there are five) and writes the 10th and 90th percentiles, to 0.5 s, as the
 platform's LAUNCH_DELAY_MIN / MAX (`--dry-run` only shows them). On the fake: bugs 3.2-3.7 s, a launch 3.0 s after its bug.
+
+**The launch delay, split (14 October).** The measured 7-14 s (`fire_delay_20261014_141533`, every trial with the bug
+dropped first) cost the warm start dcs_v8 most of its fights: 60 fights against ADAPTIVE on F-16C-DCSFIT, 33% won with no
+delay, 38% with 2.5-4 s, 13% with 7-14 s (shots launched 1.77 -> 1.32 a fight, 0.20 dropped); a training run with it sat at
+0-10% for 500k steps. Most of it is the bug, and a pilot bugs the target before deciding to shoot. So: the stick pilot's
+radar job (every 15 s while idle in `dcs_live.py --stick`) now bugs a held track ahead of a shot (up to 6 s of presses, the
+target within 50 deg) and sets master arm; a fire request then waits only for the release (the fake: 3.8 s from request to
+launch). The simulator follows it: LAUNCH_DELAY_MIN/MAX is the release, and LAUNCH_BUG_MIN/MAX is added when the track has
+been held less than LAUNCH_BUG_READY_S (25 s; the track adapter's consecutive updates). F-16C-DCSFIT: release 2.5-4 s, bug
+4.5-10.5 s more, 25 s (the 7-14 s less an estimated 2.5 s release; `fire_delay.py set F-16C-DCSFIT <file>` now writes the two
+parts from the record). Same 60 fights: 35% won, 1.58 launched, 0.12 dropped. Scripted opponents (ADAPTIVE and the rest)
+launch at once, as the DCS AI does; self-play snapshots fly the same platform and wait as the agent does.

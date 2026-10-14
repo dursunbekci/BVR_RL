@@ -15,9 +15,11 @@ LAUNCH_DELAY_MIN / LAUNCH_DELAY_MAX (bvr_env: the launch goes a uniform draw bet
    times a new one exactly as a fire job does it (no missile spent). --fire N ends with N real launches,
    which also time master arm, the held release and the launch seen. Saved: dcs_runs/fire_delay_<time>.json.
 
-2. set (no DCS): the delays from those files, and from the request-to-launch times dcs_live.py --stick writes
-   to results.csv (launch_delays_s, end to end, the best evidence), are summarised, and the platform's
-   LAUNCH_DELAY_MIN / MAX set to their 10th and 90th percentiles:
+2. set (no DCS): the two parts of the delay from those files, set on the platform at their 10th and 90th
+   percentiles: the release (master arm, the held release, the launch seen) as LAUNCH_DELAY_MIN / MAX, the
+   delay with the track already bugged, since the pilot's radar job bugs a held track ahead of a shot; and the
+   bug as LAUNCH_BUG_MIN / MAX, added for a track held less than LAUNCH_BUG_READY_S (25 s). Request-to-launch
+   times from results.csv (dcs_live.py --stick, end to end) are shown beside them for comparison:
 
        python dcs/stick/fire_delay.py set F-16C-DCSFIT dcs_runs/fire_delay_<time>.json [dcs_runs/results.csv ...]
 """
@@ -137,9 +139,13 @@ def measure(link, gains=None, trials=10, fire=0, offsets=OFFSETS, settle_s=15.0,
     return rec
 
 
+BUG_READY_S = 25.0      # s of held track after which the pilot has bugged it (radar job every 15 s, bug presses up to 6 s)
+
+
 def delays_from(paths):
-    """Launch delays (s) from fire_delay records and results.csv files: {"live": [...], "measured": [...],
-    "release_s": float, "release_measured": bool, "bug_fail": (failed, tried), "notes": [...]}."""
+    """The two parts of a launch delay, from fire_delay records: the release (master arm, the held release, the
+    launch seen: a launch's total less its bug) and the bug (target management right until the track is bugged).
+    Request-to-launch times from results.csv (dcs_live.py --stick) are kept for comparison."""
     import statistics
     live, recs = [], []
     for p in paths:
@@ -153,15 +159,15 @@ def delays_from(paths):
             with open(p) as fh:
                 recs.append(json.load(fh))
     fires = [ft for r in recs for ft in r.get("fire_times", []) if ft.get("ok") and ft.get("bug_s") is not None]
-    rel = [ft["total_s"] - ft["bug_s"] for ft in fires]
-    release = statistics.median(rel) if rel else RELEASE_EST_S
+    release = [ft["total_s"] - ft["bug_s"] for ft in fires]
     bugs = [b for r in recs for b in r.get("bug_times", [])]
-    measured = [b["s"] + release for b in bugs if b.get("ok")] + [ft["total_s"] for ft in fires]
+    bug = [b["s"] for b in bugs if b.get("ok")] + [ft["bug_s"] for ft in fires if ft["bug_s"] > 0.5]
     failed = sum(1 for b in bugs if not b.get("ok")) + sum(1 for r in recs for ft in r.get("fire_times", [])
                                                          if not ft.get("ok"))
     tried = len(bugs) + sum(len(r.get("fire_times", [])) for r in recs)
-    return {"live": live, "measured": measured, "release_s": release, "release_measured": bool(rel),
-            "bug_fail": (failed, tried)}
+    return {"live": live, "release": release, "bug": bug, "bug_fail": (failed, tried),
+            # before the split (14 October): bug + release together
+            "measured": [b + (statistics.median(release) if release else RELEASE_EST_S) for b in bug]}
 
 
 def _pct(xs, q):
@@ -173,41 +179,57 @@ def _pct(xs, q):
     return xs[i] + (xs[min(i + 1, len(xs) - 1)] - xs[i]) * (k - i)
 
 
+def _range(xs, fallback):
+    """10th-90th percentile to 0.5 s; with fewer than 3 samples the median -0.5 / +1.0 s, or the fallback."""
+    if len(xs) >= 3:
+        lo, hi = math.floor(_pct(xs, 10) * 2) / 2, math.ceil(_pct(xs, 90) * 2) / 2
+    elif xs:
+        m = _pct(xs, 50)
+        lo, hi = math.floor((m - 0.5) * 2) / 2, math.ceil((m + 1.0) * 2) / 2
+    else:
+        lo, hi = fallback
+    return max(0.0, lo), max(lo, hi)
+
+
 def summarise(d, log=print):
-    """Which delays decide, and the (min, max) they give: the 10th and 90th percentiles, to 0.5 s. The live
-    request-to-launch times decide once there are 5 (they include waiting for a radar job, as a fight does)."""
-    use = d["live"] if len(d["live"]) >= 5 else d["live"] + d["measured"]
-    src = "dcs_live.py --stick runs" if len(d["live"]) >= 5 else "timed bugs and launches (and any live runs)"
-    for name, xs in (("live request to launch", d["live"]), ("measured (bug + release)", d["measured"])):
+    """The platform values: (release (min, max), bug (min, max) or None). The release is the launch delay when the
+    track was already bugged (the pilot bugs it during its radar job); the bug is added when it was not."""
+    for name, xs in (("release (arm, held release, launch seen)", d["release"]),
+                     ("bug (target management right until bugged)", d["bug"]),
+                     ("live request to launch (dcs_live.py --stick)", d["live"])):
         if xs:
             log(f"  {name}: {len(xs)} samples, median {_pct(xs, 50):.1f} s, 10th-90th {_pct(xs, 10):.1f}-"
                 f"{_pct(xs, 90):.1f} s, {min(xs):.1f}-{max(xs):.1f} s in all")
-    log(f"  release (master arm, the held release, the launch seen): {d['release_s']:.1f} s "
-        f"({'measured' if d['release_measured'] else 'estimate: no launch timed yet'})")
     f, n = d["bug_fail"]
     if n:
         log(f"  bugs that failed in 10 s: {f} of {n}")
-    if len(use) < 3:
-        return None, src
-    lo = math.floor(_pct(use, 10) * 2) / 2
-    hi = math.ceil(_pct(use, 90) * 2) / 2
-    return (lo, max(hi, lo)), src
+    if not d["release"]:
+        log(f"  no launch timed: the release is the estimate {RELEASE_EST_S - 0.5:.1f}-{RELEASE_EST_S + 1.0:.1f} s "
+            f"(measure --fire 1 times it)")
+    rel = _range(d["release"], (RELEASE_EST_S - 0.5, RELEASE_EST_S + 1.0))
+    bug = _range(d["bug"], (0.0, 0.0)) if d["bug"] else None
+    return rel, bug
 
 
-def set_platform(pid, lo, hi, note):
-    """Write LAUNCH_DELAY_MIN / MAX into a user library platform."""
+def set_platform(pid, rel, bug, note, ready=BUG_READY_S):
+    """Write LAUNCH_DELAY_MIN/MAX (the release) and LAUNCH_BUG_MIN/MAX/READY_S into a user library platform."""
     from bvr_library import get_item, save_item, load_platform
     it = get_item("platform", pid)
     if it.get("builtin"):
         raise SystemExit(f"{pid} is a built-in platform: copy it to the user library first")
     it.pop("builtin", None)
-    it["params"] = dict(it["params"], LAUNCH_DELAY_MIN=float(lo), LAUNCH_DELAY_MAX=float(hi))
+    pr = dict(it["params"], LAUNCH_DELAY_MIN=float(rel[0]), LAUNCH_DELAY_MAX=float(rel[1]))
     src = dict(it.get("sources") or {})
-    src["LAUNCH_DELAY_MIN"] = src["LAUNCH_DELAY_MAX"] = note
-    it["sources"] = src
+    src["LAUNCH_DELAY_MIN"] = src["LAUNCH_DELAY_MAX"] = f"the release, with the track already bugged: {note}"
+    if bug is not None:
+        pr.update(LAUNCH_BUG_MIN=float(bug[0]), LAUNCH_BUG_MAX=float(bug[1]), LAUNCH_BUG_READY_S=float(ready))
+        src["LAUNCH_BUG_MIN"] = src["LAUNCH_BUG_MAX"] = f"the bug, added for a track held less than {ready:.0f} s: {note}"
+        src["LAUNCH_BUG_READY_S"] = ("the stick pilot's radar job (every 15 s while idle) bugs a held track with up to "
+                                     "6 s of presses: by 25 s a held track is bugged")
+    it["params"], it["sources"] = pr, src
     save_item(it)
     p = load_platform(pid)
-    return p.launch_delay_min, p.launch_delay_max
+    return (p.launch_delay_min, p.launch_delay_max), (p.launch_bug_min, p.launch_bug_max, p.launch_bug_ready)
 
 
 def main(argv=None):
@@ -233,24 +255,23 @@ def main(argv=None):
             link.release()
             link.close()
         print()
-        rng, _ = summarise(delays_from([rec["path"]]))
+        rel, bug = summarise(delays_from([rec["path"]]))
         print(f"\n  saved: {rec['path']}")
-        if rng:
-            print(f"  set it: python dcs/stick/fire_delay.py set {a.platform} {rec['path']}"
-                  f"   (LAUNCH_DELAY {rng[0]:.1f}-{rng[1]:.1f} s)")
+        print(f"  set it: python dcs/stick/fire_delay.py set {a.platform} {rec['path']}   (release {rel[0]:.1f}-"
+              f"{rel[1]:.1f} s" + (f", bug {bug[0]:.1f}-{bug[1]:.1f} s more" if bug else "") + ")")
         return rec
     d = delays_from(a.files)
-    rng, src = summarise(d)
-    if rng is None:
-        raise SystemExit("fewer than 3 delays in those files: nothing set")
-    note = (f"measured {datetime.date.today().isoformat()} from {src} "
-            f"({', '.join(os.path.basename(f) for f in a.files)}): the 10th and 90th percentiles, to 0.5 s")
+    rel, bug = summarise(d)
+    note = (f"measured {datetime.date.today().isoformat()} ({', '.join(os.path.basename(f) for f in a.files)}): "
+            f"the 10th and 90th percentiles, to 0.5 s")
+    txt = (f"LAUNCH_DELAY {rel[0]:.1f}-{rel[1]:.1f} s (the release)"
+           + (f", LAUNCH_BUG {bug[0]:.1f}-{bug[1]:.1f} s more for a track held under {BUG_READY_S:.0f} s" if bug else ""))
     if a.dry_run:
-        print(f"\n  {a.platform}: LAUNCH_DELAY_MIN {rng[0]:.1f}, LAUNCH_DELAY_MAX {rng[1]:.1f} s (dry run: not written)")
-        return rng
-    got = set_platform(a.platform, rng[0], rng[1], note)
-    print(f"\n  {a.platform}: LAUNCH_DELAY_MIN {got[0]:.1f}, LAUNCH_DELAY_MAX {got[1]:.1f} s written "
-          f"(library/user/platform/{a.platform}.json; commit it so training elsewhere gets it)")
+        print(f"\n  {a.platform}: {txt} (dry run: not written)")
+        return rel, bug
+    got = set_platform(a.platform, rel, bug, note)
+    print(f"\n  {a.platform}: {txt} written (library/user/platform/{a.platform}.json; commit it so training "
+          f"elsewhere gets it)")
     return got
 
 

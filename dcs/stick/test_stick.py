@@ -743,18 +743,33 @@ def test_fire_delay():
         assert len(fires) == 1 and fires[0]["ok"], (fires, buf.getvalue()[-800:])
         assert sorted(round(abs(b["az"]) / 10) for b in bugs) == [0, 2, 2], bugs     # 0, +20, -20 deg
         dd = FD.delays_from([rec["path"]])
-        assert dd["release_measured"] and len(dd["measured"]) == 4
-        # live request-to-launch times decide once there are five
+        # the launch found the track bugged (the bug from the last timed one): its whole time is the release
+        assert len(dd["release"]) == 1 and len(dd["bug"]) == 3, dd
         csvp = os.path.join(d, "results.csv")
         with open(csvp, "w") as fh:
             fh.write("episode,mode,launch_delays_s\n1,stick,4.0;5.5\n2,stick,6.0;4.5;7.5\n3,live,99\n")
         dd = FD.delays_from([rec["path"], csvp])
         assert dd["live"] == [4.0, 5.5, 6.0, 4.5, 7.5], dd["live"]
         with contextlib.redirect_stdout(io.StringIO()):
-            rng, src = FD.summarise(dd, log=print)
-    assert src.startswith("dcs_live") and rng == (4.0, 7.0), (rng, src)
-    print(f"  fire delay .................. OK  (fake: bugs {', '.join(f'{b[chr(115)]:.1f}' for b in bugs)} s, "
-          f"a launch {fires[0]['total_s']:.1f} s; live times 4.0-7.5 s give 4.0-7.0)")
+            rel, bug = FD.summarise(dd, log=print)
+        r0 = dd["release"][0]
+        assert rel[0] <= r0 <= rel[1] and rel[1] - rel[0] <= 2.0, (rel, r0)
+        assert bug[0] <= min(dd["bug"]) + 0.5 and bug[1] >= max(dd["bug"]) - 0.5, (bug, dd["bug"])
+        # set: written to a user platform (a copy of the user library here) and read back by the simulator
+        import shutil
+        import bvr_library
+        lib = os.path.join(d, "user")
+        shutil.copytree(str(bvr_library.USER_DIR), lib)
+        keep = bvr_library.USER_DIR
+        bvr_library.USER_DIR = type(keep)(lib)
+        try:
+            got = FD.set_platform("F-16C-DCSFIT", rel, bug, "test")
+        finally:
+            bvr_library.USER_DIR = keep
+        assert got == (rel, (bug[0], bug[1], FD.BUG_READY_S)), got
+    print(f"  fire delay .................. OK  (fake: bugs {', '.join(f'{b[chr(115)]:.1f}' for b in bugs)} s, a launch "
+          f"{fires[0]['total_s']:.1f} s with the track bugged; set: release {rel[0]:.1f}-{rel[1]:.1f} s, bug "
+          f"{bug[0]:.1f}-{bug[1]:.1f} s more)")
 
 
 def test_course():

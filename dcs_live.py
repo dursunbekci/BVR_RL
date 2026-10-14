@@ -353,6 +353,7 @@ class DcsLiveEnv(BvrEnv):
         # The platform's launch delay stands in for DCS's cockpit work; here DCS
         # does that work itself, so the request goes out at once.
         self._launch_delay = (0.0, 0.0)
+        self._launch_bug = (0.0, 0.0, 0.0)
 
     def _random_ic(self, blue_top_speed=None) -> dict:
         return self._world.initial_ic()

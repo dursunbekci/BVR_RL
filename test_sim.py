@@ -1483,29 +1483,36 @@ def test_launch_delay():
     assert env.action_masks()[-1]
     env.step(np.array([k0, 2, 3, 1]))
     assert env._shots_fired == 1 and env._fire_due is None, env._shots_fired
-    # with one: 3-7 s later, the mask shut until then
-    waits = []
-    for seed in range(6):
-        env, _ = rig("F-16C-DCSFIT")
-        env._launch_rng = np.random.default_rng(seed)
-        env.step(np.array([k0, 2, 3, 1]))
-        n = 1
-        while env._shots_fired == 0:
-            assert env._fire_due is not None and not env.action_masks()[-1]
-            env.step(np.array([k0, 2, 3, 1])); n += 1
-            assert n < 12, n
-        waits.append(n)
-        assert env._fire_requests == 1 and env._fire_dropped == 0
-    assert all(3 <= w <= 8 for w in waits) and len(set(waits)) > 1, waits
+    # with one: the release only (2.5-4 s) for a track held 25 s and more (the pilot has bugged it), the bug as well
+    # (4.5-10.5 s more) for a younger one; the mask shut until then
+    waits = {}
+    for held in (60.0, 2.0):
+        waits[held] = []
+        for seed in range(6):
+            env, _ = rig("F-16C-DCSFIT")
+            env._launch_rng = np.random.default_rng(seed)
+            env._track.n_hits = int(held * env.TRACK_CONVERT_HZ)
+            env.step(np.array([k0, 2, 3, 1]))
+            n = 1
+            while env._shots_fired == 0:
+                assert env._fire_due is not None and not env.action_masks()[-1]
+                env.step(np.array([k0, 2, 3, 1])); n += 1
+                assert n < 18, n
+            waits[held].append(n)
+            assert env._fire_requests == 1 and env._fire_dropped == 0
+    assert all(3 <= w <= 5 for w in waits[60.0]), waits
+    assert all(7 <= w <= 16 for w in waits[2.0]) and len(set(waits[2.0])) > 1, waits
     # the target leaves the fire cone during the wait: the launch is dropped
     env, off = rig("F-16C-DCSFIT")
+    env._track.n_hits = 600                      # a held track: the release only, so it is due within the 9 steps
     env.step(np.array([k0, 2, 3, 1]))
     off["az"] = 80.0
     for _ in range(9):
         env.step(np.array([k0, 2, 3, 0]))
     assert env._shots_fired == 0 and env._fire_dropped == 1 and env._fire_due is None
-    print(f"  launch delay ................ OK  (F-16C-DCSFIT: launched {min(waits)}-{max(waits)} decisions after "
-          f"the request; dropped when the target left the cone; F-16C-DCS at once)")
+    print(f"  launch delay ................ OK  (F-16C-DCSFIT: launched {min(waits[60.0])}-{max(waits[60.0])} decisions "
+          f"after the request on a held track, {min(waits[2.0])}-{max(waits[2.0])} on a young one; dropped when the "
+          f"target left the cone; F-16C-DCS at once)")
 
 
 def test_heading_switches():
