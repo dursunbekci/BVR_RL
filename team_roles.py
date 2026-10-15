@@ -43,7 +43,7 @@ OUTCOMES = ["KILL", "MUTUAL_KILL", "SHOT_DOWN", "CRASH", "BANDIT_CRASH", "ESCAPE
 
 
 class NearTargetTeamEnv(TeamBvrEnv):
-    """Red always opens on the nearer blue aircraft (the pre-SIM_REV 16 rule)."""
+    """Red always opens on the nearer blue aircraft (the pre-SIM_REV 18 rule)."""
     OPEN_RULES = (("nearer", 1.0),)
 
 

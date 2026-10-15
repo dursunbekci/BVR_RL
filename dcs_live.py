@@ -526,7 +526,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     try:
         while True:
             mask = env.action_masks()
-            action, _ = model.predict(sobs, deterministic=True, action_masks=mask)
+            action, _ = model.predict(sobs, deterministic=not getattr(args, "stochastic", False), action_masks=mask)
             obs, _, term, trunc, info = env.step(action)
             sobs = stacker.update(obs)
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
@@ -552,6 +552,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         raw_fh.close(); steps_fh.close()
     outcome = info.get("terminal_outcome", "?")
     row = {"episode": name, "mode": "shadow" if args.shadow else ("stick" if pilot is not None else "live"),
+           "stochastic": bool(getattr(args, "stochastic", False)),
            "agent": agent,
            "red": red, "outcome": outcome, "flight_time_s": round(env._t_sim, 1),
            "start_range_km": round(ic["start_range"] / 1000, 1),
@@ -623,6 +624,10 @@ def main(argv=None):
                          "make the mission with dcs/make_mission.py --blue-player and sit in BLUE-1")
     ap.add_argument("--stick-gains", help="stick gains file (default dcs_runs/stick_gains.json, from stick_test.py)")
     ap.add_argument("--doctrine", default="BALANCED")
+    ap.add_argument("--stochastic", action="store_true",
+                    help="sample the policy's actions (as training does) instead of always the most likely: repeated "
+                         "runs from one mission then differ. For different fights use missions with different starts "
+                         "(dcs/make_mission.py --blue-player --seed N)")
     ap.add_argument("--max-steps", type=int, help=f"episode length, s (default {BvrEnv.MAX_STEPS})")
     ap.add_argument("--port-in", type=int, default=PORT_FROM_DCS)
     ap.add_argument("--port-out", type=int, default=PORT_TO_DCS)

@@ -1075,6 +1075,34 @@ def test_team_ucav_options():
           f"before detection{'' if not tracked else f', {np.median(tracked):.0f} m on a track'})")
 
 
+def test_team_end_potential():
+    """SIM_REV 18: in 2v1, as in 1v1, an aircraft's end-state potential is 0,
+    so its discounted shaping sums to -phi(start); and each aircraft's (and
+    red's) observation reads the run's episode length."""
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = TeamBvrEnv(opponent_type=T.STRAIGHT, seed=2, doctrine="AGGRESSIVE")
+    e.MAX_STEPS = 25
+    for ep in range(2):
+        e.reset()
+        assert all(o.MAX_STEPS == 25 for o in e._obs + e._red_obs)
+        phi0, g = list(e._prev_phi), [1.0, 1.0]
+        tot = [0.0, 0.0]
+        done = False
+        while not done:
+            _, _, t, tr, infos = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+            done = t or tr
+            for k in range(2):
+                tot[k] += g[k] * infos[k]["shaping"]
+                g[k] *= e._gamma
+        assert infos[0]["terminal_outcome"] == "TIMEOUT", infos[0]["terminal_outcome"]
+        for k in range(2):
+            assert infos[k]["phi"] == 0.0
+            assert abs(tot[k] + phi0[k]) < 1e-6, (k, tot[k], phi0[k])
+    print(f"  2v1 end potential ........... OK  (discounted shaping = -phi(start) to 1e-6; "
+          f"observations read MAX_STEPS 25)")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -1810,6 +1838,106 @@ def test_launch_delay():
           f"target left the cone; F-16C-DCS at once)")
 
 
+def test_adaptive_dcs_frac():
+    """ADAPTIVE's share of DCS-like episodes (train_bvr.py --adaptive-dcs-frac): unset, the same draws as before
+    (1/3); 0.67, about two thirds, also as self-play's scripted opponent."""
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    def shares(frac, opp=T.ADAPTIVE_SHOOTER, n=300):
+        env = BvrEnv(opponent_type=opp, seed=7, privileged_critic=False, adaptive_dcs_frac=frac)
+        if opp == T.SELF_PLAY:
+            env._sp_scripted_frac = 1.0           # every self-play episode against the scripted ADAPTIVE
+        out = []
+        for i in range(n):
+            env._ready = False                    # a new episode each time (reset() right after reset() is a no-op)
+            env.reset()
+            out.append(bool(env._opponent.LONG_SHOT))
+        return out
+    a, b = shares(None), shares(1.0 / 3.0)
+    assert a == b, "unset must draw exactly as before"
+    hi = shares(0.67)
+    sp = shares(0.67, T.SELF_PLAY, n=150)
+    assert 0.25 < np.mean(a) < 0.42 and 0.58 < np.mean(hi) < 0.76 and 0.55 < np.mean(sp) < 0.8, \
+        (np.mean(a), np.mean(hi), np.mean(sp))
+    print(f"  ADAPTIVE DCS-like share ...... OK  (default {np.mean(a):.0%}, 0.67 gives {np.mean(hi):.0%}; "
+          f"in self-play {np.mean(sp):.0%})")
+
+
+def test_episode_end():
+    """SIM_REV 16: running out of time ends the episode (terminated, not truncated: no bootstrap through it), and
+    the end state's potential is 0, so the discounted shaping sums to -phi(start)."""
+    import numpy as np
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, seed=0, privileged_critic=False)
+    env.MAX_STEPS = 60
+    env.reset()
+    phi0, g, tot, k, big = env._prev_phi, env._gamma, 0.0, 0, 0.0
+    while True:
+        obs, r, term, trunc, info = env.step(np.array([HDG_OFFSETS_DEG.index(0.0), 2, 2, 0]))
+        tot += g ** k * info["shaping"]; k += 1
+        big = max(big, abs(info["shaping"]))
+        if term or trunc:
+            break
+    assert term and not trunc and info["terminal_outcome"] == "TIMEOUT", (term, trunc, info.get("terminal_outcome"))
+    assert abs(tot + phi0) < 1e-6 and big > 0.05, (tot, phi0, big)
+    print(f"  episode end ................. OK  (timeout terminated, not truncated; shaping steps up to "
+          f"{big:.2f}, discounted sum {tot:+.4f} = -phi(start) {-phi0:+.4f})")
+
+
+def test_missile_endgame():
+    """SIM_REV 17: an intercept on a target flying straight ends within a metre or so (the endgame in sub-steps);
+    at 50 Hz alone it left 2-10 m, and with the 10 m fuze good shots were scored misses."""
+    import math
+    import numpy as np
+    from missile_sim import AIM120
+    from bvr_library import missile_config
+    cfg = missile_config("AIM-120C-DCS")
+    worst = 0.0
+    for rng in (20000.0, 30000.0):
+        for hdg in (180.0, 90.0, 135.0):
+            m = AIM120(2, 1, np.array([0.0, 0.0, 9000.0]), np.array([0.0, 300.0, 0.0]), 12000.0, cfg=cfg)
+            h = math.radians(hdg)
+            vel = 250.0 * np.array([math.sin(h), math.cos(h), 0.0])
+            tp = np.array([0.0, rng, 9000.0])
+            out = None
+            for _ in range(7500):
+                m.update_guidance({"valid": 1, "tgt_pos": tp, "tgt_vel": vel})
+                ev = m.step(0.02, tp, vel)
+                tp = tp + vel * 0.02
+                out = next((e for e in ev if e["type"] in ("MISSILE_HIT", "MISSILE_MISS")), None)
+                if out:
+                    break
+            assert out and out["type"] == "MISSILE_HIT", (rng, hdg, out)
+            worst = max(worst, out["miss_dist"])
+    assert worst < 2.0, worst
+    print(f"  missile endgame ............. OK  (6 intercepts on a straight target hit, worst miss {worst:.2f} m)")
+
+
+def test_mission_seed_starts():
+    """dcs/make_mission.py --seed: starts drawn as training draws them, the same for a seed, different across seeds."""
+    import importlib.util, os
+    if importlib.util.find_spec("dcs") is None:
+        print("  mission seed starts .......... skipped (pydcs not installed)")
+        return
+    spec = importlib.util.spec_from_file_location("make_mission", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                                "dcs", "make_mission.py"))
+    mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
+    draws = [mm.draw_start(s) for s in range(200)]
+    assert mm.draw_start(7) == mm.draw_start(7)
+    kinds = {d.split(":")[1].split(",")[0].split(" (")[0].strip() for _, d in draws}
+    assert kinds == set(mm.SCENARIOS), kinds
+    for v, d in draws:
+        stern = "stern" in d
+        assert (45 <= v["range_km"] <= 75) if stern else (70 <= v["range_km"] <= 110), d
+        assert 2000 <= v["alt_blue"] <= 12500 and 2000 <= v["alt_red"] <= 12500 and 250 <= v["speed"] <= 320, d
+        assert (v["blue_off"] == 0.0) != (v["red_off"] == 0.0) or abs(v["blue_off"] + v["red_off"]) < 9, d
+    mirrored = sum("mirrored" in d for _, d in draws) / len(draws)
+    assert 0.35 < mirrored < 0.65, mirrored
+    print(f"  mission seed starts .......... OK  (all 5 scenarios, {mirrored:.0%} mirrored, ranges and altitudes as in training)")
+
+
 def test_heading_switches():
     """Heading-choice changes are charged and counted, and the rocking pair is found."""
     from bvr_env import BvrEnv, HDG_OFFSETS_DEG
@@ -2050,6 +2178,7 @@ if __name__ == "__main__":
         ("eval_2v1 statistics",     test_eval_2v1_stats),
         ("2v1 launch delay",        test_team_launch_delay),
         ("2v1 UCAV options",        test_team_ucav_options),
+        ("2v1 end potential",       test_team_end_potential),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS live stick",          test_dcs_live_stick),
@@ -2060,6 +2189,10 @@ if __name__ == "__main__":
         ("self-play mix",           test_selfplay_mix),
         ("self-play heading history", test_selfplay_heading_history),
         ("launch delay", test_launch_delay),
+        ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
+        ("episode end", test_episode_end),
+        ("missile endgame", test_missile_endgame),
+        ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),

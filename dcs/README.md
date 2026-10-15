@@ -508,3 +508,17 @@ which `setup_dcs.py` does **not** restore: to use it, comment out
 `Scripts\MissionScripting.lua` by hand, and put them back afterwards (with
 them removed, any mission can read and write your files). The live link
 records the same lines in `dcs_runs\` without that.
+
+## Different fights, not one fight replayed (15 October)
+
+A mission starts the same way every time and `dcs_live.py` takes the policy's most likely action, so five runs of one
+mission are one fight five times. `make_mission.py --seed N` draws the start as training does (range 70-110 km, or
+45-75 running away; altitudes 6-11 km and the other within 2.5 km, or 2-12.5 km in half of them; 250-320 m/s; head-on,
+offset left or right, beam or running, and in half of them mirrored, red nose-on and blue offset), one mission per seed:
+
+```
+for /L %s in (1,1,5) do python dcs\make_mission.py --blue-player --seed %s
+```
+
+writes `dcs\bvr_rl_1v1_stick_s1.miz` ... `_s5.miz`, each with its start printed. `dcs_live.py --stochastic` samples the
+policy's actions as training does (results.csv's `stochastic` column says which), for variety within one start.

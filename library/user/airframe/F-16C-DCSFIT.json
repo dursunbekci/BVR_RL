@@ -4,9 +4,9 @@
   "name": "F-16C Block 50 (open-source data), fitted to DCS",
   "description": "F-16C with thrust x1.138, CD0 x2.927, K_IND x1.737, CL_MAX x0.883, DRAG_RISE_PEAK x0.300, g lag 1.00 s building up and 1.92 s coming off, fitted by dcs/stick/manoeuvre.py to the player's F-16C in DCS flown by the stick pilot. Record manoeuvre_20261014_104111.json; mismatch 5.135 -> 2.461.",
   "params": {
-    "MASS_EMPTY": 8570.0,
-    "FUEL_FULL": 3175.0,
-    "MASS_WPNS": 500.0,
+    "MASS_EMPTY": 8570,
+    "FUEL_FULL": 3175,
+    "MASS_WPNS": 500,
     "S_REF": 27.87,
     "CD0": 0.03805,
     "K_IND": 0.231,
@@ -23,8 +23,8 @@
     "ALT_LAPSE": 0.7,
     "THRUST_MACH_TABLE": [
       [
-        0.0,
-        1.0
+        0,
+        1
       ],
       [
         0.5,
@@ -47,7 +47,7 @@
         0.95
       ],
       [
-        2.0,
+        2,
         1.014
       ]
     ],
@@ -55,22 +55,22 @@
     "FF_MIL": 0.42,
     "FF_AB": 1.65,
     "THROT_TC": 2.5,
-    "NZ_POS_MAX": 9.0,
-    "NZ_NEG_MAX": -3.0,
-    "V_STALL": 70.0,
+    "NZ_POS_MAX": 9,
+    "NZ_NEG_MAX": -3,
+    "V_STALL": 70,
     "MACH_MAX": 1.8,
-    "ALT_CEIL": 15240.0,
-    "PHI_MAX": 80.0,
+    "ALT_CEIL": 15240,
+    "PHI_MAX": 80,
     "ROLL_MAX": 229.1831180523293,
-    "GAMMA_MAX": 40.0,
-    "K_HDG_PHI": 2.0,
+    "GAMMA_MAX": 40,
+    "K_HDG_PHI": 2,
     "K_PHI_ROLL": 2.5,
     "K_ALT_GAM": 0.0003,
-    "K_GAM_NZ": 7.0,
+    "K_GAM_NZ": 7,
     "BANK_NZ_MARGIN": 0.85,
     "K_V_THROT": 0.05,
     "K_V_INT": 0.004,
-    "NZ_TAU_ON": 1.0,
+    "NZ_TAU_ON": 1,
     "NZ_TAU_OFF": 1.925
   },
   "sources": {

@@ -23,7 +23,7 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
     After that it engages the nearest blue aircraft, switching only when the
     other is clearly closer. It sees the fight as a 1v1 against its target
     with both blue aircraft's missiles counted as inbound.
-  * Red's radar (RED_RADAR, SIM_REV 16). As in 1v1 since SIM_REV 9, red
+  * Red's radar (RED_RADAR, SIM_REV 18). As in 1v1 since SIM_REV 9, red
     fights under the agent's rules: one track per blue aircraft, from the
     agent's own radar and track code run from red's side; it fires at an
     aircraft only when the agent's fire mask would allow it on that track,
@@ -137,7 +137,7 @@ class TeamBvrEnv:
     RED_AWARENESS = ("gci", "radar")
 
     # Scripted red fights on its own radar tracks (see the module notes).
-    # False: the pre-SIM_REV 16 red, truth-guided with the old cranks.
+    # False: the pre-SIM_REV 18 red, truth-guided with the old cranks.
     RED_RADAR = True
 
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT, gamma_discount=0.997,
@@ -221,6 +221,11 @@ class TeamBvrEnv:
             names = list(DOCTRINES)
             d = names[int(self._rng.integers(len(names)))]
         self._doctrine = d
+        for o in self._obs + self._red_obs:
+            # The run's episode length (train_bvr.py --max-steps sets it on the
+            # team env): each observation's t_norm is step / MAX_STEPS, and
+            # with the default 300 it went past 1 in a 400-step run.
+            o.MAX_STEPS = self.MAX_STEPS
         for o in self._obs:
             _observer_reset(o)
             o._doctrine, o._shot_cost = d, float(DOCTRINES[d])
@@ -282,6 +287,7 @@ class TeamBvrEnv:
         self._ready = True
         obs = [self._agent_obs(k) for k in range(self.n_agents)]
         self._prev_phi = [self._phi(k) for k in range(self.n_agents)]
+        self._settled = [False] * self.n_agents       # shaping paid out (end state's potential 0)
         self._prev_terms = [dict(o._phi_terms) for o in self._obs]
         return obs, {"ic": ic, "episode_id": self._episode_id}
 
@@ -315,8 +321,12 @@ class TeamBvrEnv:
 
         obs, rewards, infos = [], [], []
         terminated = self._outcome is not None
-        truncated = (not terminated) and self._step_num >= self.MAX_STEPS
-        if truncated:
+        # SIM_REV 16: out of time ends the episode (terminated), not a cut stable-baselines3 bootstraps through:
+        # as "truncated", gamma * V(last state) was added to R_TIMEOUT and late states' values ran away (bvr_env).
+        timeout = (not terminated) and self._step_num >= self.MAX_STEPS
+        truncated = False
+        if timeout:
+            terminated = True
             # A result waiting only on missiles still in flight stands.
             self._outcome = self._pending_outcome()
             if self._outcome is None:
@@ -324,11 +334,23 @@ class TeamBvrEnv:
                 team_r += self.R_TIMEOUT
         for k, o in enumerate(self._obs):
             obs.append(self._agent_obs(k))
-            if flying[k]:
-                # Lost during this step: shaped on its last real state, as a
-                # 1v1 episode's final step is. Zeroing the potential instead
-                # would pay an aircraft lost deep in the enemy's envelope
-                # (negative potential) a bonus for dying.
+            if self._settled[k]:
+                # Its shaping is paid out (lost earlier): nothing more.
+                phi, shaping = 0.0, 0.0
+                terms = {t: 0.0 for t in PHI_TERMS}
+                shaping_terms = {t: 0.0 for t in PHI_TERMS}
+            elif (flying[k] and not o._alive) or terminated:
+                # SIM_REV 18, as 1v1 since SIM_REV 16: the potential of an
+                # aircraft's end state is 0 (lost this step, or the episode
+                # ends), so its shaping sums to -phi(start) whatever happens
+                # and leaves the best policy as it was (Ng et al. 1999). Lost
+                # deep in red's envelope (negative potential) this step pays
+                # back exactly what the approach to it was charged.
+                phi, shaping = 0.0, -self._prev_phi[k]
+                terms = {t: 0.0 for t in PHI_TERMS}
+                shaping_terms = {t: -self._prev_terms[k][t] for t in PHI_TERMS}
+                self._settled[k] = True
+            elif flying[k]:
                 phi = o._potential()
                 shaping = self._gamma * phi - self._prev_phi[k]
                 terms = o._phi_terms

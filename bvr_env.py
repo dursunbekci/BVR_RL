@@ -256,8 +256,10 @@ class BvrEnv(gym.Env):
                  radar_model="sim", enable_viz=False, selfplay_pool=None,
                  sp_scripted_frac=None, sp_newest_frac=None,
                  doctrine=DOCTRINE_MIXED, platform=DEFAULT_PLATFORM,
-                 opponent_platform=DEFAULT_PLATFORM):
+                 opponent_platform=DEFAULT_PLATFORM, adaptive_dcs_frac=None):
         super().__init__()
+        # ADAPTIVE's share of DCS-like episodes (None: the opponent's own default, 1/3)
+        self._adaptive_dcs_frac = adaptive_dcs_frac
         # What each side flies, from the parameter library (bvr_library).
         self._platform_id, self._opp_platform_id = platform, opponent_platform
         self._plat = load_platform(platform)
@@ -371,6 +373,8 @@ class BvrEnv(gym.Env):
             self._opponent = make_selfplay_opponent(self,self._selfplay_pool,self._rng)
         else:
             self._opponent = BvrOpponent.create(self._opponent_type,rng=self._rng)
+        if self._adaptive_dcs_frac is not None and hasattr(self._opponent, "long_shot_frac"):
+            self._opponent.long_shot_frac = float(self._adaptive_dcs_frac)
         self._opponent.reset(ic)
         self._opp_radar = None
         if (self.OPPONENT_RADAR and isinstance(self._opponent, ShooterOpponent)
@@ -408,7 +412,15 @@ class BvrEnv(gym.Env):
         # that have nothing to do with how the agent flies.
         if self._frozen_phi is not None: phi, terms = self._frozen_phi
         else: phi = self._potential(); terms = self._phi_terms
-        if was_resolving:
+        # The episode ends on this step: decided, or out of time (SIM_REV 16: out of time is an end, not a cut).
+        timeout = (not self._done) and (self._step_num >= self.MAX_STEPS)
+        if self._done or timeout:
+            # SIM_REV 16: the end state's potential is 0, so the shaping adds up to -phi(start) whatever happens
+            # and leaves the best policy as it was (Ng et al. 1999). It was the end state's own potential: a
+            # kill or a loss kept about +0.25-0.38 of it (mostly the track term), +0.2 at the start.
+            shaping = -self._prev_phi
+            shaping_terms = {k: -self._prev_phi_terms[k] for k in PHI_TERMS}
+        elif was_resolving:
             shaping = 0.0
             shaping_terms = {k: 0.0 for k in PHI_TERMS}
         else:
@@ -421,8 +433,12 @@ class BvrEnv(gym.Env):
         self._prev_phi_terms = dict(terms)
         reward = float(shaping) - hdg_cost - shot_cost
 
-        terminated = self._done
-        truncated  = (not terminated) and (self._step_num >= self.MAX_STEPS)
+        # SIM_REV 16: running out of time ends the episode (terminated), with R_TIMEOUT. As "truncated",
+        # stable-baselines3 added gamma * V(last state) to it, as if the fight went on; the critic's value
+        # of late states then fed on itself towards R_TIMEOUT / (1 - gamma) (dcsfit_v2: -8 to -12 at step
+        # 400, where no fight is worth below about -1.4), and a long fight looked worse than being shot down.
+        terminated = self._done or timeout
+        truncated  = False
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
                 "cost_terms":{"heading":-hdg_cost,"shots":-shot_cost},
@@ -434,7 +450,7 @@ class BvrEnv(gym.Env):
         if terminated or truncated:
             # Truncated while a kill waits on missiles still in flight: the
             # kill stands.
-            if truncated: self._outcome=self._outcome or "TIMEOUT"
+            if timeout: self._outcome=self._outcome or "TIMEOUT"
             reward += self._terminal_reward(self._outcome)
             info.update({"terminal_outcome":self._outcome,
                          "shots_fired":self._shots_fired,

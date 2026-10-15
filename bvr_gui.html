@@ -760,6 +760,15 @@ select option{background:#050810}
           </div>
         </div>
 
+        <div class="field">
+          <div class="field-label">
+            <span>ADAPTIVE DCS-LIKE (%)</span>
+            <button class="help-btn" onclick="help(this,'ADAPTIVE DCS-LIKE SHARE',
+              'Share of ADAPTIVE SHOOTER episodes flown like the DCS AI: it shoots at 0.95-1.0 of its R-max (from about 60 km) and keeps pressing after its missile goes active. Applies to the ADAPTIVE stage and to the scripted opponent inside SELF PLAY. 33% by default.\n\nRaise it (67% for dcsfit_v3) when the policy waits to shoot and is shot first by the DCS AI.')">?</button>
+          </div>
+          <input type="number" id="cfg-adaptive-dcs" value="33" min="0" max="100" step="1">
+        </div>
+
         <details class="sp-grp" id="cfg-sp-box">
           <summary>SELF-PLAY (ADVANCED)</summary>
           <div id="cfg-sp-note"></div>
@@ -2750,6 +2759,8 @@ document.getElementById('btn-train').onclick=()=>{
   if(spOn && !(spNew>=0 && spNew<=100)){ alert('NEWEST SHARE must be between 0 and 100%.'); return; }
   if(spOn && !(spEvery>=1)){ alert('SNAPSHOT EVERY must be at least 1 (thousand steps).'); return; }
   if(spOn && !(spPool>=1)){ alert('POOL SIZE must be at least 1.'); return; }
+  const dcsPct=parseFloat(document.getElementById('cfg-adaptive-dcs').value);
+  if(!(dcsPct>=0 && dcsPct<=100)){ alert('ADAPTIVE DCS-LIKE must be between 0 and 100%.'); return; }
   const resume=document.getElementById('cfg-resume').value.trim();
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   const doctrine=document.getElementById('cfg-doctrine').value;
@@ -2793,7 +2804,8 @@ document.getElementById('btn-train').onclick=()=>{
     platform:document.getElementById('cfg-platform').value||'F-16C',
     opponent_platform:document.getElementById('cfg-opp-platform').value||'F-16C',
     format:fmtSel, wingman_platform:(fmtSel==='2v1'&&wingSel)||undefined,
-    max_steps:parseInt(document.getElementById('cfg-maxsteps').value)||undefined}});
+    max_steps:parseInt(document.getElementById('cfg-maxsteps').value)||undefined,
+    adaptive_dcs_frac:dcsPct===33?undefined:dcsPct/100}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';

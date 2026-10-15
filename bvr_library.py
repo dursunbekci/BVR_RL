@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 16
+SIM_REV = 18
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -489,7 +489,19 @@ _SIM_REV_NOTES = {
         "(0.997^400 = 0.30 at the end of a long episode); discounted, a kill came to about "
         "-0.2, a mutual kill -1.2, a loss -1.4 and a timeout -1.9, so dying beat surviving. "
         "Heading cost 0.04 -> 0.02 per 180 deg, timeout -0.5 -> -0.8 (2v1 too)",
-    16: "2v1 red fights under the agent's rules, as 1v1 red has since SIM_REV 9: one "
+    16: "running out of time ends the episode (terminated) with R_TIMEOUT; it was 'truncated', so "
+        "stable-baselines3 added gamma * V(last state) as if the fight went on, and the critic's values "
+        "of late states ran away towards R_TIMEOUT/(1-gamma) (dcsfit_v2: -8 to -12 at step 400 where no "
+        "fight is worth below -1.4): a long fight looked worse than being shot down. 1v1 and 2v1. And "
+        "(1v1) the shaping potential of the end state is 0, so the shaping sums to -phi(start) whatever "
+        "happens (a kill or a loss kept +0.25-0.38 of it). Expect the critic to re-learn late values",
+    17: "missile endgame: the last 2.5 km of an intercept is flown in 10 sub-steps and the closest "
+        "approach is taken between samples. Guided at 50 Hz the missile's own lag left 2-10 m against a "
+        "target flying straight (0.03-0.7 m at 500 Hz); with a 10 m fuze, 11 of dcsfit_v2's 39 shots "
+        "that reached the target were scored misses at 10-11 m, and red's too (60 fights against DCS-like "
+        "ADAPTIVE: ours 27 -> 34 hits of 39 -> 37, misses now 11-35 m). Missiles kill as in DCS; R-max "
+        "is unchanged (8 envelope points identical), so no recalibration",
+    18: "2v1 red fights under the agent's rules, as 1v1 red has since SIM_REV 9: one "
         "radar track per blue aircraft, fire only on a firm track of the aircraft it "
         "shoots at (also its second shot, at the other blue aircraft), each missile "
         "guided on red's track of its target, so the support rule binds it. It also "
@@ -497,7 +509,7 @@ _SIM_REV_NOTES = {
         "DCS speeds (2v1 had kept the pre-SIM_REV 9 red). Red's opening target is drawn "
         "per episode: the nearer blue aircraft in half the episodes, the farther or a "
         "random one in a quarter each, held until red's first launch (it always opened "
-        "on the nearer one, nearly always the lead). 1v1 is unchanged",
+        "on the nearer one, nearly always the lead). Each 2v1 aircraft's observation reads the run's episode length (t_norm went past 1 with --max-steps above 300), and the 2v1 end state's shaping potential is 0, as 1v1's since SIM_REV 16. 1v1 is unchanged",
 }
 
 

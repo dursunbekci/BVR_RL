@@ -587,3 +587,47 @@ been held less than LAUNCH_BUG_READY_S (25 s; the track adapter's consecutive up
 4.5-10.5 s more, 25 s (the 7-14 s less an estimated 2.5 s release; `fire_delay.py set F-16C-DCSFIT <file>` now writes the two
 parts from the record). Same 60 fights: 35% won, 1.58 launched, 0.12 dropped. Scripted opponents (ADAPTIVE and the rest)
 launch at once, as the DCS AI does; self-play snapshots fly the same platform and wait as the agent does.
+
+## dcsfit_v2 in DCS, and dcsfit_v3 (15 October)
+
+**First DCS fight with the policy on the stick (`live_20261015_084910`)**: the plumbing worked (109 s flown, the radar track
+held, no aborts, no wing rocking: heading choices 30 then 50 deg off), and the fight was lost: the policy never asked to
+fire. Replayed on its recorded inputs, its probability of firing stayed below 0.004 from 13 to 80 s although the shot was
+open (0.6-0.9 of R-max, the target 34-58 deg off the nose, four missiles). The DCS AI fired at 44 s from 64 km; we held 50
+deg off, climbed to 12.3 km at Mach 1.25 and never broke away; the missile hit at 110 s. No input was out of training's
+range (each one swapped for its value at the policy's simulator shots changed nothing): it waits, by choice, for a shot
+near its no-escape range (median 0.44 of R-max, 0.96 of R-nez at its simulator shots) and cranks while closing (before
+anyone fires: 0 deg 3% of the time, 15 deg 43%, 30-50 deg 47%; first shot at 122 s median, none in 15 of 60 fights).
+Against ADAPTIVE's DCS-like episodes (shoot at 0.95-1.0 of R-max, press) red fires first in 94% and the policy loses 49%.
+The envelope term of the shaping (our band minus red's) pays for a crank before any shot: crossing shrinks red's R-max on
+us while ours on red stays. Its self-play copies hold fire too, and DCS-like red was 1 fight in 9.
+
+**dcsfit_v3**: `train_bvr.py --adaptive-dcs-frac` (GUI: ADAPTIVE DCS-LIKE %, default 33) sets the share of ADAPTIVE episodes
+flown like the DCS AI, also as self-play's scripted opponent; unset, the draws are the old ones exactly. For v3: 67%, and
+the self-play scripted share 50%. Red then shoots first from about 60 km in most scripted fights: waiting costs the fight,
+so the policy has to shoot first or defend. The reward is unchanged (the shaping is potential-based); if v3 still cranks
+before shooting, the envelope term's threat half is the next thing to look at. Also: the F-16C-DCSFIT airframe in git now
+has the number formatting of the copy dcsfit_v2 trained with (15240 against 15240.0 changed its fingerprint and a warm
+start reported a changed airframe; the values were the same).
+
+**SIM_REV 16 (15 October), before dcsfit_v3.** Checking another session's reward review against the code found a bigger
+problem: running out of time was returned as `truncated`, so stable-baselines3 added gamma x V(last state) to R_TIMEOUT as
+if the fight went on. The critic's value of late states fed on itself towards R_TIMEOUT / (1 - gamma): on dcsfit_v2 along
+three fights that timed out, V was -0.3 to -0.8 at the start, -1.5 to -8.5 at step 300 and -7.9 to -12.0 at step 400, where
+no fight is worth below about -1.4. A long fight looked worse than being shot down (-1), which fits a policy that did not
+defend in DCS. Now out of time ends the episode (`terminated`, 1v1 and 2v1). And in 1v1 the end state's potential is 0, so
+the shaping sums to -phi(start) whatever happens (Ng et al.); it was the end state's own potential, +0.25 to +0.38 after a
+kill or a loss (mostly the track term). Kept as they are, by choice: mutual kill -0.4 above timeout -0.8, gamma 0.997, and
+2v1's end-state potential (that env's own comment argues for it). dcsfit_v3 warm-starts from dcsfit_v2 with a critic that
+has to re-learn its late values.
+
+**SIM_REV 17: the missile's endgame (15 October).** Is defending easier in the simulator than in DCS? Two checks.
+(1) The flight: the simulator's AIM-120C-DCS flown from the DCS fight's launch (64.7 km) at our recorded flight path tracks
+the DCS missile within 14 m/s and is 1.4 km behind, closing at 540 m/s, when the DCS one hit: the same crank would have
+been shot down here too. (2) The hit: with dcsfit_v2 against DCS-like ADAPTIVE (60 fights), 11 of our 12 endgame misses
+were at 10.0-10.5 m and 13 of red's 23 at 10-31 m, against a 10 m fuze. Guided at 50 Hz the missile's own lag left 2-10 m
+against a target flying straight (0.03-0.7 m at 500 Hz). Now the last 2.5 km of an intercept is flown in 10 sub-steps
+(the target moved along its velocity within the frame) and the closest approach is taken between samples: ours 27 hits /
+12 misses -> 34 / 3 (hits at about 1 m), red's misses now 11-490 m (real evasion). R-max is unchanged at 8 envelope
+points, so no recalibration. Still to look at: red's missiles that die because red's radar loses us (14-24 of 102 in
+those fights; none in the DCS fight, where the DCS AI kept us in its radar).
