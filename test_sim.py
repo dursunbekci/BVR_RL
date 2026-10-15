@@ -1563,6 +1563,35 @@ def test_episode_end():
           f"{big:.2f}, discounted sum {tot:+.4f} = -phi(start) {-phi0:+.4f})")
 
 
+def test_missile_endgame():
+    """SIM_REV 17: an intercept on a target flying straight ends within a metre or so (the endgame in sub-steps);
+    at 50 Hz alone it left 2-10 m, and with the 10 m fuze good shots were scored misses."""
+    import math
+    import numpy as np
+    from missile_sim import AIM120
+    from bvr_library import missile_config
+    cfg = missile_config("AIM-120C-DCS")
+    worst = 0.0
+    for rng in (20000.0, 30000.0):
+        for hdg in (180.0, 90.0, 135.0):
+            m = AIM120(2, 1, np.array([0.0, 0.0, 9000.0]), np.array([0.0, 300.0, 0.0]), 12000.0, cfg=cfg)
+            h = math.radians(hdg)
+            vel = 250.0 * np.array([math.sin(h), math.cos(h), 0.0])
+            tp = np.array([0.0, rng, 9000.0])
+            out = None
+            for _ in range(7500):
+                m.update_guidance({"valid": 1, "tgt_pos": tp, "tgt_vel": vel})
+                ev = m.step(0.02, tp, vel)
+                tp = tp + vel * 0.02
+                out = next((e for e in ev if e["type"] in ("MISSILE_HIT", "MISSILE_MISS")), None)
+                if out:
+                    break
+            assert out and out["type"] == "MISSILE_HIT", (rng, hdg, out)
+            worst = max(worst, out["miss_dist"])
+    assert worst < 2.0, worst
+    print(f"  missile endgame ............. OK  (6 intercepts on a straight target hit, worst miss {worst:.2f} m)")
+
+
 def test_heading_switches():
     """Heading-choice changes are charged and counted, and the rocking pair is found."""
     from bvr_env import BvrEnv, HDG_OFFSETS_DEG
@@ -1809,6 +1838,7 @@ if __name__ == "__main__":
         ("launch delay", test_launch_delay),
         ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
         ("episode end", test_episode_end),
+        ("missile endgame", test_missile_endgame),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),

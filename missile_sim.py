@@ -132,6 +132,7 @@ class AIM120:
         self._aim_vel = None
 
         self.prev_range        = 1e12
+        self._prev_rel         = None      # target minus missile at the last step (closest approach)
         self._rng_to_tgt_cache = 0.0
         self.t_launch          = 0.0
 
@@ -150,9 +151,29 @@ class AIM120:
         self.t_since_update = 0.0
 
     # ── integration step ─────────────────────────────────────────────
+    ENDGAME_RANGE = 2500.0   # m: inside this, with the seeker on, a frame is flown in ENDGAME_SUBSTEPS steps
+    ENDGAME_SUBSTEPS = 10
+
     def step(self, dt: float,
              tgt_pos_true: np.ndarray,
              tgt_vel_true: np.ndarray) -> list:
+        """One frame. The last ENDGAME_RANGE of an intercept is flown in ENDGAME_SUBSTEPS sub-steps (SIM_REV 17),
+        the target moved along its velocity within the frame (the world passes its position at the frame's
+        start): guided at 50 Hz, the missile's own lag left 2-10 m against a target flying straight (0.03-0.7 m
+        at 500 Hz), and with a 10 m fuze about a fifth of good intercepts were scored as misses at 10-11 m."""
+        if (self.seeker_active and self.phase not in (MslPhase.HIT, MslPhase.MISS)
+                and float(np.linalg.norm(tgt_pos_true - self.pos)) < self.ENDGAME_RANGE):
+            n, h, events = self.ENDGAME_SUBSTEPS, dt / self.ENDGAME_SUBSTEPS, []
+            for k in range(1, n + 1):
+                events += self._step1(h, tgt_pos_true + tgt_vel_true * (h * k), tgt_vel_true)
+                if self.phase in (MslPhase.HIT, MslPhase.MISS):
+                    break
+            return events
+        return self._step1(dt, tgt_pos_true, tgt_vel_true)
+
+    def _step1(self, dt: float,
+               tgt_pos_true: np.ndarray,
+               tgt_vel_true: np.ndarray) -> list:
         """
         Advance one time step.
         tgt_pos_true / tgt_vel_true are ONLY used for:
@@ -267,25 +288,34 @@ class AIM120:
         self.pos = self.pos + self.vel * dt
 
         # ── endgame: closest approach detection ──────────────────────
-        rng_now = float(np.linalg.norm(tgt_pos_true - self.pos))
+        rel_now = tgt_pos_true - self.pos
+        rng_now = float(np.linalg.norm(rel_now))
         self._rng_to_tgt_cache = rng_now
 
         # A guard of 500 m prevents false triggers while the missile is
         # turning onto its intercept course at launch.
         if rng_now > self.prev_range and self.prev_range < 500.0:
+            # The closest approach lies between the last two samples, not on one of them (SIM_REV 17).
             md = self.prev_range
+            if self._prev_rel is not None:
+                d = rel_now - self._prev_rel
+                dd = float(np.dot(d, d))
+                if dd > 1e-9:
+                    u = min(1.0, max(0.0, -float(np.dot(self._prev_rel, d)) / dd))
+                    md = min(md, float(np.linalg.norm(self._prev_rel + u * d)))
             if md < self.cfg.FUZE_RADIUS:
                 self.phase = MslPhase.HIT
                 events.append(_ev("MISSILE_HIT", id=self.id, owner=self.owner,
                                    target=self.target,
-                                   miss_dist=round(md, 2), killed=1))
+                                   miss_dist=round(md, 3), killed=1))
                 events.append(_ev("AC_DESTROYED", ac=self.target, cause="MISSILE"))
             else:
                 self.phase = MslPhase.MISS
                 events.append(_ev("MISSILE_MISS", id=self.id, owner=self.owner,
-                                   miss_dist=round(md, 1), cause="ENDGAME"))
+                                   miss_dist=round(md, 3), cause="ENDGAME"))
 
         self.prev_range = rng_now
+        self._prev_rel = rel_now
 
         # ── lifetime / terrain ───────────────────────────────────────
         if self.phase not in (MslPhase.HIT, MslPhase.MISS):

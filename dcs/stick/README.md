@@ -620,3 +620,14 @@ the shaping sums to -phi(start) whatever happens (Ng et al.); it was the end sta
 kill or a loss (mostly the track term). Kept as they are, by choice: mutual kill -0.4 above timeout -0.8, gamma 0.997, and
 2v1's end-state potential (that env's own comment argues for it). dcsfit_v3 warm-starts from dcsfit_v2 with a critic that
 has to re-learn its late values.
+
+**SIM_REV 17: the missile's endgame (15 October).** Is defending easier in the simulator than in DCS? Two checks.
+(1) The flight: the simulator's AIM-120C-DCS flown from the DCS fight's launch (64.7 km) at our recorded flight path tracks
+the DCS missile within 14 m/s and is 1.4 km behind, closing at 540 m/s, when the DCS one hit: the same crank would have
+been shot down here too. (2) The hit: with dcsfit_v2 against DCS-like ADAPTIVE (60 fights), 11 of our 12 endgame misses
+were at 10.0-10.5 m and 13 of red's 23 at 10-31 m, against a 10 m fuze. Guided at 50 Hz the missile's own lag left 2-10 m
+against a target flying straight (0.03-0.7 m at 500 Hz). Now the last 2.5 km of an intercept is flown in 10 sub-steps
+(the target moved along its velocity within the frame) and the closest approach is taken between samples: ours 27 hits /
+12 misses -> 34 / 3 (hits at about 1 m), red's misses now 11-490 m (real evasion). R-max is unchanged at 8 envelope
+points, so no recalibration. Still to look at: red's missiles that die because red's radar loses us (14-24 of 102 in
+those fights; none in the DCS fight, where the DCS AI kept us in its radar).

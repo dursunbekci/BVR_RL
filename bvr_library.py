@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 16
+SIM_REV = 17
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -495,6 +495,12 @@ _SIM_REV_NOTES = {
         "fight is worth below -1.4): a long fight looked worse than being shot down. 1v1 and 2v1. And "
         "(1v1) the shaping potential of the end state is 0, so the shaping sums to -phi(start) whatever "
         "happens (a kill or a loss kept +0.25-0.38 of it). Expect the critic to re-learn late values",
+    17: "missile endgame: the last 2.5 km of an intercept is flown in 10 sub-steps and the closest "
+        "approach is taken between samples. Guided at 50 Hz the missile's own lag left 2-10 m against a "
+        "target flying straight (0.03-0.7 m at 500 Hz); with a 10 m fuze, 11 of dcsfit_v2's 39 shots "
+        "that reached the target were scored misses at 10-11 m, and red's too (60 fights against DCS-like "
+        "ADAPTIVE: ours 27 -> 34 hits of 39 -> 37, misses now 11-35 m). Missiles kill as in DCS; R-max "
+        "is unchanged (8 envelope points identical), so no recalibration",
 }
 
 
