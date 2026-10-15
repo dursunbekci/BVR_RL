@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 15
+SIM_REV = 16
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -489,6 +489,12 @@ _SIM_REV_NOTES = {
         "(0.997^400 = 0.30 at the end of a long episode); discounted, a kill came to about "
         "-0.2, a mutual kill -1.2, a loss -1.4 and a timeout -1.9, so dying beat surviving. "
         "Heading cost 0.04 -> 0.02 per 180 deg, timeout -0.5 -> -0.8 (2v1 too)",
+    16: "running out of time ends the episode (terminated) with R_TIMEOUT; it was 'truncated', so "
+        "stable-baselines3 added gamma * V(last state) as if the fight went on, and the critic's values "
+        "of late states ran away towards R_TIMEOUT/(1-gamma) (dcsfit_v2: -8 to -12 at step 400 where no "
+        "fight is worth below -1.4): a long fight looked worse than being shot down. 1v1 and 2v1. And "
+        "(1v1) the shaping potential of the end state is 0, so the shaping sums to -phi(start) whatever "
+        "happens (a kill or a loss kept +0.25-0.38 of it). Expect the critic to re-learn late values",
 }
 
 

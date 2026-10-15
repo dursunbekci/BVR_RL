@@ -1541,6 +1541,28 @@ def test_adaptive_dcs_frac():
           f"in self-play {np.mean(sp):.0%})")
 
 
+def test_episode_end():
+    """SIM_REV 16: running out of time ends the episode (terminated, not truncated: no bootstrap through it), and
+    the end state's potential is 0, so the discounted shaping sums to -phi(start)."""
+    import numpy as np
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, seed=0, privileged_critic=False)
+    env.MAX_STEPS = 60
+    env.reset()
+    phi0, g, tot, k, big = env._prev_phi, env._gamma, 0.0, 0, 0.0
+    while True:
+        obs, r, term, trunc, info = env.step(np.array([HDG_OFFSETS_DEG.index(0.0), 2, 2, 0]))
+        tot += g ** k * info["shaping"]; k += 1
+        big = max(big, abs(info["shaping"]))
+        if term or trunc:
+            break
+    assert term and not trunc and info["terminal_outcome"] == "TIMEOUT", (term, trunc, info.get("terminal_outcome"))
+    assert abs(tot + phi0) < 1e-6 and big > 0.05, (tot, phi0, big)
+    print(f"  episode end ................. OK  (timeout terminated, not truncated; shaping steps up to "
+          f"{big:.2f}, discounted sum {tot:+.4f} = -phi(start) {-phi0:+.4f})")
+
+
 def test_heading_switches():
     """Heading-choice changes are charged and counted, and the rocking pair is found."""
     from bvr_env import BvrEnv, HDG_OFFSETS_DEG
@@ -1786,6 +1808,7 @@ if __name__ == "__main__":
         ("self-play heading history", test_selfplay_heading_history),
         ("launch delay", test_launch_delay),
         ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
+        ("episode end", test_episode_end),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),

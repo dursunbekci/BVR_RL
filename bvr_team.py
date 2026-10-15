@@ -208,8 +208,12 @@ class TeamBvrEnv:
 
         obs, rewards, infos = [], [], []
         terminated = self._outcome is not None
-        truncated = (not terminated) and self._step_num >= self.MAX_STEPS
-        if truncated:
+        # SIM_REV 16: out of time ends the episode (terminated), not a cut stable-baselines3 bootstraps through:
+        # as "truncated", gamma * V(last state) was added to R_TIMEOUT and late states' values ran away (bvr_env).
+        timeout = (not terminated) and self._step_num >= self.MAX_STEPS
+        truncated = False
+        if timeout:
+            terminated = True
             # A result waiting only on missiles still in flight stands.
             self._outcome = self._pending_outcome()
             if self._outcome is None:

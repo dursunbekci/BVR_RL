@@ -609,3 +609,14 @@ so the policy has to shoot first or defend. The reward is unchanged (the shaping
 before shooting, the envelope term's threat half is the next thing to look at. Also: the F-16C-DCSFIT airframe in git now
 has the number formatting of the copy dcsfit_v2 trained with (15240 against 15240.0 changed its fingerprint and a warm
 start reported a changed airframe; the values were the same).
+
+**SIM_REV 16 (15 October), before dcsfit_v3.** Checking another session's reward review against the code found a bigger
+problem: running out of time was returned as `truncated`, so stable-baselines3 added gamma x V(last state) to R_TIMEOUT as
+if the fight went on. The critic's value of late states fed on itself towards R_TIMEOUT / (1 - gamma): on dcsfit_v2 along
+three fights that timed out, V was -0.3 to -0.8 at the start, -1.5 to -8.5 at step 300 and -7.9 to -12.0 at step 400, where
+no fight is worth below about -1.4. A long fight looked worse than being shot down (-1), which fits a policy that did not
+defend in DCS. Now out of time ends the episode (`terminated`, 1v1 and 2v1). And in 1v1 the end state's potential is 0, so
+the shaping sums to -phi(start) whatever happens (Ng et al.); it was the end state's own potential, +0.25 to +0.38 after a
+kill or a loss (mostly the track term). Kept as they are, by choice: mutual kill -0.4 above timeout -0.8, gamma 0.997, and
+2v1's end-state potential (that env's own comment argues for it). dcsfit_v3 warm-starts from dcsfit_v2 with a critic that
+has to re-learn its late values.
