@@ -1592,6 +1592,29 @@ def test_missile_endgame():
     print(f"  missile endgame ............. OK  (6 intercepts on a straight target hit, worst miss {worst:.2f} m)")
 
 
+def test_mission_seed_starts():
+    """dcs/make_mission.py --seed: starts drawn as training draws them, the same for a seed, different across seeds."""
+    import importlib.util, os
+    if importlib.util.find_spec("dcs") is None:
+        print("  mission seed starts .......... skipped (pydcs not installed)")
+        return
+    spec = importlib.util.spec_from_file_location("make_mission", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                                "dcs", "make_mission.py"))
+    mm = importlib.util.module_from_spec(spec); spec.loader.exec_module(mm)
+    draws = [mm.draw_start(s) for s in range(200)]
+    assert mm.draw_start(7) == mm.draw_start(7)
+    kinds = {d.split(":")[1].split(",")[0].split(" (")[0].strip() for _, d in draws}
+    assert kinds == set(mm.SCENARIOS), kinds
+    for v, d in draws:
+        stern = "stern" in d
+        assert (45 <= v["range_km"] <= 75) if stern else (70 <= v["range_km"] <= 110), d
+        assert 2000 <= v["alt_blue"] <= 12500 and 2000 <= v["alt_red"] <= 12500 and 250 <= v["speed"] <= 320, d
+        assert (v["blue_off"] == 0.0) != (v["red_off"] == 0.0) or abs(v["blue_off"] + v["red_off"]) < 9, d
+    mirrored = sum("mirrored" in d for _, d in draws) / len(draws)
+    assert 0.35 < mirrored < 0.65, mirrored
+    print(f"  mission seed starts .......... OK  (all 5 scenarios, {mirrored:.0%} mirrored, ranges and altitudes as in training)")
+
+
 def test_heading_switches():
     """Heading-choice changes are charged and counted, and the rocking pair is found."""
     from bvr_env import BvrEnv, HDG_OFFSETS_DEG
@@ -1839,6 +1862,7 @@ if __name__ == "__main__":
         ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
         ("episode end", test_episode_end),
         ("missile endgame", test_missile_endgame),
+        ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),

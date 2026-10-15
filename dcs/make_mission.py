@@ -14,6 +14,7 @@ that runs bvr_bridge.lua (the file is packed into the .miz).
     python dcs/make_mission.py --defender               # -> dcs/bvr_rl_defender.miz
     python dcs/make_mission.py --stick-test             # -> dcs/bvr_rl_sticktest.miz
     python dcs/make_mission.py --stick-test --target    # -> dcs/bvr_rl_sticktest_target.miz
+    python dcs/make_mission.py --blue-player --seed 3   # -> dcs/bvr_rl_1v1_stick_s3.miz, a start drawn as in training
 
   BLUE-1   the aircraft the policy flies (an AI unit; without dcs_live.py it
            flies a CAP and fights on its own)
@@ -259,10 +260,22 @@ def build(args):
             tgt.units[0].skill = Skill.Excellent
         m.save(args.out)                        # no bridge: the Export.lua script does the work
         return me, None
+    # --seed: each aircraft may start pointed off the other (head-on, offset, beam, running); its first waypoint is
+    # far along that heading
+    off_b, off_r = getattr(args, "blue_off", 0.0), getattr(args, "red_off", 0.0)
+    h_b, h_r = (hdg_blue + off_b) % 360, (hdg_blue + 180 + off_r) % 360
+
+    def ahead(p, hdg):
+        h = math.radians(hdg)
+        return mapping.Point(p.x + 4.0 * half * 2 * math.cos(h), p.y + 4.0 * half * 2 * math.sin(h), m.terrain)
+    if off_b:
+        p_blue_wp = ahead(p_blue, h_b)
+    if off_r:
+        p_red_wp = ahead(p_red, h_r)
     blue = flight(blue_c, "BLUE", types[args.blue_type], p_blue, p_blue_wp, args.alt_blue,
-                  hdg_blue, args.speed)
+                  h_b, args.speed)
     red = flight(red_c, "RED", types[args.red_type], p_red, p_red_wp, args.alt_red,
-                 (hdg_blue + 180) % 360, args.speed_red)
+                 h_r, args.speed_red)
     if args.red_player:
         red.units[0].skill = Skill.Player
     if getattr(args, "blue_player", False):
@@ -279,6 +292,51 @@ def build(args):
     return blue, red
 
 
+# Training's start draw (bvr_env.BvrEnv._random_ic, F-16 platforms), for --seed. Kept here, not imported, so the
+# mission builder needs only pydcs. The aircraft that starts nose-on is "first"; mirrored, that is red.
+SCENARIOS = ("head_on", "offset_left", "offset_right", "beam", "stern_conversion")
+MIRROR_START_FRAC = 0.5
+WIDE_ALT_FRAC = 0.5
+
+
+def draw_start(seed):
+    """A start drawn as training draws them: range, altitudes, speeds, which side is nose-on and how the other is
+    pointed. Returns the values for build() and a description."""
+    import random
+    rng = random.Random(seed)
+    sc = rng.choice(SCENARIOS)
+    rm = rng.uniform(70.0, 110.0)
+    a1 = rng.uniform(6000.0, 11000.0)
+    a2 = min(max(a1 + rng.uniform(-2500.0, 2500.0), 4000.0), 12500.0)
+    wide = rng.uniform(2000.0, 12500.0)
+    if rng.random() < WIDE_ALT_FRAC:
+        a2 = wide
+    s1, s2 = rng.uniform(250.0, 320.0), rng.uniform(250.0, 320.0)
+    # the second aircraft's heading off pointing straight at the first, deg (training: a2p - (br + pi))
+    if sc == "head_on":
+        off = math.degrees(rng.uniform(-0.15, 0.15))
+    elif sc == "offset_left":
+        off = math.degrees(rng.uniform(0.25, 0.70))
+    elif sc == "offset_right":
+        off = -math.degrees(rng.uniform(0.25, 0.70))
+    elif sc == "beam":
+        off = -90.0 + math.degrees(rng.uniform(-0.30, 0.30))
+    else:
+        off = 180.0 + math.degrees(rng.uniform(-0.30, 0.30))
+        rm = rng.uniform(45.0, 75.0)
+    mirrored = rng.random() < MIRROR_START_FRAC
+    bearing = rng.uniform(0.0, 360.0)
+    if mirrored:     # red starts nose-on, blue gets the scenario's offset
+        v = dict(alt_blue=a2, alt_red=a1, speed=s2, speed_red=s1, blue_off=off, red_off=0.0)
+    else:
+        v = dict(alt_blue=a1, alt_red=a2, speed=s1, speed_red=s2, blue_off=0.0, red_off=off)
+    v.update(range_km=rm, bearing=bearing)
+    desc = (f"seed {seed}: {sc}{' (mirrored: red nose-on, blue offset)' if mirrored else ''}, {rm:.0f} km, "
+            f"blue {v['alt_blue']:.0f} m {v['speed']:.0f} m/s heading {v['blue_off']:+.0f} deg off red, "
+            f"red {v['alt_red']:.0f} m {v['speed_red']:.0f} m/s heading {v['red_off']:+.0f} deg off blue")
+    return v, desc
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -291,6 +349,10 @@ def main():
     ap.add_argument("--speed", type=float, default=280.0, help="start speed, m/s (default 280)")
     ap.add_argument("--speed-red", type=float,
                     help="red's start speed, m/s (default: --speed; 200 for the Su-25T)")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="draw the start as training does (range, altitudes, speeds, head-on / offset / beam / stern, "
+                         "half mirrored) from this seed; overrides --range-km, --bearing, --alt-*, --speed*. Each "
+                         "seed is a different fight: dcs_live.py from one mission plays the same fight every time")
     ap.add_argument("--blue-type", default="F-16C", choices=["F-16C", "F-15C", "FA-18C"],
                     help="DCS aircraft for the policy (default F-16C, the training platform)")
     ap.add_argument("--red-type", default="F-16C", choices=["F-16C", "F-15C", "Su-27", "MiG-29S", "FA-18C", "Su-25T"],
@@ -307,6 +369,16 @@ def main():
                     help="you fly RED-1 in the free Su-25T and defend (sets --red-type Su-25T "
                          "--red-player; writes bvr_rl_defender.miz)")
     args = ap.parse_args()
+    args.blue_off = args.red_off = 0.0
+    start_desc = None
+    if args.seed is not None:
+        if args.stick_test or args.defender:
+            raise SystemExit("--seed draws a 1v1 start: not with --stick-test or --defender")
+        v, start_desc = draw_start(args.seed)
+        for k, x in v.items():
+            setattr(args, k, x)
+        if args.out == ap.get_default("out") and not args.blue_player:
+            args.out = os.path.join(HERE, f"bvr_rl_1v1_s{args.seed}.miz")
     if args.defender:
         args.red_type, args.red_player = "Su-25T", True
         if args.out == ap.get_default("out"):
@@ -315,7 +387,8 @@ def main():
         if args.blue_type != "F-16C":
             raise SystemExit("--blue-player: the stick link knows the F-16C only (--blue-type F-16C)")
         if args.out == ap.get_default("out"):
-            args.out = os.path.join(HERE, "bvr_rl_1v1_stick.miz")
+            args.out = os.path.join(HERE, "bvr_rl_1v1_stick.miz" if args.seed is None
+                                    else f"bvr_rl_1v1_stick_s{args.seed}.miz")
     if args.stick_test:
         if args.out == ap.get_default("out"):
             args.out = os.path.join(HERE, "bvr_rl_sticktest_target.miz" if args.target else "bvr_rl_sticktest.miz")
@@ -333,6 +406,8 @@ def main():
               f"{'with an unarmed target 60 km ahead' if args.target else 'alone'} over the sea")
         print("copy it to Saved Games\\DCS\\Missions\\ (or open it from anywhere in DCS)")
         return
+    if start_desc:
+        print(start_desc)
     print(f"written {args.out}: BLUE-1 ({args.blue_type}, policy) v RED-1 ({args.red_type}"
           f"{', you' if args.red_player else ', DCS AI'}), {args.range_km:.0f} km apart")
     print("copy it to Saved Games\\DCS\\Missions\\ (or open it from anywhere in DCS)")
