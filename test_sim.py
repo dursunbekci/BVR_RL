@@ -1515,6 +1515,32 @@ def test_launch_delay():
           f"target left the cone; F-16C-DCS at once)")
 
 
+def test_adaptive_dcs_frac():
+    """ADAPTIVE's share of DCS-like episodes (train_bvr.py --adaptive-dcs-frac): unset, the same draws as before
+    (1/3); 0.67, about two thirds, also as self-play's scripted opponent."""
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    def shares(frac, opp=T.ADAPTIVE_SHOOTER, n=300):
+        env = BvrEnv(opponent_type=opp, seed=7, privileged_critic=False, adaptive_dcs_frac=frac)
+        if opp == T.SELF_PLAY:
+            env._sp_scripted_frac = 1.0           # every self-play episode against the scripted ADAPTIVE
+        out = []
+        for i in range(n):
+            env._ready = False                    # a new episode each time (reset() right after reset() is a no-op)
+            env.reset()
+            out.append(bool(env._opponent.LONG_SHOT))
+        return out
+    a, b = shares(None), shares(1.0 / 3.0)
+    assert a == b, "unset must draw exactly as before"
+    hi = shares(0.67)
+    sp = shares(0.67, T.SELF_PLAY, n=150)
+    assert 0.25 < np.mean(a) < 0.42 and 0.58 < np.mean(hi) < 0.76 and 0.55 < np.mean(sp) < 0.8, \
+        (np.mean(a), np.mean(hi), np.mean(sp))
+    print(f"  ADAPTIVE DCS-like share ...... OK  (default {np.mean(a):.0%}, 0.67 gives {np.mean(hi):.0%}; "
+          f"in self-play {np.mean(sp):.0%})")
+
+
 def test_heading_switches():
     """Heading-choice changes are charged and counted, and the rocking pair is found."""
     from bvr_env import BvrEnv, HDG_OFFSETS_DEG
@@ -1759,6 +1785,7 @@ if __name__ == "__main__":
         ("self-play mix",           test_selfplay_mix),
         ("self-play heading history", test_selfplay_heading_history),
         ("launch delay", test_launch_delay),
+        ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
         ("mirrored starts",         test_mirrored_starts),

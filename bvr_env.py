@@ -256,8 +256,10 @@ class BvrEnv(gym.Env):
                  radar_model="sim", enable_viz=False, selfplay_pool=None,
                  sp_scripted_frac=None, sp_newest_frac=None,
                  doctrine=DOCTRINE_MIXED, platform=DEFAULT_PLATFORM,
-                 opponent_platform=DEFAULT_PLATFORM):
+                 opponent_platform=DEFAULT_PLATFORM, adaptive_dcs_frac=None):
         super().__init__()
+        # ADAPTIVE's share of DCS-like episodes (None: the opponent's own default, 1/3)
+        self._adaptive_dcs_frac = adaptive_dcs_frac
         # What each side flies, from the parameter library (bvr_library).
         self._platform_id, self._opp_platform_id = platform, opponent_platform
         self._plat = load_platform(platform)
@@ -371,6 +373,8 @@ class BvrEnv(gym.Env):
             self._opponent = make_selfplay_opponent(self,self._selfplay_pool,self._rng)
         else:
             self._opponent = BvrOpponent.create(self._opponent_type,rng=self._rng)
+        if self._adaptive_dcs_frac is not None and hasattr(self._opponent, "long_shot_frac"):
+            self._opponent.long_shot_frac = float(self._adaptive_dcs_frac)
         self._opponent.reset(ic)
         self._opp_radar = None
         if (self.OPPONENT_RADAR and isinstance(self._opponent, ShooterOpponent)

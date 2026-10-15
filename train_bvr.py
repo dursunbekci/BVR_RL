@@ -501,7 +501,7 @@ class BvrCallback(BaseCallback):
 # ═════════════════════════════════════════════════════════════════════
 def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfplay_pool,
              doctrine, platform, opponent_platform, sp_scripted_frac=None, sp_newest_frac=None,
-             max_steps=None):
+             max_steps=None, adaptive_dcs_frac=None):
     def _init():
         env = BvrEnv(opponent_type=opponent, gamma_discount=gamma,
                       seed=seed + idx, instance_id=idx,
@@ -510,7 +510,8 @@ def make_env(idx, opponent, seed, privileged, viz, envelope_table, gamma, selfpl
                       envelope_table=envelope_table,
                       selfplay_pool=selfplay_pool, doctrine=doctrine,
                       platform=platform, opponent_platform=opponent_platform,
-                      sp_scripted_frac=sp_scripted_frac, sp_newest_frac=sp_newest_frac)
+                      sp_scripted_frac=sp_scripted_frac, sp_newest_frac=sp_newest_frac,
+                      adaptive_dcs_frac=adaptive_dcs_frac)
         if max_steps:              # set here: worker processes import the class afresh
             env.MAX_STEPS = int(max_steps)
         return env
@@ -558,6 +559,10 @@ def main():
     ap.add_argument("--sp-pool-size", type=int, default=MAX_POOL,
                     help="self-play: snapshots kept; the oldest is deleted beyond this "
                          "(default %(default)s)")
+    ap.add_argument("--adaptive-dcs-frac", type=float, default=None,
+                    help="share of ADAPTIVE_SHOOTER episodes (as a stage, and as self-play's scripted "
+                         "opponent) flown like the DCS AI: shoot at 0.95-1.0 of R-max and keep pressing "
+                         "(default 1/3, as since SIM_REV 12). dcsfit_v3: 0.67")
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
     ap.add_argument("--save-dir", type=str, default="models_bvr")
@@ -682,7 +687,8 @@ def main():
     else:
         fns = [make_env(i, opponent, args.seed, privileged, args.viz, envelope_table, args.gamma,
                         selfplay_pool, args.doctrine.upper(), args.platform, args.opponent_platform,
-                        args.sp_scripted_frac, args.sp_newest_frac, args.max_steps)
+                        args.sp_scripted_frac, args.sp_newest_frac, args.max_steps,
+                        args.adaptive_dcs_frac)
                for i in range(args.n_envs)]
         vec = DummyVecEnv(fns) if args.n_envs == 1 else SubprocVecEnv(fns)
 
@@ -739,6 +745,9 @@ def main():
                      **({"no_selfplay_reason": "2v1 has no self-play stage yet"} if team else {}))
 
     note(cb.describe_curriculum())
+    if args.adaptive_dcs_frac is not None:
+        note(f"ADAPTIVE_SHOOTER flies like the DCS AI (shoots at 0.95-1.0 of R-max, presses) in "
+             f"{args.adaptive_dcs_frac:.0%} of its episodes (default 33%)")
     if not (heterogeneous or team) and (opponent == BvrOpponentType.SELF_PLAY
                                         or not args.no_curriculum):
         note(f"self-play settings: scripted ADAPTIVE_SHOOTER in {args.sp_scripted_frac:.0%} of "

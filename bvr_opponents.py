@@ -388,6 +388,10 @@ class AdaptiveShooterOpponent(ShooterOpponent):
     will do against the fixed ShooterOpponent.
     """
 
+    # Share of episodes flown like the DCS AI (LONG_SHOT: shoot at 0.95-1.0 of R-max and press). The env sets it
+    # per instance (train_bvr.py --adaptive-dcs-frac); 1/3 since SIM_REV 12.
+    long_shot_frac = 1.0 / 3.0
+
     def reset(self, ic):
         super().reset(ic)
         self.SHOT_RMAX_FRAC = float(self.rng.uniform(0.60, 0.95))
@@ -406,7 +410,7 @@ class AdaptiveShooterOpponent(ShooterOpponent):
             # agent never learned to be shot at: red fired in 16 of 40 fights
             # against dcs_v7; at 1.0, in 33, first in 31, from 62 km (the DCS
             # AI fired from 63 km).
-            self.LONG_SHOT = bool(self.rng.random() < 1.0 / 3.0)
+            self.LONG_SHOT = bool(self.rng.random() < self.long_shot_frac)
             frac = float(self.rng.uniform(0.95, 1.0))
             self.PRESS = self.LONG_SHOT
             if self.LONG_SHOT:

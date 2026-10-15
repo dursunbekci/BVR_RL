@@ -587,3 +587,25 @@ been held less than LAUNCH_BUG_READY_S (25 s; the track adapter's consecutive up
 4.5-10.5 s more, 25 s (the 7-14 s less an estimated 2.5 s release; `fire_delay.py set F-16C-DCSFIT <file>` now writes the two
 parts from the record). Same 60 fights: 35% won, 1.58 launched, 0.12 dropped. Scripted opponents (ADAPTIVE and the rest)
 launch at once, as the DCS AI does; self-play snapshots fly the same platform and wait as the agent does.
+
+## dcsfit_v2 in DCS, and dcsfit_v3 (15 October)
+
+**First DCS fight with the policy on the stick (`live_20261015_084910`)**: the plumbing worked (109 s flown, the radar track
+held, no aborts, no wing rocking: heading choices 30 then 50 deg off), and the fight was lost: the policy never asked to
+fire. Replayed on its recorded inputs, its probability of firing stayed below 0.004 from 13 to 80 s although the shot was
+open (0.6-0.9 of R-max, the target 34-58 deg off the nose, four missiles). The DCS AI fired at 44 s from 64 km; we held 50
+deg off, climbed to 12.3 km at Mach 1.25 and never broke away; the missile hit at 110 s. No input was out of training's
+range (each one swapped for its value at the policy's simulator shots changed nothing): it waits, by choice, for a shot
+near its no-escape range (median 0.44 of R-max, 0.96 of R-nez at its simulator shots) and cranks while closing (before
+anyone fires: 0 deg 3% of the time, 15 deg 43%, 30-50 deg 47%; first shot at 122 s median, none in 15 of 60 fights).
+Against ADAPTIVE's DCS-like episodes (shoot at 0.95-1.0 of R-max, press) red fires first in 94% and the policy loses 49%.
+The envelope term of the shaping (our band minus red's) pays for a crank before any shot: crossing shrinks red's R-max on
+us while ours on red stays. Its self-play copies hold fire too, and DCS-like red was 1 fight in 9.
+
+**dcsfit_v3**: `train_bvr.py --adaptive-dcs-frac` (GUI: ADAPTIVE DCS-LIKE %, default 33) sets the share of ADAPTIVE episodes
+flown like the DCS AI, also as self-play's scripted opponent; unset, the draws are the old ones exactly. For v3: 67%, and
+the self-play scripted share 50%. Red then shoots first from about 60 km in most scripted fights: waiting costs the fight,
+so the policy has to shoot first or defend. The reward is unchanged (the shaping is potential-based); if v3 still cranks
+before shooting, the envelope term's threat half is the next thing to look at. Also: the F-16C-DCSFIT airframe in git now
+has the number formatting of the copy dcsfit_v2 trained with (15240 against 15240.0 changed its fingerprint and a warm
+start reported a changed airframe; the values were the same).

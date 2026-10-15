@@ -529,6 +529,8 @@ class TrainingManager:
             cmd += ["--advance-min-episodes", str(int(config["advance_min_episodes"]))]
         if config.get("advance_hold_checks") is not None:
             cmd += ["--advance-hold-checks", str(int(config["advance_hold_checks"]))]
+        if config.get("adaptive_dcs_frac") is not None:
+            cmd += ["--adaptive-dcs-frac", str(float(config["adaptive_dcs_frac"]))]
         for key, flag, cast in (("sp_scripted_frac", "--sp-scripted-frac", float),
                                 ("sp_newest_frac", "--sp-newest-frac", float),
                                 ("sp_snapshot_steps", "--sp-snapshot-steps", int),
