@@ -652,3 +652,60 @@ not a toggle) and press the ICP A-A button once only if the HUD still reads not-
 (`radar: A-A master mode by the missile override`) or that the HUD stayed out of A-A. The switch goes back to centre at the
 end of the episode. To check by hand in a mission: `python dcs\stick\stick_test.py click hotas.THROTTLE_DOG_FIGHT --value -1`
 (the HUD should show `4 MRM`), `--value 0` back to centre.
+
+## Five live fights with dcsfit_v3_selfplay, SIM_REV 18 and chaff (15 October)
+
+**The fights** (seeded missions, `dcs_live.py --stick`, missiles leaving the rail by missile override): one mutual kill,
+four shot down. In all five the DCS AI fired first, at 42.7-49.5 km (0.73-1.02 of its R-max against us, median 0.77), and
+its first missile hit every time. The policy shot twice (42.7 km, the same second as red; 31.8 km with red's missile in the
+air) and under fire never defended: it held a +30 to +50 deg crank, climbed, and in the last 10 s before impact turned 90 deg
+or more at no decision (P(break) 0.2-4%).
+
+**Why it did not defend.** Replayed through the policy, the DCS inputs gave the same RWR picture as the simulator (launch
+warning, time to impact, seeker active, the last on earlier in DCS). In the simulator dcsfit_v3 broke with under 10 s to
+impact at 3% of decisions while it held a radar track, 4% while coasting, 89% with none; with the track inputs of the DCS
+frames set to "no track" P(break) rose from about 0.005 to 0.1-0.95. It had learned to break when the track dropped. The
+simulated radar's azimuth limit was drawn from 51-69 deg per episode, so a 50 deg crank lost the track in many episodes
+just as red's missile arrived; the F-16's radar in DCS held it at 56 deg off the nose to impact. And cranking alone was
+enough in the simulator: of red's long shots (beyond 38 km) 5 of 36 hit; 10 were removed by the 3-second support rule
+(red turned away and its radar lost us), 9 ran out of energy and 12 missed in the endgame by 50-460 m against a target only
+cranking (red fired at 0.95-1.0 of R-max, 64.7 km median, and its missiles arrived slow). In DCS, 5 of 5 from 0.75.
+
+**SIM_REV 18** (1v1; `bvr_library._SIM_REV_NOTES[18]`):
+
+- Scripted red's missiles fly without the support rule (`BvrEnv.SCRIPTED_RED_SUPPORT_RULE = False`, `AIM120.support_rule`):
+  without red's guidance a missile flies on to the extrapolated last estimate and turns its seeker on as usual, as a DCS
+  missile does when its shooter loses the lock. The agent's missiles (and a self-play snapshot's) keep the rule, which
+  `dcs_live.py` also applies to ours in DCS.
+- The radar's azimuth limit is drawn from 60 deg x (1 +- 0.05), 57-63 deg (`RadarSim.FOV_AZ_SPREAD`; was 0.15), ours and
+  red's; range and noise randomisation unchanged.
+- The DCS-like red (ADAPTIVE LONG_SHOT) fires at 0.72-0.90 of R-max, a fifth of episodes at 0.95-1.0 (was 0.95-1.0).
+
+Measured, dcsfit_v3_selfplay against the DCS-like red, the same 60 starts:
+
+| | SIM_REV 17 | SIM_REV 18 |
+|---|---|---|
+| red's missiles | 110 | 75 |
+| hit | 27 (25%) | 22 (29%) |
+| removed by the support rule | 33 | 0 |
+| ran out of energy | 16 | 29 (22 after our jet turned cold, guidance long lost) |
+| missed in the endgame | 19 (8 within 50 m) | 16 (10 within 50 m) |
+| score / win / loss | 0.60 / 47% / 27% | 0.55 / 47% / 37% |
+| we fired first | 3% | 17% |
+
+Turning away from red no longer kills red's missile; only defeating the missile does (running it out of energy cold,
+or beating it in the endgame), and the track no longer drops at a 50 deg crank, so the inputs left to defend on are the
+missile ones (RWR warning, time to impact, seeker active), which look the same in DCS. Still easier than DCS (5 of 5);
+the next model has to learn the defence there. Fuze radius left at 10 m: at SIM_REV 17 a 15 m fuze would have turned 1 of
+red's 19 endgame misses into a hit and none of ours.
+
+**Chaff (our jet, DCS only; the simulator has no countermeasures).** The radar job sets the countermeasures panel once:
+MODE to MAN, PROGRAM to 1, CH (chaff) ON. While a missile is inbound with its seeker active or under 20 s from impact
+(`dcs_live.chaff_wanted`, from the policy's own RWR inputs), the pilot presses CMS forward for 0.3 s every 1.5 s (each press
+dispenses manual program 1), from the frame callback, so also during a radar or fire job. The console says when the panel is
+set (`chaff: countermeasures panel MAN, program 1, CH on (N chaff, M flares)`), when the count goes down
+(`chaff: dispensing (60 -> 59)`) or that four presses changed nothing; `results.csv` gains `chaff_presses` and
+`chaff_used`; `--no-chaff` turns it off. It needs **bvr_stick_export.lua version 2**: version 1 refused the whole
+countermeasures panel; version 2 lets its MODE (32 3010), PROGRAM (32 3009) and CH (32 3007) controls through (JETT and the
+rest stay refused) and sends the chaff and flare counts (`LoGetSnares`, `cm` in the telemetry). Re-install it:
+`python dcs\stick\install_export.py`. Whether chaff decoys red's AIM-120 in DCS, and how often, is not modelled in training.

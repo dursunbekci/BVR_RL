@@ -81,6 +81,15 @@ class StickPilot(threading.Thread):
         self.icp_aa_tried = False     # the ICP A-A button toggles: pressed at most once
         self.aa_said = None           # the A-A state last reported
         self.center_az = None         # the bearing the cursor was last put on
+        # chaff: the main thread says when (chaff()); the frame callback presses CMS forward every CHAFF_EVERY s
+        self.chaff_on = False
+        self.cmds_tried = False       # the countermeasures panel set to MAN, program 1, chaff on (once)
+        self.cmds_ok = False
+        self.cms_presses = 0
+        self._cms_down = None         # DCS time the CMS switch went forward (released after CHAFF_HOLD)
+        self._cms_last = -1e9
+        self.chaff_first = self.chaff_last = None   # the jet's chaff count at the first press, and the latest
+        self._chaff_said = False
         # timings, DCS seconds: each fire job {"bug_s", "total_s", "ok"}, each timed bug {"s", "ok", ...} (fire_delay.py)
         self.fire_times, self.bug_times = [], []
 
@@ -95,6 +104,10 @@ class StickPilot(threading.Thread):
 
     def fire(self):
         self.jobs.put("fire")
+
+    def chaff(self, on):
+        """Dispense chaff while on (a missile inbound: dcs_live.py decides)."""
+        self.chaff_on = bool(on)
 
     def time_bug(self):
         """Drop the bug, then time a bug from there as a fire job does it, without a launch (fire_delay.py)."""
@@ -115,7 +128,9 @@ class StickPilot(threading.Thread):
     # ── the thread ──────────────────────────────────────────────────────
     def fn(self, f, tau):
         """The axes for frame f: the policy's command through the inner loop, or the present state held
-        until the first one comes."""
+        until the first one comes. Every frame also runs the chaff switch (_cms_tick), so chaff goes out
+        during a radar or fire job too."""
+        self._cms_tick(f)
         if self.target is None:
             if f.hdg is None or f.alt is None:
                 return None
@@ -164,12 +179,76 @@ class StickPilot(threading.Thread):
             try:
                 if self.armed:
                     cockpit.click(self.r, "mmc.MasterArmSw", self.defs, value=0.0, verbose=False)
+                if self._cms_down is not None:
+                    dev, cmd, _, up = cockpit.resolve("hotas.STICK_CMS_MANAGE_FWD", self.defs)
+                    self.link.click(dev, cmd, up, "s")
                 if self.overridden:
                     cockpit.click(self.r, "hotas.THROTTLE_DOG_FIGHT", self.defs, value=0.0, verbose=False)
             except Exception:
                 pass
             self.link.release()
             self.r.close()
+
+    # ── chaff ───────────────────────────────────────────────────────────
+    CHAFF_EVERY = 1.5          # s between presses of CMS forward (each dispenses the MAN program once)
+    CHAFF_HOLD = 0.3           # s the switch is held forward
+
+    def _cmds_setup(self):
+        """The countermeasures panel to MAN, PROGRAM 1 and the CH (chaff) switch ON, once: CMS forward then
+        dispenses manual program 1. Switch positions, so a repeat does no harm. bvr_stick_export.lua version 2
+        lets these three panel controls through (it refuses the rest of the panel)."""
+        r, d, fn = self.r, self.defs, self.fn
+        self.cmds_tried = True
+        res = []
+        for spec, value in (("cmds.Mode", 0.2), ("cmds.Prgm", 0.1), ("cmds.ChExp", 1.0)):
+            res.append(cockpit.click(r, spec, d, value=value, fn=fn, verbose=False))
+        refused = [x for x in res if isinstance(x, dict) and x.get("err") == "refused"]
+        self.cmds_ok = not refused
+        fc = cockpit.last_with(r.frames[-60:], "cm")
+        cm = fc.raw.get("cm") if fc else None
+        self.events.put(("chaff", "setup" if self.cmds_ok else "refused",
+                         "countermeasures panel MAN, program 1, CH on"
+                         + (f" ({cm.get('chaff')} chaff, {cm.get('flare')} flares)" if isinstance(cm, dict) else "")
+                         if self.cmds_ok else
+                         "the export refused the countermeasures panel: install bvr_stick_export.lua version 2 "
+                         "(python dcs\\stick\\install_export.py); CMS forward is pressed anyway"))
+
+    def _chaff_count(self):
+        fc = cockpit.last_with(self.r.frames[-30:], "cm")
+        cm = fc.raw.get("cm") if fc else None
+        return cm.get("chaff") if isinstance(cm, dict) else None
+
+    def _cms_tick(self, f):
+        """CMS forward for CHAFF_HOLD s every CHAFF_EVERY s while chaff is on, straight on the link (no settle:
+        it runs inside the frame callback); says once whether the jet's chaff count goes down."""
+        t = f.t
+        if t is None:
+            return
+        dev, cmd, down, up = cockpit.resolve("hotas.STICK_CMS_MANAGE_FWD", self.defs)
+        if self._cms_down is not None:
+            if t - self._cms_down >= self.CHAFF_HOLD:
+                self.link.click(dev, cmd, up, "s")
+                self._cms_down = None
+            return
+        if not self.chaff_on or t - self._cms_last < self.CHAFF_EVERY:
+            return
+        n = self._chaff_count()
+        if self.chaff_first is None:
+            self.chaff_first = n
+        if n is not None:
+            self.chaff_last = n
+        if not self._chaff_said and self.cms_presses >= 1:
+            if n is not None and self.chaff_first is not None and n < self.chaff_first:
+                self._chaff_said = True
+                self.events.put(("chaff", "ok", f"dispensing (chaff {self.chaff_first} -> {n})"))
+            elif self.cms_presses >= 4:
+                self._chaff_said = True
+                self.events.put(("chaff", "none", f"{self.cms_presses} CMS presses and " + (
+                    f"the chaff count is still {n}: the countermeasures panel did not dispense"
+                    if n is not None else "no chaff count from the export (bvr_stick_export.lua before version 2)")))
+        self.link.click(dev, cmd, down, "s")
+        self._cms_down = self._cms_last = t
+        self.cms_presses += 1
 
     # ── jobs ────────────────────────────────────────────────────────────
     def _target_az(self):
@@ -193,6 +272,8 @@ class StickPilot(threading.Thread):
         r, d, fn = self.r, self.defs, self.fn
         cockpit.settle(r, 0.3, fn)
         self._aa()
+        if not self.cmds_tried:
+            self._cmds_setup()
         info = self._page()
         if info["mode"] != "TWS":
             cockpit.click(r, "hotas.STICK_TGT_MANAGE_RIGHT", d, hold=1.5, fn=fn, verbose=False)

@@ -120,6 +120,12 @@ class AIM120:
         self.t_since_update  = 0.0
         self.seeker_active   = False
         self.guidance_valid  = True   # seeded at launch
+        # The 3-second support rule (SUPPORT_TIMEOUT): without its shooter's
+        # guidance the missile is removed before its seeker turns on. False:
+        # it flies on to the extrapolated last estimate and turns its seeker on
+        # as usual, as a DCS missile does when its shooter loses the lock
+        # (SIM_REV 18: scripted red's missiles; the agent's keep the rule).
+        self.support_rule    = True
         self._loft_done      = False  # the loft climb, if any, has ended
 
         # Last known target state (from datalink). These are ESTIMATES, not truth.
@@ -211,7 +217,7 @@ class AIM120:
                 and not self.seeker_active):
             if not self.guidance_valid:
                 self.t_since_update += dt
-                if self.t_since_update > self.cfg.SUPPORT_TIMEOUT:
+                if self.support_rule and self.t_since_update > self.cfg.SUPPORT_TIMEOUT:
                     self.phase = MslPhase.MISS
                     events.append(_ev("MISSILE_MISS", id=self.id, owner=self.owner,
                                       miss_dist=round(rng_to_tgt, 1),

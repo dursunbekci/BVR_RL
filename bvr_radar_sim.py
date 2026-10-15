@@ -103,6 +103,13 @@ class RadarSim:
     enable_notch = False
     NOTCH_CLOSURE = 25.0
 
+    # Per-episode spread of the azimuth limit (randomize=True): 60 deg x (1 +- FOV_AZ_SPREAD). It was 0.15
+    # (51-69 deg) until SIM_REV 18: a 50 deg crank then lost the track in many episodes just as red's
+    # missile came, and the policy learned to break when the track dropped (89% of decisions with no
+    # track and under 10 s to impact, 3% with one), a cue the F-16's radar never gave in DCS, which
+    # held the track at 56 deg off the nose to impact. 0.05: 57-63 deg.
+    FOV_AZ_SPREAD = 0.05
+
     # Parameters a library radar item (bvr_library.radar_config) may set.
     CFG_KEYS = ("MAX_RANGE", "FOV_AZ", "FOV_EL", "REF_RANGE", "SIG_AZ_REF", "SIG_EL_REF",
                 "SIG_RNG_REF", "SIG_RDOT_REF", "SIG_ADOT_REF", "TAU",
@@ -136,7 +143,7 @@ class RadarSim:
         if self._randomize:
             r = self.rng
             self.max_range = self.MAX_RANGE * float(r.uniform(0.85, 1.15))
-            self.fov_az = self.FOV_AZ * float(r.uniform(0.85, 1.15))
+            self.fov_az = self.FOV_AZ * float(r.uniform(1.0 - self.FOV_AZ_SPREAD, 1.0 + self.FOV_AZ_SPREAD))
             self.fov_el = self.FOV_EL * float(r.uniform(0.85, 1.15))
             self._sig_scale = float(r.uniform(0.7, 1.5))
         else:

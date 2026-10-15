@@ -320,7 +320,7 @@ class StickLiveWorld(DcsLiveWorld):
                     self.fire_why.append(why)
                 self.log(f"  fire {status} at {self.t - self.t0:.1f} s: {why}")
             else:
-                self.log(f"  radar: {why}")
+                self.log(f"  {kind}: {why}")
 
     def step(self, cmd1, cmd2):
         self._pilot_events()
@@ -380,6 +380,16 @@ class DcsLiveEnv(BvrEnv):
             info["terminal_outcome"] = self._outcome or "MISSION_END"
             self._ready = False
         return obs, reward, terminated, truncated, info
+
+
+CHAFF_TTI_S = 20.0      # chaff while a missile is inbound with its seeker on, or this close to impact
+
+
+def chaff_wanted(obs) -> bool:
+    """Chaff from the policy's own inputs (OBS_LABELS): the RWR's launch warning, with the missile's seeker
+    active or its time to impact under CHAFF_TTI_S."""
+    o = {k: float(obs[i]) for i, k in enumerate(OBS_LABELS) if k in ("rwr_warn", "rwr_seeker_active", "inbound_tti")}
+    return o["rwr_warn"] > 0.5 and (o["rwr_seeker_active"] > 0.5 or 0.0 < o["inbound_tti"] < CHAFF_TTI_S)
 
 
 def launch_delays(fire_log) -> list:
@@ -529,6 +539,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             action, _ = model.predict(sobs, deterministic=not getattr(args, "stochastic", False), action_masks=mask)
             obs, _, term, trunc, info = env.step(action)
             sobs = stacker.update(obs)
+            if pilot is not None and not args.shadow:
+                pilot.chaff(chaff_wanted(raw["obs"]) and not getattr(args, "no_chaff", False))
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
             world.boost_steps += int(world._boosting)    # once per decision, not per frame
             a = [int(x) for x in np.asarray(action).reshape(-1)]
@@ -563,7 +575,10 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            "launch_delays_s": ";".join(f"{d:.1f}" for d in launch_delays(world.fire_log)),
            "fire_timeout_reasons": ";".join(getattr(world, "fire_why", [])),
            "missiles_removed": sum(1 for *_, st in world.support_log if st == "destroyed"),
-           "support_losses": info.get("support_losses", 0)}
+           "support_losses": info.get("support_losses", 0),
+           "chaff_presses": pilot.cms_presses if pilot is not None else "",
+           "chaff_used": (pilot.chaff_first - pilot.chaff_last)
+           if pilot is not None and pilot.chaff_first is not None and pilot.chaff_last is not None else ""}
     # How often BLUE-1 flew well below the speed the policy asked for. The DCS
     # AI following a route may not use afterburner; the simulator always does.
     short = [c - f > SPEED_SHORT_MPS for c, f in spd]
@@ -624,6 +639,9 @@ def main(argv=None):
                          "make the mission with dcs/make_mission.py --blue-player and sit in BLUE-1")
     ap.add_argument("--stick-gains", help="stick gains file (default dcs_runs/stick_gains.json, from stick_test.py)")
     ap.add_argument("--doctrine", default="BALANCED")
+    ap.add_argument("--no-chaff", action="store_true",
+                    help="--stick: no chaff (by default the pilot presses CMS forward every 1.5 s while a missile is "
+                         "inbound with its seeker on or under 20 s from impact)")
     ap.add_argument("--stochastic", action="store_true",
                     help="sample the policy's actions (as training does) instead of always the most likely: repeated "
                          "runs from one mission then differ. For different fights use missions with different starts "

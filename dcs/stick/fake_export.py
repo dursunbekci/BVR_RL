@@ -116,7 +116,15 @@ class FakeCockpit:
                      (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
                      (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm",
-                     (d["HOTAS"], h["THROTTLE_DOG_FIGHT"]): "dogfight"}
+                     (d["HOTAS"], h["THROTTLE_DOG_FIGHT"]): "dogfight",
+                     (d["HOTAS"], h["STICK_CMS_MANAGE_FWD"]): "cms_fwd",
+                     (d["CMDS"], defs["commands"]["cmds"]["Mode"]): "cmds_mode",
+                     (d["CMDS"], defs["commands"]["cmds"]["Prgm"]): "cmds_prgm",
+                     (d["CMDS"], defs["commands"]["cmds"]["ChExp"]): "cmds_ch"}
+        # the countermeasures panel: OFF, program BIT, CH off until set; CMS forward dispenses one chaff
+        # (manual program 1) in MAN, SEMI or AUTO with a program chosen and CH on
+        self.cmds_mode, self.cmds_prgm, self.cmds_ch = 0.0, 0.0, False
+        self.chaff, self.flare = 60, 60
         self.icp_aa_works = True           # False: the ICP A-A press does nothing (a live run, 15 October)
         self.aa = self.armed = False
         self.stage = 0                     # 0 searching, 1 designated (bugged), 2 single-target track
@@ -156,6 +164,15 @@ class FakeCockpit:
             self.soi_left = True
         elif name == "dms_right" and value != 0.0:
             self.soi_left = False
+        elif name == "cmds_mode":
+            self.cmds_mode = value
+        elif name == "cmds_prgm":
+            self.cmds_prgm = value
+        elif name == "cmds_ch":
+            self.cmds_ch = value == 1.0
+        elif name == "cms_fwd" and value == 1.0:
+            if 0.15 < self.cmds_mode < 0.45 and self.cmds_prgm > 0.05 and self.cmds_ch and self.chaff > 0:
+                self.chaff -= 1
         elif name == "dogfight":
             if value == -1.0:              # MISSILE OVERRIDE: A-A with the missile selected
                 self.aa = True
@@ -248,6 +265,7 @@ class FakeCockpit:
                       "limits": self.stage == 1, "td": self.stage == 1, "tll": self.stage == 2, "threat": self.aa,
                       "aa": self.aa, "msl120": self.aa},
                "ball": [self.missile] if self.missile else [],
+               "cm": {"chaff": self.chaff, "flare": self.flare},
                "pay": {"CurrentStation": 7, "Stations": self.stores}}
         return out
 

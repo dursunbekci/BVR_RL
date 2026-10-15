@@ -98,6 +98,9 @@ class SimWorld:
         self.alive     = [True] * self.n
         self._prev_fire = [0] * self.n
         self._rwr_t_warn: dict = {}
+        # Shooters whose missiles fly without the 3-second support rule (the
+        # env sets it per episode: scripted red in 1v1, SIM_REV 18).
+        self.no_support_rule: set = set()
 
     # 1v1 names, kept for readers of the two-aircraft world
     ac1  = property(lambda self: self.acs[0])
@@ -270,6 +273,7 @@ class SimWorld:
         handoff = float(self._rng.uniform(lo, hi))
         m = AIM120(owner, tgt_id, pos_src, ac_src.vel_enu.copy(), handoff,
                    cfg=mcfg, seeker_range_scale=scale)
+        m.support_rule = owner not in self.no_support_rule
         m.last_tgt_pos = pos_tgt.copy()
         m.last_tgt_vel = ac_tgt.vel_enu.copy()
         m.t_launch     = self.t_sim

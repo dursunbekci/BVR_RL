@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 17
+SIM_REV = 18
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -501,6 +501,13 @@ _SIM_REV_NOTES = {
         "that reached the target were scored misses at 10-11 m, and red's too (60 fights against DCS-like "
         "ADAPTIVE: ours 27 -> 34 hits of 39 -> 37, misses now 11-35 m). Missiles kill as in DCS; R-max "
         "is unchanged (8 envelope points identical), so no recalibration",
+    18: "red as in DCS (five live fights of 15 October, all lost to red's first missile while the "
+        "policy only cranked): scripted red's missiles fly on without the 3-second support rule (a DCS "
+        "missile is not removed when its shooter loses the lock; 30% of red's were); the radar's azimuth "
+        "limit is drawn from 57-63 deg, not 51-69 (a 50 deg crank lost the track in many episodes and the "
+        "policy learned to break only when the track dropped, which DCS never did); the DCS-like red fires "
+        "at 0.72-0.90 of R-max (a fifth at 0.95-1.0), as the DCS AI did, not 0.95-1.0. 1v1. Expect the "
+        "win rate to fall at first: cranking alone no longer defeats red's missiles",
 }
 
 

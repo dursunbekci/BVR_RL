@@ -274,7 +274,8 @@ def test_click():
     refused = ["CLICK 10 3006 1",                           # CPT_MECH: ejection handle
                "CLICK 10 3003 1", "CLICK 7 3001 1",         # canopy, landing gear handle
                "CLICK 6 3003 1", "CLICK 4 3001 1", "CLICK 3 3001 1", "CLICK 2 3001 1",
-               "CLICK 32 3004 1",                           # countermeasures jettison
+               "CLICK 32 3004 1", "CLICK 32 3015 1",        # countermeasures jettison (switch, iterator)
+               "CLICK 32 3011 1", "CLICK 32 3001 1",        # the rest of the panel: dispense button, RWR source
                "CLICK 19 3003 1", "CLICK 19 3004 1", "CLICK 19 3005 1", "CLICK 19 3018 1"]   # stores jettison, ALT REL
     for text in refused:
         m.send(text)
@@ -290,13 +291,21 @@ def test_click():
     assert [dv[k] for k in ("CONTROL_INTERFACE", "ELEC_INTERFACE", "FUEL_INTERFACE", "HYDRO_INTERFACE", "ENGINE_INTERFACE",
                             "GEAR_INTERFACE", "OXYGEN_INTERFACE", "CPT_MECH", "CMDS")] == [2, 3, 4, 5, 6, 7, 8, 10, 32]
     assert defs["devices"]["MMC"] == 19 and defs["commands"]["cmds"]["Jett"] == 3004
+    # three countermeasures-panel controls pass (version 2): MODE, PROGRAM, CH
+    cm = defs["commands"]["cmds"]
+    assert (cm["Mode"], cm["Prgm"], cm["ChExp"]) == (3010, 3009, 3007)
+    n = len(clicks())
+    for text in ("CLICK 32 3010 0.2", "CLICK 32 3009 0.1", "CLICK 32 3007 1"):
+        m.send(text)
+    m.run(0.2)
+    assert clicks()[n:] == [(32, 3010, 0.2), (32, 3009, 0.1), (32, 3007, 1)], clicks()[n:]
     # a failing DCS call is reported, not fatal
     m.L.execute("function GetDevice(id) error('no device') end")
     m.send("CLICK 16 3010 1")
     m.run(0.1)
     last = [d for d in m.lines() if d["ev"] == "click"][-1]
     assert last["ok"] is False and "no device" in last["err"], last
-    print("  CLICK ....................... OK  (5 cockpit commands pass; 12 dangerous ones refused, the deny list "
+    print("  CLICK ....................... OK  (5 cockpit commands and 3 chaff-panel ones pass; 15 refused, the deny list "
           "matches the module's numbers; a DCS error is reported)")
 
 
@@ -1148,6 +1157,47 @@ def test_own_missile():
     print("  own-missile launch check .... OK  (own side, missile type, near the jet)")
 
 
+def test_chaff():
+    """The pilot sets the countermeasures panel up in its radar job and, while chaff is on, presses CMS forward
+    every CHAFF_EVERY s (on the fake cockpit each press of MAN program 1 is one chaff); it says when the jet's
+    chaff count goes down; nothing goes out once chaff is off."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    link = FakeLink(cockpit_defs=defs)
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    with tempfile.TemporaryDirectory() as d:
+        p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+        p.start()
+        try:
+            p.radar()
+            t0 = _time.time()
+            while not p.cmds_tried and _time.time() - t0 < 30:
+                _time.sleep(0.01)
+            assert link.cockpit.cmds_ch and abs(link.cockpit.cmds_mode - 0.2) < 1e-9, "panel not set up"
+            assert link.cockpit.chaff == 60, "chaff before any missile"
+            p.chaff(True)
+            t0 = _time.time()
+            while link.cockpit.chaff > 55 and _time.time() - t0 < 60:
+                _time.sleep(0.01)
+            p.chaff(False)
+            _time.sleep(0.5)
+            n_off = link.cockpit.chaff
+            _time.sleep(1.0)
+            ev = p.drain_events()
+        finally:
+            p.stop()
+    assert n_off <= 55 and link.cockpit.chaff == n_off, (n_off, link.cockpit.chaff)
+    assert any(k == "chaff" and st == "setup" for k, st, _ in ev), ev
+    assert any(k == "chaff" and st == "ok" for k, st, _ in ev), ev
+    assert p.chaff_first == 60 and p.cms_presses >= 5, (p.chaff_first, p.cms_presses)
+    print(f"  chaff ....................... OK  (panel MAN / program 1 / CH on; {p.cms_presses} CMS presses, "
+          f"chaff 60 -> {link.cockpit.chaff}; none once off)")
+
+
 if __name__ == "__main__":
     if lua() is None:
         print("lupa is not installed (pip install lupa): skipped")
@@ -1170,4 +1220,5 @@ if __name__ == "__main__":
     test_stall_message()
     test_install()
     test_own_missile()
-    print("18/18 passed")
+    test_chaff()
+    print("19/19 passed")

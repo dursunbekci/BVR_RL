@@ -247,7 +247,7 @@ class ShooterOpponent(BvrOpponent):
     # Once its missile no longer needs support: turn cold and run (DRAG), or
     # press: turn hot again and keep attacking, as the DCS AI does (SIM_REV 12).
     PRESS = False
-    LONG_SHOT = False     # ADAPTIVE's DCS-like episodes: SHOT_RMAX_FRAC 0.95-1.0 and PRESS
+    LONG_SHOT = False     # ADAPTIVE's DCS-like episodes: SHOT_RMAX_FRAC 0.72-0.90 (a fifth 0.95-1.0) and PRESS
     # Speeds, m/s: going hot (COMMIT, REATTACK), cranking, beaming (shallow
     # defence), and running (DRAG, deep and last-ditch defence). ADAPTIVE flies
     # faster since SIM_REV 13: the DCS AI holds about Mach 1.3 (385 m/s) while
@@ -411,7 +411,12 @@ class AdaptiveShooterOpponent(ShooterOpponent):
             # against dcs_v7; at 1.0, in 33, first in 31, from 62 km (the DCS
             # AI fired from 63 km).
             self.LONG_SHOT = bool(self.rng.random() < self.long_shot_frac)
-            frac = float(self.rng.uniform(0.95, 1.0))
+            # Where the DCS AI fires (SIM_REV 18): in the five live fights of 15 October at 0.73-1.02 of
+            # its R-max against us (median 0.77, 43-50 km); the one before at 63-64 km. Mostly 0.72-0.90,
+            # a fifth at the edge. From 0.95-1.0 red's long shots arrived slow: against dcsfit_v3, 16 of
+            # 110 ran out of energy and 19 missed a target only cranking by 50-460 m; in DCS 5 of 5 hit.
+            u = float(self.rng.random())
+            frac = float(self.rng.uniform(0.95, 1.0)) if u < 0.2 else float(self.rng.uniform(0.72, 0.90))
             self.PRESS = self.LONG_SHOT
             if self.LONG_SHOT:
                 self.SHOT_RMAX_FRAC = frac
