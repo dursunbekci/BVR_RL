@@ -273,13 +273,31 @@ class StickPilot(threading.Thread):
         for _ in range(6):
             cockpit.settle(r, 0.5, fn)
             fo2 = cockpit.last_with(r.frames[-60:], "obj")
+            me = fo2.raw.get("me") if fo2 else None
             new = [o for o in ((fo2.raw.get("obj") or []) if fo2 else [])
-                   if o.get("id") not in ids0 and o.get("l1") == 4]
+                   if o.get("id") not in ids0 and self._own_missile(o, me)]
             mrm1 = cockpit.hud_mrm(r, self.link)
             if new or (mrm0 is not None and mrm1 is not None and mrm1 < mrm0):
                 self.fire_times.append({"bug_s": round(t_bug - t0, 2), "total_s": round(r.frames[-1].t - t0, 2),
                                         "ok": True})
-                self.events.put(("fire", "launched", f"HUD {mrm0} -> {mrm1} MRM"))
+                self.events.put(("fire", "launched", f"HUD {mrm0} -> {mrm1} MRM"
+                                 + (f", {new[0].get('name')} off the rail" if new else "")))
                 return
         self.fire_times.append({"bug_s": round(t_bug - t0, 2), "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
-        self.events.put(("fire", "timeout", f"no missile left the rail (HUD {mrm0} MRM)"))
+        rd = cockpit.last_with(r.frames[-200:], "rd")
+        rd = rd.raw.get("rd") if rd else None
+        hud = ("no HUD data" if not rd else
+               f"HUD A-A {'yes' if rd.get('aa') else 'NO'}, AIM-120 selected {'yes' if rd.get('msl120') else 'NO'}")
+        self.events.put(("fire", "timeout", f"no missile left the rail (HUD {mrm0} MRM; {hud}; radar {self._state()})"))
+
+    @staticmethod
+    def _own_missile(o, me, near=5000.0):
+        """A missile (level 4 4) of our own side within `near` m of us: one just off our rail. Any other new
+        weapon object (the bandit's missile, chaff, a flare) is not our launch: a live run once took one for it."""
+        if o.get("l1") != 4 or o.get("l2") != 4:
+            return False
+        if me and o.get("coal") is not None and me.get("coal") is not None and o["coal"] != me["coal"]:
+            return False
+        if me and None not in (o.get("x"), o.get("z"), me.get("x"), me.get("z")):
+            return math.hypot(o["x"] - me["x"], o["z"] - me["z"]) < near
+        return True

@@ -1135,6 +1135,19 @@ def test_install():
     print("  install_export.py ........... OK  (block in and out byte for byte, loads the right file, install/undo)")
 
 
+def test_own_missile():
+    """A launch is our own missile just off the rail: not the bandit's missile, chaff or a flare, nor one far off."""
+    from pilot import StickPilot
+    me = {"coal": 2, "x": 0.0, "z": 0.0}
+    ours = {"l1": 4, "l2": 4, "coal": 2, "x": 300.0, "z": 50.0}
+    assert StickPilot._own_missile(ours, me)
+    assert not StickPilot._own_missile(dict(ours, coal=1), me)                 # the bandit's
+    assert not StickPilot._own_missile(dict(ours, l2=8), me)                   # not a missile (countermeasure)
+    assert not StickPilot._own_missile(dict(ours, x=20000.0), me)              # far away: an earlier one
+    assert StickPilot._own_missile({"l1": 4, "l2": 4}, None)                   # no position data: as before
+    print("  own-missile launch check .... OK  (own side, missile type, near the jet)")
+
+
 if __name__ == "__main__":
     if lua() is None:
         print("lupa is not installed (pip install lupa): skipped")
@@ -1156,4 +1169,5 @@ if __name__ == "__main__":
     test_fire_delay()
     test_stall_message()
     test_install()
-    print("17/17 passed")
+    test_own_missile()
+    print("18/18 passed")

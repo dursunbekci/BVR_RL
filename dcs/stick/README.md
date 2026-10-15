@@ -631,3 +631,11 @@ against a target flying straight (0.03-0.7 m at 500 Hz). Now the last 2.5 km of 
 12 misses -> 34 / 3 (hits at about 1 m), red's misses now 11-490 m (real evasion). R-max is unchanged at 8 envelope
 points, so no recalibration. Still to look at: red's missiles that die because red's radar loses us (14-24 of 102 in
 those fights; none in the DCS fight, where the DCS AI kept us in its radar).
+
+**A launch that was not ours (15 October, dcsfit_v3_selfplay, live_20261015_152411)**: the first fire request printed
+`fire launched at 68.7 s: HUD None -> None MRM`, yet the episode ended with 0 shots: DCS reported no missile from BLUE-1.
+The HUD count could not be read (None: the HUD did not draw `N MRM`), so the fire job went by new world objects alone, and
+it took any new weapon object (level 4) for our launch: the bandit's missile or a countermeasure would do. A launch now has to
+be a missile (level 4 4) of our own coalition within 5 km of the jet, and the launched line names it (`AIM_120C off the
+rail`). A request that times out now says whether the HUD was in A-A and showed the AIM-120 selected, and the radar's lock
+state, so the next run tells why no missile left the rail.
