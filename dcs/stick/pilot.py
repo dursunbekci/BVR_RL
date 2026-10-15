@@ -179,8 +179,12 @@ class StickPilot(threading.Thread):
     def _page(self):
         return cockpit.fcr_info(cockpit.ind_text(self.r, self.link, cockpit._fcr_id(self.r)))
 
-    def _radar(self, force=False):
-        """A-A, TWS, the cursor on the target's bearing. Quiet when all is already so."""
+    PREBUG_S = 6.0             # s of target management presses a radar job spends bugging the track
+
+    def _radar(self, force=False, prebug=True):
+        """A-A, TWS, the cursor on the target's bearing, and the track bugged (a pilot bugs the target before
+        deciding to shoot: a fire request then waits only for the release, 7-14 s less in DCS). Quiet when all is
+        already so."""
         r, d, fn = self.r, self.defs, self.fn
         cockpit.settle(r, 0.3, fn)
         if cockpit.master_mode(cockpit.last_with(r.frames[-200:], "rd")) is False:
@@ -200,14 +204,26 @@ class StickPilot(threading.Thread):
                                                        or abs(az - self.center_az) > 10.0):
                 cockpit.center_cursor(r, d, fn, az, verbose=False)
                 self.center_az = az
+            if prebug and az is not None and abs(az) < 50.0 and self._press_bug(self.PREBUG_S):
+                self.events.put(("radar", "bugged", f"track bugged ahead of a shot (target {az:+.0f} deg)"))
+                if not self.armed:                   # and master arm on, as a pilot does before the shot
+                    cockpit.click(r, "mmc.MasterArmSw", d, value=1.0, fn=fn, verbose=False)
+                    cockpit.settle(r, 0.5, fn)
+                    self.armed = True
 
     def _bug(self, max_secs=10.0):
         """Target management right every 2 s until the track is bugged (the launch zone is drawn or the
         markers say designated); the cursor goes to the target's bearing first."""
+        if self._state() in ("designated", "stt"):
+            return True
+        self._radar(force=True, prebug=False)
+        return self._press_bug(max_secs)
+
+    def _press_bug(self, max_secs):
+        """Target management right every 2 s until the track is bugged; True once it is."""
         r, d, fn = self.r, self.defs, self.fn
         if self._state() in ("designated", "stt"):
             return True
-        self._radar(force=True)
         t0 = r.frames[-1].t
         while r.frames[-1].t - t0 < max_secs:
             cockpit.click(r, "hotas.STICK_TGT_MANAGE_RIGHT", d, fn=fn, verbose=False)
