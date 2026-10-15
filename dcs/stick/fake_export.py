@@ -115,7 +115,9 @@ class FakeCockpit:
                      (d["HOTAS"], h["STICK_DISP_MANAGE_LEFT"]): "dms_left",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
-                     (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm"}
+                     (d["MMC"], defs["commands"]["mmc"]["MasterArmSw"]): "arm",
+                     (d["HOTAS"], h["THROTTLE_DOG_FIGHT"]): "dogfight"}
+        self.icp_aa_works = True           # False: the ICP A-A press does nothing (a live run, 15 October)
         self.aa = self.armed = False
         self.stage = 0                     # 0 searching, 1 designated (bugged), 2 single-target track
         self.soi_left = True               # which MFD the cursor and target management act on
@@ -154,7 +156,10 @@ class FakeCockpit:
             self.soi_left = True
         elif name == "dms_right" and value != 0.0:
             self.soi_left = False
-        elif name == "aa" and value == 1.0:
+        elif name == "dogfight":
+            if value == -1.0:              # MISSILE OVERRIDE: A-A with the missile selected
+                self.aa = True
+        elif name == "aa" and value == 1.0 and self.icp_aa_works:
             self.aa = True                 # (in DCS the radar page stayed the sensor of interest: no DMS needed)
         elif name == "cursor" and value == 1.0 and self.soi_left:
             self.cursor += 1

@@ -925,6 +925,7 @@ def test_dcs_live_stick():
             return super().next(timeout)
     defs = cockpit.load_defs()
     stick = SlowLink(cockpit_defs=defs, scan_needed=999)
+    stick.cockpit.icp_aa_works = False      # as in DCS on 15 October: A-A has to come from missile override
     gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
              "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
     fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=200.0, lockstep=True)
@@ -947,6 +948,7 @@ def test_dcs_live_stick():
     launched = [m for m in logs if "fire launched" in m]
     assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
     assert not stick.controlling, "the axes were not released at the end"
+    assert any("A-A master mode by the missile override" in m for m in logs), logs[:20]
     delays = [float(x) for x in row["launch_delays_s"].split(";") if x]
     assert delays and all(d > 0 for d in delays), row
     assert dcs_live.launch_delays([(1.0, "requested"), (5.5, "launched"), (9.0, "requested"), (19.0, "timeout"),

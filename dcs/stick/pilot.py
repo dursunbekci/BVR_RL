@@ -77,6 +77,9 @@ class StickPilot(threading.Thread):
         self._halt = threading.Event()
         self.aborts = 0
         self.armed = False
+        self.overridden = False       # the DOGFIGHT switch was put to MISSILE OVERRIDE (back to centre at the end)
+        self.icp_aa_tried = False     # the ICP A-A button toggles: pressed at most once
+        self.aa_said = None           # the A-A state last reported
         self.center_az = None         # the bearing the cursor was last put on
         # timings, DCS seconds: each fire job {"bug_s", "total_s", "ok"}, each timed bug {"s", "ok", ...} (fire_delay.py)
         self.fire_times, self.bug_times = [], []
@@ -161,6 +164,8 @@ class StickPilot(threading.Thread):
             try:
                 if self.armed:
                     cockpit.click(self.r, "mmc.MasterArmSw", self.defs, value=0.0, verbose=False)
+                if self.overridden:
+                    cockpit.click(self.r, "hotas.THROTTLE_DOG_FIGHT", self.defs, value=0.0, verbose=False)
             except Exception:
                 pass
             self.link.release()
@@ -187,9 +192,7 @@ class StickPilot(threading.Thread):
         already so."""
         r, d, fn = self.r, self.defs, self.fn
         cockpit.settle(r, 0.3, fn)
-        if cockpit.master_mode(cockpit.last_with(r.frames[-200:], "rd")) is False:
-            cockpit.click(r, "ufc.AA", d, fn=fn, verbose=False)
-            cockpit.settle(r, 1.0, fn)
+        self._aa()
         info = self._page()
         if info["mode"] != "TWS":
             cockpit.click(r, "hotas.STICK_TGT_MANAGE_RIGHT", d, hold=1.5, fn=fn, verbose=False)
@@ -210,6 +213,35 @@ class StickPilot(threading.Thread):
                     cockpit.click(r, "mmc.MasterArmSw", d, value=1.0, fn=fn, verbose=False)
                     cockpit.settle(r, 0.5, fn)
                     self.armed = True
+
+    def _aa(self):
+        """The A-A master mode, so that weapon release launches the AIM-120: the throttle's DOGFIGHT switch to MISSILE
+        OVERRIDE (a switch position, through the HOTAS route that target management and weapon release take, so a
+        second press does no harm), then, if the HUD still draws no A-A, the ICP A-A button once (a toggle). In a live
+        run (15 October) the ICP press alone left the HUD in NAV for the whole fight: no missile could leave the rail.
+        True when the HUD shows A-A, False when it does not, None when there is no display data."""
+        r, d, fn = self.r, self.defs, self.fn
+        mm = cockpit.master_mode(cockpit.last_with(r.frames[-200:], "rd"))
+        if mm is not False:
+            return mm
+        how = "missile override (DOGFIGHT switch aft)"
+        cockpit.click(r, "hotas.THROTTLE_DOG_FIGHT", d, value=-1.0, fn=fn, verbose=False)
+        self.overridden = True
+        cockpit.settle(r, 1.0, fn)
+        mm = cockpit.master_mode(cockpit.last_with(r.frames[-60:], "rd"))
+        if mm is False and not self.icp_aa_tried:
+            self.icp_aa_tried = True
+            how = "ICP A-A button"
+            cockpit.click(r, "ufc.AA", d, fn=fn, verbose=False)
+            cockpit.settle(r, 1.0, fn)
+            mm = cockpit.master_mode(cockpit.last_with(r.frames[-60:], "rd"))
+        if mm != self.aa_said:
+            self.aa_said = mm
+            self.events.put(("radar", "aa" if mm else "no_aa",
+                             f"A-A master mode by the {how}" if mm else
+                             "the HUD is still not in A-A after missile override and the ICP A-A button: "
+                             "weapon release will launch nothing"))
+        return mm
 
     def _bug(self, max_secs=10.0):
         """Target management right every 2 s until the track is bugged (the launch zone is drawn or the
@@ -256,6 +288,7 @@ class StickPilot(threading.Thread):
     def _fire(self):
         r, d, fn = self.r, self.defs, self.fn
         t0 = r.frames[-1].t
+        self._aa()
         if not self._bug():
             self.fire_times.append({"bug_s": None, "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
             self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"))

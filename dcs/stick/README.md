@@ -639,3 +639,16 @@ it took any new weapon object (level 4) for our launch: the bandit's missile or 
 be a missile (level 4 4) of our own coalition within 5 km of the jet, and the launched line names it (`AIM_120C off the
 rail`). A request that times out now says whether the HUD was in A-A and showed the AIM-120 selected, and the radar's lock
 state, so the next run tells why no missile left the rail.
+
+**Why nothing left the rail (same run, its cockpit log `stick_20261015_152411_live.jsonl`)**: the HUD never drew the A-A
+master mode: `rd.aa` and `rd.msl120` were false in all 453 display reads from 0 to 109 s, while the HUD itself was read (its
+target locator line `tll` came on at 35 s, the bug) and the payload showed four AIM-120C on stations 1, 2, 8 and 9 with
+`CurrentStation` 0 (no weapon selected). The radar job pressed the ICP A-A button every 15 s (it does so whenever the HUD reads
+not-A-A) and the HUD stayed in NAV: the ICP press does not work from this route in a live run. The radar ran in TWS and bugged
+the target in NAV all the same, so only the release failed. The `AIM_120C` at 68.8 s was RED's (coalition 1, 42 km away)
+and at 108.5 s RED's second. The radar job and each fire job now put the throttle's DOGFIGHT switch to MISSILE OVERRIDE
+(HOTAS device 16 command 3030, value -1: the HOTAS route that target management and weapon release take; a switch position,
+not a toggle) and press the ICP A-A button once only if the HUD still reads not-A-A; the console says which worked
+(`radar: A-A master mode by the missile override`) or that the HUD stayed out of A-A. The switch goes back to centre at the
+end of the episode. To check by hand in a mission: `python dcs\stick\stick_test.py click hotas.THROTTLE_DOG_FIGHT --value -1`
+(the HUD should show `4 MRM`), `--value 0` back to centre.
