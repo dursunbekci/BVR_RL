@@ -502,8 +502,9 @@ _SIM_REV_NOTES = {
         "ADAPTIVE: ours 27 -> 34 hits of 39 -> 37, misses now 11-35 m). Missiles kill as in DCS; R-max "
         "is unchanged (8 envelope points identical), so no recalibration",
     18: "red as in DCS (five live fights of 15 October, all lost to red's first missile while the "
-        "policy only cranked): scripted red's missiles fly on without the 3-second support rule (a DCS "
-        "missile is not removed when its shooter loses the lock; 30% of red's were); the radar's azimuth "
+        "policy only cranked): no missile has the 3-second support rule any more, ours and red's alike "
+        "(a DCS missile is not removed when its shooter loses the lock; 30% of red's were; support still "
+        "pays in accuracy, it no longer keeps the missile alive); the radar's azimuth "
         "limit is drawn from 57-63 deg, not 51-69 (a 50 deg crank lost the track in many episodes and the "
         "policy learned to break only when the track dropped, which DCS never did); the DCS-like red fires "
         "at 0.72-0.90 of R-max (a fifth at 0.95-1.0), as the DCS AI did, not 0.95-1.0. 1v1. Expect the "

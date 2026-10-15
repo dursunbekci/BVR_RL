@@ -1596,7 +1596,7 @@ def test_missile_endgame():
 
 
 def test_red_as_dcs():
-    """SIM_REV 18: scripted red's missiles fly on without the support rule (the agent's keep it), the radar's
+    """SIM_REV 18: no missile has the support rule (ours and red's alike; dcs_live leaves them to DCS), the radar's
     azimuth limit is drawn from 57-63 deg, the DCS-like red shoots at 0.72-0.90 of R-max (a fifth at 0.95-1.0);
     dcs_live.chaff_wanted reads the RWR inputs."""
     import numpy as np
@@ -1623,13 +1623,21 @@ def test_red_as_dcs():
         ends[rule] = out
     assert ends[True]["cause"] == "SUPPORT_LOST", ends[True]
     assert ends[False]["type"] == "MISSILE_HIT", ends[False]      # flew on to the target and its seeker took it
-    # the env: scripted red's missiles without the rule, the agent's with it
+    # the env: no missile has the rule, ours and red's alike (True: the old rule for both)
     env = BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, privileged_critic=False, seed=3)
     env.reset(seed=3)
-    assert env._world.no_support_rule == {2}
+    assert env._world.no_support_rule == {1, 2}
     env._world._launch(1, {}); env._world._launch(2, {})
     owners = {m.owner: m.support_rule for m in env._world.missiles}
-    assert owners == {1: True, 2: False}, owners
+    assert owners == {1: False, 2: False}, owners
+    env.SUPPORT_RULE = True
+    env._ready = False          # a second reset() without a step is otherwise a no-op
+    env.reset(seed=4)
+    env._world._launch(1, {}); env._world._launch(2, {})
+    assert {m.owner: m.support_rule for m in env._world.missiles} == {1: True, 2: True}
+    # DCS live leaves every missile to DCS by default, as training does
+    import inspect, dcs_live as _dl
+    assert inspect.signature(_dl.DcsLiveWorld.__init__).parameters["support_rule"].default == "dcs"
     # radar azimuth limit
     fov = [np.degrees(RadarSim(rng=np.random.default_rng(i)).fov_az) for i in range(200)]
     assert 56.9 < min(fov) and max(fov) < 63.1 and max(fov) - min(fov) > 4, (min(fov), max(fov))
@@ -1655,7 +1663,7 @@ def test_red_as_dcs():
     assert dcs_live.chaff_wanted(o)
     o[ix["inbound_tti"]] = 35.0; o[ix["rwr_seeker_active"]] = 1
     assert dcs_live.chaff_wanted(o)
-    print(f"  red as in DCS ............... OK  (no rule: the missile flew on and hit, with it removed; red's only; "
+    print(f"  missiles as in DCS .......... OK  (no rule: the missile flew on and hit, with it removed; both sides; "
           f"radar limit {min(fov):.1f}-{max(fov):.1f} deg; long shots at the edge {edge:.0%}; chaff on the RWR)")
 
 
@@ -1929,7 +1937,7 @@ if __name__ == "__main__":
         ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
         ("episode end", test_episode_end),
         ("missile endgame", test_missile_endgame),
-        ("red as in DCS", test_red_as_dcs),
+        ("missiles as in DCS", test_red_as_dcs),
         ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),

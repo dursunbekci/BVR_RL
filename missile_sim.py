@@ -124,7 +124,7 @@ class AIM120:
         # guidance the missile is removed before its seeker turns on. False:
         # it flies on to the extrapolated last estimate and turns its seeker on
         # as usual, as a DCS missile does when its shooter loses the lock
-        # (SIM_REV 18: scripted red's missiles; the agent's keep the rule).
+        # (SIM_REV 18: the 1v1 env turns the rule off for every missile).
         self.support_rule    = True
         self._loft_done      = False  # the loft climb, if any, has ended
 

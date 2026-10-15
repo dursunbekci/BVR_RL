@@ -673,25 +673,30 @@ cranking (red fired at 0.95-1.0 of R-max, 64.7 km median, and its missiles arriv
 
 **SIM_REV 18** (1v1; `bvr_library._SIM_REV_NOTES[18]`):
 
-- Scripted red's missiles fly without the support rule (`BvrEnv.SCRIPTED_RED_SUPPORT_RULE = False`, `AIM120.support_rule`):
-  without red's guidance a missile flies on to the extrapolated last estimate and turns its seeker on as usual, as a DCS
-  missile does when its shooter loses the lock. The agent's missiles (and a self-play snapshot's) keep the rule, which
-  `dcs_live.py` also applies to ours in DCS.
+- No missile has the 3-second support rule (`BvrEnv.SUPPORT_RULE = False`, `AIM120.support_rule`), ours, a scripted
+  red's and a self-play snapshot's alike: without its shooter's guidance a missile flies on to the extrapolated last
+  estimate and turns its seeker on as usual, as a DCS missile does when its shooter loses the lock. Support still pays (a
+  missile on fresh guidance aims where the target is, an unsupported one where it was going); it is no longer required to
+  keep the missile. `dcs_live.py` now leaves every missile to DCS by default (`--support-rule dcs`); `--support-rule
+  training` is the old rule, both sides, for checkpoints trained before SIM_REV 18. (A first version of this change kept the
+  rule for our missiles and, in `dcs_live.py --support-rule training`, still removed red's DCS missiles when red's
+  simulated radar lost us, the opposite of training: now one rule for both, in training and in DCS.)
 - The radar's azimuth limit is drawn from 60 deg x (1 +- 0.05), 57-63 deg (`RadarSim.FOV_AZ_SPREAD`; was 0.15), ours and
   red's; range and noise randomisation unchanged.
 - The DCS-like red (ADAPTIVE LONG_SHOT) fires at 0.72-0.90 of R-max, a fifth of episodes at 0.95-1.0 (was 0.95-1.0).
 
 Measured, dcsfit_v3_selfplay against the DCS-like red, the same 60 starts:
 
-| | SIM_REV 17 | SIM_REV 18 |
-|---|---|---|
-| red's missiles | 110 | 75 |
-| hit | 27 (25%) | 22 (29%) |
-| removed by the support rule | 33 | 0 |
-| ran out of energy | 16 | 29 (22 after our jet turned cold, guidance long lost) |
-| missed in the endgame | 19 (8 within 50 m) | 16 (10 within 50 m) |
-| score / win / loss | 0.60 / 47% / 27% | 0.55 / 47% / 37% |
-| we fired first | 3% | 17% |
+| | SIM_REV 17 | SIM_REV 18, rule off for red only (first version) | SIM_REV 18 |
+|---|---|---|---|
+| red's missiles | 110 | 75 | 72 |
+| hit | 27 (25%) | 22 (29%) | 19 (26%) |
+| removed by the support rule | 33 | 0 | 0 |
+| ran out of energy | 16 | 29 (22 after our jet turned cold, guidance long lost) | 32 |
+| missed in the endgame | 19 (8 within 50 m) | 16 (10 within 50 m) | 14 (11 within 50 m) |
+| our missiles: hit / ran out of energy / endgame miss | | | 41 / 31 / 5 of 82; 17 ended without our guidance, 6 of them hits (the rule would have removed all 17) |
+| score / win / loss | 0.60 / 47% / 27% | 0.55 / 47% / 37% | 0.56 / 47% / 35% |
+| we fired first | 3% | 17% | 17% |
 
 Turning away from red no longer kills red's missile; only defeating the missile does (running it out of energy cold,
 or beating it in the endgame), and the track no longer drops at a 50 deg crank, so the inputs left to defend on are the

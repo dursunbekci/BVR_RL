@@ -99,7 +99,7 @@ class SimWorld:
         self._prev_fire = [0] * self.n
         self._rwr_t_warn: dict = {}
         # Shooters whose missiles fly without the 3-second support rule (the
-        # env sets it per episode: scripted red in 1v1, SIM_REV 18).
+        # 1v1 env sets it per episode: both, SIM_REV 18; empty, the rule for all).
         self.no_support_rule: set = set()
 
     # 1v1 names, kept for readers of the two-aircraft world

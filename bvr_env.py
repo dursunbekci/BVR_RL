@@ -248,13 +248,16 @@ class BvrEnv(gym.Env):
     OPPONENT_RADAR = True
     # ...except for what happens when that track is lost (SIM_REV 18): a DCS
     # missile is never removed when its shooter loses the lock, it flies on to
-    # where the target was going and turns its seeker on. In DCS live runs red
-    # is the DCS AI, so scripted red's missiles fly that way too. Against them
-    # turning away no longer kills the missile, only defeating it does: with the
-    # rule, 30% of red's missiles against dcsfit_v3 were removed this way, and
-    # the five DCS fights of 15 October were lost to a policy that only cranked.
-    # The agent's missiles (and a self-play snapshot's) keep the rule.
-    SCRIPTED_RED_SUPPORT_RULE = False
+    # where the target was going and turns its seeker on. So no missile has the
+    # 3-second support rule any more, the agent's, a scripted red's and a
+    # self-play snapshot's alike: support still pays (a missile on fresh
+    # guidance aims where the target is, an unsupported one where it was going),
+    # it is no longer required to keep the missile. With the rule (red's only),
+    # 30% of red's missiles against dcsfit_v3 were removed, and the five DCS
+    # fights of 15 October were lost to a policy that only cranked. True: the
+    # rule for every missile, as before SIM_REV 18 (dcs_live.py --support-rule
+    # training is its DCS counterpart).
+    SUPPORT_RULE = False
 
     RADAR_OMEGA_COMPENSATED = False
     TRACK_CONVERT_HZ        = 10.0
@@ -392,9 +395,7 @@ class BvrEnv(gym.Env):
             self._opponent.fire_gate = self._opp_radar._can_fire
         self._world.reset(ic, episode_id=self._episode_id)
         if hasattr(self._world, "no_support_rule"):
-            self._world.no_support_rule = (
-                {2} if (isinstance(self._opponent, BvrOpponent) and not self.SCRIPTED_RED_SUPPORT_RULE)
-                else set())
+            self._world.no_support_rule = set() if self.SUPPORT_RULE else {1, 2}
         self._cmd_hdg=float(ic["ac1_psi"]); self._cmd_alt=float(ic["ac1_alt"])
         self._cmd_spd=float(ic["ac1_spd"])
 

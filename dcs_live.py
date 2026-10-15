@@ -99,7 +99,7 @@ class DcsLiveWorld(DcsReplayWorld):
     BEHIND_WARN_S = 2.0     # warn when DCS's data is this far ahead of the policy
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
-                 shadow=False, log=print, support_rule="training", speed_boost=None,
+                 shadow=False, log=print, support_rule="dcs", speed_boost=None,
                  eta_lock=None):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
@@ -494,7 +494,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     link.sink = lambda line: raw_fh.write(line + "\n")
 
     privileged = isinstance(model.observation_space, spaces.Dict)
-    rule = getattr(args, "support_rule", "training")
+    rule = getattr(args, "support_rule", "dcs")
     pilot = None
     if getattr(args, "stick_link", None) is not None:
         from pilot import StickPilot
@@ -623,10 +623,11 @@ def main(argv=None):
                                         "unless --opp-platform says otherwise")
     ap.add_argument("--opp-platform", help="library platform for red's envelopes "
                                             "(default: the checkpoint's training opponent)")
-    ap.add_argument("--support-rule", choices=["training", "dcs"], default="training",
-                    help="training (default): a missile without support from its shooter for 3 s "
-                         "before its seeker takes over is removed, as in the simulator; dcs: DCS "
-                         "decides (its missiles usually fly on and go active)")
+    ap.add_argument("--support-rule", choices=["training", "dcs"], default="dcs",
+                    help="dcs (default, as training since SIM_REV 18): DCS decides, every missile flies on "
+                         "without its shooter's support and turns its seeker on; training: the old rule, a "
+                         "missile of either side without support for 3 s before its seeker takes over is "
+                         "removed (for checkpoints trained before SIM_REV 18)")
     ap.add_argument("--speed-boost", type=float, nargs="?", const=550.0, default=None, metavar="M_S",
                     help="while BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for "
                          "this speed instead (default 550 m/s), to make the DCS AI use afterburner")
@@ -679,9 +680,9 @@ def main(argv=None):
         print("stick: the policy flies the player's Viper (BLUE-1) through Export.lua; hands off the stick "
               "and throttle once the mission runs")
     if not args.shadow:
-        print("support rule: " + ("as in training (3 s without support before the seeker takes "
+        print("support rule: " + ("the old training rule (3 s without support before the seeker takes "
                                   "over: the missile is removed)" if args.support_rule == "training"
-                                  else "DCS's own"))
+                                  else "none, as in training since SIM_REV 18 (DCS's own: missiles fly on)"))
     last_t, rows = None, []
     try:
         for ep in range(1, args.episodes + 1):
