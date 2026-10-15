@@ -237,7 +237,14 @@ def load_model(path: str, env=None, log=print, **kwargs):
     from sb3_contrib import MaskablePPO
     fd, tmp = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
+    flat = None
     try:
+        flat = unnest(path)
+        if flat:
+            if log:
+                log(f"[bvr] {os.path.basename(path)}: its files are inside a folder in the zip (repacked on the "
+                    f"way, e.g. by Windows 'Send to > Compressed folder'); read from the folder")
+            path = flat
         if migrate(path, tmp):
             if log:
                 log(f"[bvr] {os.path.basename(path)}: from an older version of the code, "
@@ -247,7 +254,29 @@ def load_model(path: str, env=None, log=print, **kwargs):
             return MaskablePPO.load(tmp, env=env, **kwargs)
         return MaskablePPO.load(path, env=env, **kwargs)
     finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        for f in (tmp, flat):
+            try:
+                if f:
+                    os.remove(f)
+            except OSError:
+                pass
+
+
+def unnest(path: str):
+    """A checkpoint zip whose files sit in one folder (zipping the folder instead of its files) is copied to a
+    temporary zip with them at the top, as stable-baselines3 reads them; returns its path, or None if the zip
+    is already flat."""
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        if "data" in names:
+            return None
+        tops = {n.split("/", 1)[0] for n in names}
+        if len(tops) != 1 or not all("/" in n for n in names) or not any(n.endswith("/data") for n in names):
+            return None
+        fd, out = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as w:
+            for n in names:
+                w.writestr(n.split("/", 1)[1], z.read(n))
+    return out
