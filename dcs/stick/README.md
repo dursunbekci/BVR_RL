@@ -714,3 +714,26 @@ set (`chaff: countermeasures panel MAN, program 1, CH on (N chaff, M flares)`), 
 countermeasures panel; version 2 lets its MODE (32 3010), PROGRAM (32 3009) and CH (32 3007) controls through (JETT and the
 rest stay refused) and sends the chaff and flare counts (`LoGetSnares`, `cm` in the telemetry). Re-install it:
 `python dcs\stick\install_export.py`. Whether chaff decoys red's AIM-120 in DCS, and how often, is not modelled in training.
+
+**Going direct, and the envelope term (SIM_REV 18, 15 October).** dcsfit_v3 cranks 30-50 deg before its first shot. Forced
+to fly at red until either side fired and to shoot inside a set fraction of R-max (then flown as trained), against the
+DCS-like red at SIM_REV 18, the same 60 starts: as trained 0.56 (win 47%, loss 35%); hot, shooting inside 0.85 of R-max,
+0.53 (win 28%: the missiles arrived slow); inside 0.70, **0.68** (win 52%, loss 15%); inside 0.55, 0.64. Going direct pays
+in the simulator now; shooting at the edge does not. No reward for either was added: the shaping is potential-based
+(gamma*phi' - phi, phi 0 at the end), so it cannot change which tactic wins, and a bonus would also pay where it is wrong.
+
+The envelope term (our R-max band minus the threat's) had a slant. The threat's R-max is computed for our aspect, so it
+shrinks as we turn away, but ours was the table's, launched at the target, whatever our heading, so cranking paid at once
+and pointing never did. Ours is now scaled by the R-max an off-axis launch keeps (`BvrEnv._offaxis_factor`, shaping only;
+the inputs and the fire mask keep the table's), measured with sweep_envelope's idealised shot, AIM-120C-DCS against a
+target flying at us:
+
+| off the lead bearing | 15 | 30 | 45 | 60 | 75 | 90 deg |
+|---|---|---|---|---|---|---|
+| launched at 5 km | 0.99 | 0.95 | 0.88 | 0.69 | 0.46 | 0.19 |
+| launched at 9 km | 0.99 | 0.98 | 0.96 | 0.92 | 0.87 | 0.80 |
+
+The angle is to the lead (collision) bearing, so cranking toward a crossing target's lead point costs nothing. The effect
+is small: at 9 km, red at Mach 0.9 flying at us, the term's gain from a 50 deg crank falls from +0.23 to +0.19 at 70 km
+(+0.21 to +0.19 at 45 km). Most of the crank's pay is real: it cuts red's R-max against us from 98 to 58 km, ours by 6%.
+What decides the tactic is the fight's outcome, which SIM_REV 18 changed; check v4's heading before its first shot.

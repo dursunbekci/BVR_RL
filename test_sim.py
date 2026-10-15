@@ -1667,6 +1667,32 @@ def test_red_as_dcs():
           f"radar limit {min(fov):.1f}-{max(fov):.1f} deg; long shots at the edge {edge:.0%}; chaff on the RWR)")
 
 
+def test_offaxis_envelope():
+    """SIM_REV 18: the envelope shaping term counts our R-max as launched along our heading: all of it pointing
+    at the target or at the lead point of a crossing one, less off the nose (more so low down)."""
+    import math
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, privileged_critic=False, seed=1)
+    env.reset(seed=1)
+    def f(crank, alt=9000.0, tv=(0.0, -270.0)):
+        a = math.radians(crank)
+        env._own_pos_enu = lambda: np.array([0.0, 0.0, alt])
+        env._own_vel_enu = lambda: np.array([400.0 * math.sin(a), 400.0 * math.cos(a), 0.0])
+        env._state = dict(env._state, alt=alt)
+        return env._offaxis_factor({"valid": True, "pos": np.array([0.0, 50000.0, alt]),
+                                    "vel": np.array([tv[0], tv[1], 0.0]), "speed": 270.0})
+    assert abs(f(0) - 1.0) < 1e-9 and abs(f(-30) - f(30)) < 1e-9
+    assert 0.93 < f(50) < 0.96 and 0.80 < f(50, alt=5000.0) < 0.86 and f(90) < f(60) < f(50)
+    # a target crossing at 200 m/s: pointing at its lead point keeps all of the reach, at it does not
+    lead = math.degrees(math.asin(200.0 / env.OFFAXIS_V_MSL))
+    assert f(lead, tv=(200.0, -180.0)) > 0.999 and f(-lead, tv=(200.0, -180.0)) < f(0, tv=(200.0, -180.0))
+    assert env._offaxis_factor({"valid": False}) == 1.0
+    print(f"  off-axis envelope ........... OK  (50 deg off: {f(50):.2f} at 9 km, {f(50, alt=5000.0):.2f} at 5 km; "
+          f"the lead point of a crossing target keeps it all)")
+
+
 def test_mission_seed_starts():
     """dcs/make_mission.py --seed: starts drawn as training draws them, the same for a seed, different across seeds."""
     import importlib.util, os
@@ -1938,6 +1964,7 @@ if __name__ == "__main__":
         ("episode end", test_episode_end),
         ("missile endgame", test_missile_endgame),
         ("missiles as in DCS", test_red_as_dcs),
+        ("off-axis envelope", test_offaxis_envelope),
         ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),

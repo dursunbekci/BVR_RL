@@ -867,6 +867,36 @@ class BvrEnv(gym.Env):
         return self._env_own.compute(mach,s.get("alt",9000),self._est_aspect(est),tgt_mach,
                                      target_alt=tgt_alt)
 
+    # R-max launched off the nose / R-max launched at the target, AIM-120C-DCS,
+    # target flying at us (aspect 0) at Mach 0.9, launch Mach 0.9 and 1.3
+    # averaged, at 5 and 9 km (measured with sweep_envelope's idealised shot,
+    # 15 October). Interpolated in altitude, clamped outside 5-9 km.
+    OFFAXIS_DEG     = (0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0, 180.0)
+    OFFAXIS_LO_ALT  = (1.0, 0.994, 0.951, 0.875, 0.691, 0.457, 0.192, 0.0)    # 5 km
+    OFFAXIS_HI_ALT  = (1.0, 0.994, 0.980, 0.956, 0.918, 0.870, 0.799, 0.0)    # 9 km
+    OFFAXIS_V_MSL   = 750.0   # m/s: the missile's mean speed for the lead angle
+
+    def _offaxis_factor(self,est) -> float:
+        """How much of our R-max a launch along our present heading keeps: the
+        angle is between our horizontal velocity and the lead (collision)
+        bearing, the line of sight turned toward the target's crossing motion
+        (a missile launched toward the lead point loses nothing)."""
+        if not est["valid"]: return 1.0
+        d=est["pos"]-self._own_pos_enu(); v=self._own_vel_enu()
+        dh=np.array([d[0],d[1]]); vh=np.array([v[0],v[1]])
+        nd,nv=float(np.linalg.norm(dh)),float(np.linalg.norm(vh))
+        if nd<1.0 or nv<1.0: return 1.0
+        u=dh/nd; tv=np.array([est["vel"][0],est["vel"][1]])
+        perp=tv-float(np.dot(tv,u))*u
+        q=min(float(np.linalg.norm(perp))/self.OFFAXIS_V_MSL,0.95)
+        lead=u*math.sqrt(1.0-q*q)+perp/self.OFFAXIS_V_MSL if q<0.95 else u
+        lead=lead/max(float(np.linalg.norm(lead)),1e-9)
+        off=math.degrees(math.acos(float(np.clip(np.dot(lead,vh/nv),-1.0,1.0))))
+        w=float(np.clip((self._state.get("alt",9000)-5000.0)/4000.0,0.0,1.0))
+        lo=float(np.interp(off,self.OFFAXIS_DEG,self.OFFAXIS_LO_ALT))
+        hi=float(np.interp(off,self.OFFAXIS_DEG,self.OFFAXIS_HI_ALT))
+        return (1.0-w)*lo+w*hi
+
     def _threat_envelope(self,est) -> tuple:
         if not est["valid"]: return 60_000.0,25_000.0
         s=self._state; tgt_mach=est["speed"]/A_SOUND
@@ -1085,7 +1115,13 @@ class BvrEnv(gym.Env):
         s=self._state; est=self._est(); rng=self._est_range(est)
         ts=self._trk_state()
         rm,rn=self._own_envelope(est); rmt,rnt=self._threat_envelope(est)
-        pe=self.W_ENVELOPE*(_band(rng,rn,rm)-_band(rng,rnt,rmt))
+        # Our reach as launched along our present heading (SIM_REV 18): the
+        # threat's reach already shrank as we turned away (it is computed
+        # for our aspect), ours did not, so the term paid for cranking at
+        # once and never for pointing. Shaping only: the inputs and the fire
+        # mask keep the table's own-envelope.
+        f=self._offaxis_factor(est)
+        pe=self.W_ENVELOPE*(_band(rng,rn*f,rm*f)-_band(rng,rnt,rmt))
         if   ts==TrackState.TRACK:     t=1.0
         elif ts==TrackState.COAST:     t=0.4*math.exp(-est["age"]/8)
         elif ts==TrackState.ACQUIRING: t=0.5

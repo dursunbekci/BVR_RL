@@ -507,7 +507,9 @@ _SIM_REV_NOTES = {
         "pays in accuracy, it no longer keeps the missile alive); the radar's azimuth "
         "limit is drawn from 57-63 deg, not 51-69 (a 50 deg crank lost the track in many episodes and the "
         "policy learned to break only when the track dropped, which DCS never did); the DCS-like red fires "
-        "at 0.72-0.90 of R-max (a fifth at 0.95-1.0), as the DCS AI did, not 0.95-1.0. 1v1. Expect the "
+        "at 0.72-0.90 of R-max (a fifth at 0.95-1.0), as the DCS AI did, not 0.95-1.0; the envelope "
+        "shaping term counts our R-max as launched along our heading (off the lead bearing: 0.94 at 50 deg "
+        "at 9 km, 0.81 at 5 km; the threat's already shrank as we turned away, ours did not). 1v1. Expect the "
         "win rate to fall at first: cranking alone no longer defeats red's missiles",
 }
 
