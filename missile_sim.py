@@ -88,6 +88,20 @@ def _angle_between(a: np.ndarray, b: np.ndarray) -> float:
 def _ev(type_, **kw): return {"type": type_, **kw}
 
 
+# A missile is a threat to its target while it closes on it (SIM_REV 20), and THREAT_HOLD_S after: the
+# RWR warning, the threat missile in the observation and the defence term go by it. A real RWR warns while
+# the missile's seeker tracks the aircraft; a missile that has overshot or run out of energy no longer
+# does. Before, a defeated missile kept the warning on until it was gone: in the simulator a median 18 s
+# after its closest approach (up to 94 s), in DCS 146 s once (dcsfit_v5, 20 October; DCS kept it flying
+# 249 s), and the policy ran from it all that time. Both worlds use these numbers.
+THREAT_CLOSING_MPS = 20.0
+THREAT_HOLD_S = 3.0
+
+
+def is_threat(t_now: float, t_last_closing: float) -> bool:
+    return (t_now - t_last_closing) <= THREAT_HOLD_S
+
+
 class AIM120:
     """
     One AIM-120 instance. Owns its full state. Call step() each sim frame.
@@ -137,6 +151,7 @@ class AIM120:
         self._aim_pos = None
         self._aim_vel = None
 
+        self.t_closing         = 0.0       # sim time it last closed on its target (the world keeps it)
         self.prev_range        = 1e12
         self._prev_rel         = None      # target minus missile at the last step (closest approach)
         self._rng_to_tgt_cache = 0.0

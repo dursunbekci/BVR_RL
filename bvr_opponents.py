@@ -288,7 +288,7 @@ class ShooterOpponent(BvrOpponent):
 
     def _inbound(self, state):
         for m in state.get("missiles", []) or []:
-            if m.get("owner") == 1 and m.get("state") not in ("HIT", "MISS", "DUD"):
+            if m.get("owner") == 1 and m.get("state") not in ("HIT", "MISS", "DUD") and m.get("threat", 1):
                 return m
         return None
 

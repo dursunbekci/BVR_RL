@@ -531,6 +531,8 @@ class TrainingManager:
             cmd += ["--advance-hold-checks", str(int(config["advance_hold_checks"]))]
         if config.get("adaptive_dcs_frac") is not None:
             cmd += ["--adaptive-dcs-frac", str(float(config["adaptive_dcs_frac"]))]
+        if config.get("symmetric_policy"):
+            cmd += ["--symmetric-policy"]
         for key, flag, cast in (("sp_scripted_frac", "--sp-scripted-frac", float),
                                 ("sp_newest_frac", "--sp-newest-frac", float),
                                 ("sp_snapshot_steps", "--sp-snapshot-steps", int),

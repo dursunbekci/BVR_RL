@@ -44,7 +44,7 @@ import math
 import numpy as np
 
 from f16_sim   import F16Aircraft, _wrap_pi
-from missile_sim import AIM120, MslPhase
+from missile_sim import AIM120, MslPhase, THREAT_CLOSING_MPS, is_threat
 from bvr_library import rcs_scale
 
 G        = 9.80665
@@ -223,6 +223,9 @@ class SimWorld:
                     if e.get("type") == "MISSILE_HIT":
                         e["killed"] = 0
             self.events.extend(evs)
+            rel = ac_pos[tgt] - m.pos
+            if float(np.dot(m.vel - ac_vel[tgt], rel)) > THREAT_CLOSING_MPS * max(float(np.linalg.norm(rel)), 1.0):
+                m.t_closing = self.t_sim                    # still closing on its target: still a threat
             destroyed += [e["ac"] for e in evs if e.get("type") == "AC_DESTROYED"]
             if m.phase in (MslPhase.HIT, MslPhase.MISS):
                 self._despawn_next.append(m)
@@ -274,6 +277,7 @@ class SimWorld:
         m = AIM120(owner, tgt_id, pos_src, ac_src.vel_enu.copy(), handoff,
                    cfg=mcfg, seeker_range_scale=scale)
         m.support_rule = owner not in self.no_support_rule
+        m.t_closing = self.t_sim
         m.last_tgt_pos = pos_tgt.copy()
         m.last_tgt_vel = ac_tgt.vel_enu.copy()
         m.t_launch     = self.t_sim
@@ -337,7 +341,8 @@ class SimWorld:
         my_team = self.teams[me - 1]
         inbound = [m for m in self.missiles
                    if self.teams[m.owner - 1] != my_team and m.target == me
-                   and m.phase not in (MslPhase.HIT, MslPhase.MISS)]
+                   and m.phase not in (MslPhase.HIT, MslPhase.MISS)
+                   and is_threat(self.t_sim, m.t_closing)]
         if inbound:
             cl = min(inbound, key=lambda m: float(np.linalg.norm(m.pos - pos1)))
             d  = cl.pos - pos1
@@ -357,6 +362,7 @@ class SimWorld:
         msl_list = []
         for m in self.missiles + self._despawn_next:
             d = m.to_dict()
+            d["threat"] = int(is_threat(self.t_sim, m.t_closing))
             la, lo, _ = _enu_to_latlon(*m.pos)
             d["lat"] = round(la, 6); d["lon"] = round(lo, 6)
             if not identity:

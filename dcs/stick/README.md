@@ -800,3 +800,35 @@ side per start 0.97 (an upper bound): the side matters per geometry.
   table's R-max): under the 40 deg rule dcsfit_v4, which cranks 30-50 deg before shooting, fired 2 shots in 60
   simulated fights against the DCS-like red (14 with its actions sampled, half of them hits). To test pointed shots
   with v4 in DCS: `--fire-cone 60 --point-before-fire 20`.
+
+## dcsfit_v5 in DCS, and SIM_REV 20 (20 October)
+
+**dcsfit_v5** (3M steps from v4, SIM_REV 19) against the DCS-like red in the simulator, the same 60 starts: balanced
+0.71, aggressive 0.85 (v4 under its own 60 deg rule 0.83); 1% of its shots beyond 40 deg off the nose (v4 44%), median
+21-22 deg; red's missiles hit it 14-19% (v4 25%), and under fire it turns away at 52-59% of decisions (v4 27%). It
+still cranked to the + side in 99% of its choices, whatever the geometry (mirrored inputs flipped 3%): the new
+crossing inputs went unused in 3M steps.
+
+**In DCS (live_20261020_165232)** red's first missile was defeated (v5 broke 29 s before impact, the track held), but
+DCS kept it flying until 301 s (249 s of flight), and the RWR built from DCS's missile list warned for 146 s: v5 ran
+from it, climbing to 12.9 km, until red fired again (250 s, 313 s) and hit. In the simulator a defeated missile also
+kept the warning on, until it was gone: a median 18 s after its closest approach (up to 94 s). All three of v5's fire
+requests went unbugged ("no TWS track bugged in 10 s"): one at 83 km, 9 deg off the nose; two at 69 and 54 km, 32-36
+deg off, but the policy kept cranking (+40, +50) through the 10 s the bug may take and the target drifted to 45-47 deg.
+
+**SIM_REV 20** (`bvr_library._SIM_REV_NOTES[20]`):
+
+- A missile is a threat only while it closes on its target (closing faster than 20 m/s), and 3 s after
+  (`missile_sim.is_threat`, `THREAT_CLOSING_MPS`, `THREAT_HOLD_S`): the RWR warning, the missile list's `threat` flag,
+  the threat missile in the observation and the defence term, scripted red's defence and the fight records'
+  "under fire" go by it, in `sim_world.py` and `dcs_world.py` alike. A missile that has overshot or run out of
+  energy drops off in 3 s, as a real RWR stops warning once the seeker loses the aircraft.
+- The stick pilot holds the nose where it was at the request through the bug and the release (unless
+  `--point-before-fire` points it first), so the target stays in the TWS scan while the radar bugs it.
+- `train_bvr.py --symmetric-policy` (GUI: SYMMETRIC POLICY, on by default): each choice is the average of the
+  policy's logits for the fight as seen and, mirrored back, for its mirror image (`bvr_policy.AsymmetricMaskablePolicy`,
+  `MIRROR_LABELS`). In a mirror-symmetric world a policy left to itself settles on one side; averaged, a choice not
+  tied to the geometry comes out even, so the side has to come from the inputs that tell left from right. Exactly
+  mirror-equivariant (a test checks it, after training too); stored in the checkpoint's policy_kwargs, so a resumed
+  checkpoint is switched over and every checkpoint the run saves, self-play snapshots included, keeps it. Off for
+  older checkpoints, which fly as before.

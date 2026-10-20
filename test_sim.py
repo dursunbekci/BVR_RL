@@ -1798,6 +1798,87 @@ def test_geometry_inputs():
           f"{cranked['r_over_rmax_axis']:.2f} off-axis)")
 
 
+def test_threat_only_while_closing():
+    """SIM_REV 20: a red missile warns (RWR, threat input) while it closes on us and 3 s after; one that has
+    overshot drops off though it flies on."""
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from missile_sim import THREAT_HOLD_S
+    env = BvrEnv(opponent_type=T.STRAIGHT, privileged_critic=False, seed=4)
+    env.reset(seed=4)
+    w = env._world
+    w._launch(2, {})
+    m = w.missiles[-1]
+    a1 = w.acs[0]
+    # put the missile 3 km behind us, flying away from us: it has overshot
+    fwd = np.array([np.sin(a1.chi), np.cos(a1.chi), 0.0])
+    m.pos = np.array([a1.x, a1.y, a1.z]) - 3000.0 * fwd
+    m.vel = -900.0 * fwd
+    m.guidance_valid = False; m.support_rule = False
+    t0 = w.t_sim
+    warn = []
+    for _ in range(int((THREAT_HOLD_S + 2.0) / w.SIM_DT)):
+        w.step(env._encode_cmd(0, 2, 2, 0), {"mode": 0, "V": 250.0, "hdgCmd": 0.0, "altTarget": 9000.0, "fire": 0})
+        tel = w.telemetry(1)
+        warn.append((w.t_sim - t0, tel["rwr"]["launch_warn"], [x["threat"] for x in tel["missiles"] if x["owner"] == 2]))
+    assert warn[0][1] == 1 and warn[-1][1] == 0, (warn[0], warn[-1])
+    off = next(t for t, wn, _ in warn if not wn)
+    assert THREAT_HOLD_S - 0.1 <= off <= THREAT_HOLD_S + 0.2, off
+    assert m in w.missiles and warn[-1][2] == [0]                         # still flying, no longer a threat
+    env._state = w.telemetry(1)
+    assert env._missile_summary()[1] is None
+    print(f"  threat only while closing ... OK  (an overshot missile warns {off:.1f} s, then drops off; it flies on)")
+
+
+def test_symmetric_policy():
+    """--symmetric-policy: the mirror image of the inputs gives the mirror image of the choice, exactly;
+    the policy trains and saves with it; off, it is the plain policy."""
+    import tempfile, os
+    import numpy as np, torch as th
+    from gymnasium import spaces
+    from sb3_contrib import MaskablePPO
+    from bvr_env import OBS_DIM, PRIV_DIM, ACTION_NVEC
+    from bvr_policy import AsymmetricMaskablePolicy, mirror_columns, heading_mirror
+    from bvr_selfplay import N_STACK
+    box = lambda n: spaces.Box(low=-1.0, high=1.0, shape=(n * N_STACK,), dtype=np.float32)
+    class Dummy:
+        observation_space = spaces.Dict({"obs": box(OBS_DIM), "priv": box(PRIV_DIM)})
+        action_space = spaces.MultiDiscrete(ACTION_NVEC)
+    import gymnasium as gym
+    class E(gym.Env):
+        observation_space = Dummy.observation_space; action_space = Dummy.action_space
+        def reset(self, seed=None, options=None): return self.observation_space.sample(), {}
+        def step(self, a): return self.observation_space.sample(), 0.0, False, False, {}
+        def action_masks(self): return np.ones(sum(ACTION_NVEC), bool)
+    m = MaskablePPO(AsymmetricMaskablePolicy, E(), n_steps=64, batch_size=32, n_epochs=1,
+                    policy_kwargs=dict(pi_arch=(64, 64), vf_arch=(64, 64), symmetric=True), seed=0)
+    rng = np.random.default_rng(0)
+    o = rng.uniform(-1, 1, (8, OBS_DIM * N_STACK)).astype(np.float32)
+    om = o.copy(); om[:, mirror_columns(OBS_DIM * N_STACK)] *= -1
+    pv = rng.uniform(-1, 1, (8, PRIV_DIM * N_STACK)).astype(np.float32)
+    def probs(model, x):
+        t = {"obs": th.as_tensor(x), "priv": th.as_tensor(pv)}
+        with th.no_grad():
+            d = model.policy.get_distribution(t, action_masks=np.ones((8, sum(ACTION_NVEC)), bool))
+        return [p.probs.numpy() for p in d.distributions]
+    p, pm = probs(m, o), probs(m, om)
+    mir = heading_mirror()
+    assert np.allclose(p[0], pm[0][:, mir], atol=1e-6) and all(np.allclose(a, b, atol=1e-6) for a, b in zip(p[1:], pm[1:]))
+    m.learn(128)                                                      # gradients through both views
+    p, pm = probs(m, o), probs(m, om)
+    assert np.allclose(p[0], pm[0][:, mir], atol=1e-6)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.zip"); m.save(path)
+        m2 = MaskablePPO.load(path, env=E())
+        assert m2.policy.symmetric and np.allclose(probs(m2, o)[0], p[0], atol=1e-6)
+    m.policy.set_symmetric(False)                                     # off: the plain, asymmetric choice
+    q, qm = probs(m, o), probs(m, om)
+    assert not np.allclose(q[0], qm[0][:, mir], atol=1e-3)
+    print("  symmetric policy ............ OK  (mirrored inputs give the mirrored choice exactly, after training "
+          "too; kept on save and load)")
+
+
 def test_mission_seed_starts():
     """dcs/make_mission.py --seed: starts drawn as training draws them, the same for a seed, different across seeds."""
     import importlib.util, os
@@ -2072,6 +2153,8 @@ if __name__ == "__main__":
         ("off-axis envelope", test_offaxis_envelope),
         ("fight records", test_episode_report),
         ("geometry inputs", test_geometry_inputs),
+        ("threat only while closing", test_threat_only_while_closing),
+        ("symmetric policy", test_symmetric_policy),
         ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),

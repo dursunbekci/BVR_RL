@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 19
+SIM_REV = 20
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -519,6 +519,12 @@ _SIM_REV_NOTES = {
         "inputs are appended: which way the target crosses our line of sight (signed aspect; trk_aspect is "
         "unsigned), the signed line-of-sight rate, and range over the off-axis R-max. Older checkpoints are "
         "widened with zero weights for them and fly as before until trained",
+    20: "a missile is a threat only while it closes on its target, and 3 s after (missile_sim.is_threat): "
+        "the RWR warning, the threat missile in the observation, the defence term, scripted red's defence "
+        "and the fight records go by it, in the simulator and in DCS alike. A defeated missile kept the "
+        "warning on until it was gone: a median 18 s after its closest approach in the simulator (up to "
+        "94 s), 146 s once in DCS (dcsfit_v5, 20 October), and the policy ran from it all that time. With "
+        "it, train_bvr.py --symmetric-policy: each choice averaged over the fight and its mirror image",
 }
 
 

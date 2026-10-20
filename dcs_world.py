@@ -55,7 +55,7 @@ from bvr_env import (BvrEnv, HDG_OFFSETS_DEG, ALT_DELTAS_M, DEG2RAD, RAD2DEG, G,
 from bvr_library import DEFAULT_PLATFORM, rcs_scale
 from bvr_opponents import BvrOpponentType
 from bvr_track_adapter import body_to_enu_matrix
-from missile_sim import _isa_a
+from missile_sim import _isa_a, THREAT_CLOSING_MPS, is_threat
 from sim_world import _enu_to_latlon
 
 FORMAT = "bvr_rl.dcs.v1"
@@ -359,6 +359,7 @@ class DcsReplayWorld:
 
     # ── SimWorld interface ───────────────────────────────────────────
     def reset(self, ic=None, episode_id: int = 0) -> None:
+        self._closing_t = {}              # weapon id -> time it last closed on its target (SIM_REV 20)
         self.episode_id = int(episode_id)
         self.t = self.t0
         self._t_prev = self.t0 - 1e-9
@@ -489,6 +490,14 @@ class DcsReplayWorld:
         rng = float(np.linalg.norm(los))
         closing = float(np.dot(vel - tk["vel"], los / max(rng, 1.0)))
         tgo = rng / closing if closing > 10.0 else 999.0
+        # A threat while it closes on its target, and THREAT_HOLD_S after (SIM_REV 20, as the simulator):
+        # DCS keeps a defeated missile flying for minutes, and the RWR built from its list warned all along.
+        if not hasattr(self, "_closing_t"):
+            self._closing_t = {}
+        last = self._closing_t.setdefault(d["id"], t)
+        if closing > THREAT_CLOSING_MPS:
+            self._closing_t[d["id"]] = last = t
+        threat = int(is_threat(t, last))
         handoff = self._handoff(d["shooter"], tgt)
         if rng < handoff:
             self._seeker.add(d["id"])
@@ -506,7 +515,7 @@ class DcsReplayWorld:
             "t_flight": round(t_flight, 3), "tgo_est": round(tgo, 2),
             "seeker_active": int(seeker), "needs_support": int(not seeker),
             "t_since_update": round(tsu, 3), "handoff_range": round(handoff, 0),
-            "guidance_valid": int(tsu == 0.0), "rng_to_target": round(rng, 1),
+            "guidance_valid": int(tsu == 0.0), "rng_to_target": round(rng, 1), "threat": threat,
             "vel": [round(float(x), 1) for x in vel],
         }
 
@@ -581,7 +590,7 @@ class DcsReplayWorld:
                 m["owner"] = 1 if owner == me else 2
                 m["target"] = 1 if tgt == blue else 2
             msl.append(m)
-            if owner != me and tgt == blue:
+            if owner != me and tgt == blue and m["threat"]:
                 inbound.append((dw, m))
         if inbound:
             dw, m = min(inbound, key=lambda x: float(np.linalg.norm(

@@ -990,6 +990,7 @@ class BvrEnv(gym.Env):
         n=0; tgo=None; sup=0.0
         for m in state.get("missiles",[]) or []:
             if m.get("state") in ("HIT","MISS","DUD") or m.get("owner")!=owner_label: continue
+            if owner_label==2 and not m.get("threat",1): continue    # a defeated missile (SIM_REV 20)
             n+=1; t=float(m.get("tgo_est",0))
             tgo=t if tgo is None else min(tgo,t)
             sup=max(sup,float(m.get("needs_support",0)))
@@ -1062,7 +1063,7 @@ class BvrEnv(gym.Env):
             if m.get("owner")==1:
                 n+=1
                 if own is None or m.get("tgo_est",999)<own.get("tgo_est",999): own=m
-            elif m.get("owner")==2:
+            elif m.get("owner")==2 and m.get("threat",1):     # SIM_REV 20: only while it closes on us
                 if thr is None or m.get("tgo_est",999)<thr.get("tgo_est",999): thr=m
         return own,thr,n
 

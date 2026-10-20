@@ -147,7 +147,7 @@ class EpisodeReport:
         h = int(round(abs(float(hdg_offset_deg))))
         msl = [m for m in (s.get("missiles") or []) if m.get("state") not in ("HIT", "MISS", "DUD")]
         ours = [m for m in msl if m.get("owner") == 1]
-        reds = [m for m in msl if m.get("owner") == 2]
+        reds = [m for m in msl if m.get("owner") == 2 and m.get("threat", 1)]   # under fire: closing on us
         for m in msl:
             rec = self.missiles.get(m.get("id"))
             if rec is not None and not m.get("seeker_active", 0):

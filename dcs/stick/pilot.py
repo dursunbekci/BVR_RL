@@ -83,7 +83,7 @@ class StickPilot(threading.Thread):
         self.center_az = None         # the bearing the cursor was last put on
         # chaff: the main thread says when (chaff()); the frame callback presses CMS forward every CHAFF_EVERY s
         # --point-before-fire (dcs_live.py): a fire job first turns the nose to within point_deg of the target
-        # and holds it there through the release; None: the policy's heading is flown throughout
+        # and holds it there through the release; None: it holds the nose where it was at the request
         self.point_deg = None
         self._point_hdg = None
         self.chaff_on = False
@@ -405,6 +405,11 @@ class StickPilot(threading.Thread):
         self._aa()
         if self.point_deg:
             self._point()
+        else:
+            # Hold the nose where it was at the request through the bug and the release (SIM_REV 20): the
+            # policy kept cranking during dcsfit_v5's fire jobs in DCS, the target drifted from 32-36 to
+            # 45-47 deg off the nose in the 10 s the bug may take, out of the TWS scan, and none was bugged.
+            self._point_hdg = r.frames[-1].hdg
         if not self._bug():
             self.fire_times.append({"bug_s": None, "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
             self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"))
