@@ -19,6 +19,7 @@ from bvr_track_adapter import RadarTrackAdapter, TrackState, body_to_enu_matrix
 from bvr_envelope     import Aim120Envelope, aspect_deg_from_vectors
 from bvr_radar_sim    import RadarSim
 from bvr_opponents    import BvrOpponent, BvrOpponentType, ShooterOpponent
+from bvr_report       import EpisodeReport, red_style
 from bvr_library      import (load_platform, envelope_path, LibraryError,
                               DEFAULT_PLATFORM)
 
@@ -286,6 +287,10 @@ class BvrEnv(gym.Env):
         # SELF_PLAY opponent mix; None = bvr_selfplay's defaults.
         self._sp_scripted_frac, self._sp_newest_frac = sp_scripted_frac, sp_newest_frac
         self._sp_observers = {}
+        # One record per fight (bvr_report.py): info["report"] at the end. dcs_live.py sets
+        # chaff_presses_fn so a defence counts the chaff it got.
+        self._report = EpisodeReport()
+        self.chaff_presses_fn = None
         # Optional callable(env) -> opponent, overriding opponent_type for every
         # episode. The cross-play evaluator uses it to pit two chosen policies.
         self._opponent_factory = None
@@ -396,6 +401,7 @@ class BvrEnv(gym.Env):
         self._world.reset(ic, episode_id=self._episode_id)
         if hasattr(self._world, "no_support_rule"):
             self._world.no_support_rule = set() if self.SUPPORT_RULE else {1, 2}
+        self._report.reset(self, red_style(self._opponent))
         self._cmd_hdg=float(ic["ac1_psi"]); self._cmd_alt=float(ic["ac1_alt"])
         self._cmd_spd=float(ic["ac1_spd"])
 
@@ -414,6 +420,7 @@ class BvrEnv(gym.Env):
         want_fire = bool(FIRE_OPTIONS[i_fire]) and self._can_fire()
         fire_now = want_fire and self._request_fire(self._t_sim)
         cmd = self._encode_cmd(i_hdg,i_alt,i_spd,i_fire)
+        self._report.on_decision(self, HDG_OFFSETS_DEG[i_hdg], TrackState.NAMES[self._trk_state()])
         hdg_cost = self._heading_choice(HDG_OFFSETS_DEG[i_hdg])
         shots_before = self._shots_fired
         was_resolving = self._frozen_phi is not None
@@ -476,7 +483,8 @@ class BvrEnv(gym.Env):
                          "bank_reversals":self._bank_revs,
                          "hdg_switches":self._hdg_switches,"hdg_pairs":dict(self._hdg_pairs),
                          "flight_time":self._t_sim,
-                         "wpn_remaining":self._state.get("wpn_remaining",0)})
+                         "wpn_remaining":self._state.get("wpn_remaining",0),
+                         "report":self._report.finish(self, self._outcome)})
             self._ready=False
 
         if self._viz:
@@ -638,6 +646,7 @@ class BvrEnv(gym.Env):
             self._on_event(ev)
 
     def _on_event(self, ev:dict) -> None:
+        self._report.on_event(self, ev)
         t=ev.get("type")
         if t=="MISSILE_LAUNCH" and ev.get("owner")==1:
             self._shots_fired+=1; self._last_shot_t=self._t_sim

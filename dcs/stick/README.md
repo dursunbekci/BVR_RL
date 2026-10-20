@@ -737,3 +737,33 @@ The angle is to the lead (collision) bearing, so cranking toward a crossing targ
 is small: at 9 km, red at Mach 0.9 flying at us, the term's gain from a 50 deg crank falls from +0.23 to +0.19 at 70 km
 (+0.21 to +0.19 at 45 km). Most of the crank's pay is real: it cuts red's R-max against us from 98 to 58 km, ours by 6%.
 What decides the tactic is the fight's outcome, which SIM_REV 18 changed; check v4's heading before its first shot.
+
+## Fight records: the same log for the simulator and DCS (20 October)
+
+Every 1v1 fight now ends with a record (`bvr_report.py`, `info["report"]` from `BvrEnv`), written one JSON line per fight
+by WATCH (`watch_runs/watch_<time>_<checkpoint>_<opponent>.jsonl`) and by `dcs_live.py` (`dcs_runs/episodes.jsonl`), so a
+fight in the simulator and one in DCS read the same way:
+
+- **red**: the bandit's style. In the simulator ADAPTIVE is `DCS-like` (shoots first from long range and presses, the
+  style the DCS AI fights in), `runner`, or `defence shallow / deep_beam / deep_cold`; a self-play snapshot; in DCS
+  `DCS AI`. WATCH's default ADAPTIVE mix has about a third DCS-like.
+- **missiles**, ours and red's: at launch the range, the shooter's r/Rmax (red's from the truth, plus our estimate of it),
+  how far off the shooter's nose the target was, both aircraft's speed and altitude; at the end HIT, KINEMATIC (out of
+  energy), ENDGAME with the miss distance, or still flying; the time of flight and the longest it flew without its
+  shooter's guidance.
+- **defence**, each red missile at us: the RWR warning and the time to impact then, our heading choices while it flew,
+  the first turn of 90 deg or more (time to impact, our radar track then), the chaff presses while it flew (DCS), how
+  it ended. This is the check on the DCS failure of 15 October: no break while the track was held.
+- **first**: who fired first, and by how many seconds.
+- **phases**: heading choices (|offset|) before our first shot, while our missile flies, under fire, and after.
+- **track_losses**: each loss of the radar track, how long, and its likely cause (outside the azimuth limit, beyond
+  the radar's range, low closure, other).
+- **timeout**, for a fight out of time: range, both aspects, closure, missiles left on each side, fuel, a cause (red
+  running and we follow / turned away, both turned away, red cranking or beaming, both pointing, both out of missiles),
+  our last 60 heading choices.
+
+WATCH STATISTICS gains BY RED STYLE, FIRST SHOT, DEFENCE, OUR MISSILES, HEADING BY PHASE, OUT OF TIME and RADAR TRACK
+LOSSES. `dcs_live.py`'s `results.csv` gains `red_style`, `first_shot`, `first_gap_s`, `red_missiles`, `red_hits`,
+`broke`, `broke_with_track`, `tti_at_break_s`, `chaff_per_defence`, `timeout_cause`, `track_losses`, and how well the
+stick pilot flew the commands, a second after each (`hdg_err_med_deg`, `hdg_err_p90_deg`, `alt_err_med_m`); the console
+prints each red missile's defence and who fired first.

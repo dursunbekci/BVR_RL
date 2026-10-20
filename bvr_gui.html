@@ -1170,7 +1170,7 @@ select option{background:#050810}
       <div class="sec-body">
         <div style="display:flex;justify-content:flex-end;margin:-4px 0 2px">
           <button class="help-btn" onclick="help(this,'WATCH STATISTICS',
-            'A summary of the episodes played since you last pressed START EVAL. Episodes stopped part-way are left out.\n\nWIN RATE shows a 95% range: with few episodes it is wide, so do not read much into 10 episodes.\n\nWATCH always takes the policy\'s single most likely action, while training samples its actions, so these numbers can differ from the training dashboard (usually higher).\n\nBY START GEOMETRY and BY START RANGE show where it wins and loses. ⇄ marks a mirrored start: the bandit has the start named (nose on while you are offset, you beaming, or you running with it behind). LOSS is shot down, MUT is a mutual kill, OTHER is escape or crash.')">?</button>
+            'A summary of the episodes played since you last pressed START EVAL. Episodes stopped part-way are left out.\n\nWIN RATE shows a 95% range: with few episodes it is wide, so do not read much into 10 episodes.\n\nWATCH always takes the policy\'s single most likely action, while training samples its actions, so these numbers can differ from the training dashboard (usually higher).\n\nBY START GEOMETRY and BY START RANGE show where it wins and loses. BY RED STYLE splits by the bandit: DCS-like is the ADAPTIVE style that fights like the DCS AI (shoots first from long range and presses), the one the DCS fights are against. FIRST SHOT, DEFENCE (what we did when a red missile came: whether we broke 90° or more, with the radar track still held, and how many seconds before impact), OUR MISSILES, HEADING BY PHASE, OUT OF TIME (a rough cause from the end state) and RADAR TRACK LOSSES come from each fight\'s record, also written one line per fight to watch_runs/ (the same record dcs_live.py writes to episodes.jsonl for DCS fights). ⇄ marks a mirrored start: the bandit has the start named (nose on while you are offset, you beaming, or you running with it behind). LOSS is shot down, MUT is a mutual kill, OTHER is escape or crash.')">?</button>
         </div>
         <div id="ws-body"><div style="color:var(--muted);font-size:12px">Start an eval to collect statistics.</div></div>
       </div>
@@ -2597,7 +2597,82 @@ function wsRender() {
     + (team ? kpi((lost / n).toFixed(2), 'BLUE LOST / EPISODE') : kpi(c('TIMEOUT') ? Math.round(100 * c('TIMEOUT') / n) + '%' : '0%', 'TIMEOUT RATE'))
     + `</div>`
     + `<div class="ws-cap">BY START GEOMETRY</div><table class="ws-tbl">${head}${wsRows(byScen)}</table>`
-    + `<div class="ws-cap">BY START RANGE</div><table class="ws-tbl">${head}${wsRows(byRange)}</table>`;
+    + `<div class="ws-cap">BY START RANGE</div><table class="ws-tbl">${head}${wsRows(byRange)}</table>`
+    + wsReportHtml(E);
+}
+
+// The fight records (bvr_report.py): who the bandit was, who fired first, how we defended, why fights ran
+// out of time, where we pointed in each phase, how our missiles ended. The same records dcs_live.py writes.
+function wsReportHtml(E) {
+  const R = E.map(e => e.report).filter(r => r);
+  if (!R.length) return '';
+  const pc = (a, n) => n ? Math.round(100 * a / n) + '%' : '—';
+  const med = a => { if (!a.length) return NaN; const b = [...a].sort((x, y) => x - y), m = b.length >> 1;
+                     return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+  const fx = (v, d = 0) => isNaN(v) ? '—' : v.toFixed(d);
+  let h = '';
+  // by red style
+  const styles = [...new Set(E.filter(e => e.report).map(e => e.report.red.style))].sort();
+  const head = '<tr><th>RED</th><th>N</th><th>WIN</th><th>MUT</th><th>LOSS</th><th>T/O</th><th>OTHER</th></tr>';
+  h += `<div class="ws-cap">BY RED STYLE</div><table class="ws-tbl">${head}`
+     + wsRows(styles.map(st => ({name: st, eps: E.filter(e => e.report && e.report.red.style === st)}))) + '</table>';
+  // first shot
+  const fw = k => R.filter(r => r.first.who === k).length;
+  const lead = R.filter(r => r.first.who === 'red' && r.first.gap_s != null).map(r => r.first.gap_s);
+  h += `<div class="ws-cap">FIRST SHOT</div><table class="ws-tbl"><tr><th>WE FIRED FIRST</th><th>RED FIRST</th><th>NEITHER</th>`
+     + `<th>RED'S LEAD (MEDIAN)</th></tr><tr><td>${pc(fw('ours'), R.length)}</td><td>${pc(fw('red'), R.length)}</td>`
+     + `<td>${pc(fw('none'), R.length)}</td><td>${fx(med(lead))} s</td></tr></table>`;
+  // defence
+  const D = R.flatMap(r => r.defence || []);
+  if (D.length) {
+    const end = k => D.filter(x => x.end === k).length;
+    const brk = D.filter(x => x.t_break != null);
+    h += `<div class="ws-cap">DEFENCE · ${D.length} red missile${D.length > 1 ? 's' : ''} at us</div><table class="ws-tbl">`
+       + `<tr><th>HIT US</th><th>OUT OF ENERGY</th><th>ENDGAME MISS</th><th>OTHER / IN FLIGHT</th><th>WE BROKE (≥90°)</th>`
+       + `<th>BROKE WITH TRACK</th><th>TIME TO IMPACT AT BREAK</th></tr><tr><td>${pc(end('HIT'), D.length)}</td>`
+       + `<td>${pc(end('KINEMATIC'), D.length)}</td><td>${pc(end('ENDGAME'), D.length)}</td>`
+       + `<td>${pc(D.length - end('HIT') - end('KINEMATIC') - end('ENDGAME'), D.length)}</td><td>${pc(brk.length, D.length)}</td>`
+       + `<td>${pc(brk.filter(x => x.track_at_break === 'TRACK').length, D.length)}</td>`
+       + `<td>${fx(med(brk.map(x => x.tti_break)))} s</td></tr></table>`;
+  }
+  // our missiles
+  const M = R.flatMap(r => (r.missiles || []).filter(m => m.owner === 'ours'));
+  if (M.length) {
+    const end = k => M.filter(x => x.end === k).length;
+    h += `<div class="ws-cap">OUR MISSILES · ${M.length}</div><table class="ws-tbl"><tr><th>HIT</th><th>OUT OF ENERGY</th>`
+       + `<th>ENDGAME MISS</th><th>OTHER / IN FLIGHT</th><th>r / Rmax (MEDIAN)</th><th>OFF THE NOSE (MEDIAN)</th>`
+       + `<th>LONGEST UNGUIDED (MEDIAN)</th></tr><tr><td>${pc(end('HIT'), M.length)}</td><td>${pc(end('KINEMATIC'), M.length)}</td>`
+       + `<td>${pc(end('ENDGAME'), M.length)}</td><td>${pc(M.length - end('HIT') - end('KINEMATIC') - end('ENDGAME'), M.length)}</td>`
+       + `<td>${fx(med(M.filter(m => m.r_over_rmax != null).map(m => m.r_over_rmax)), 2)}</td>`
+       + `<td>${fx(med(M.map(m => Math.abs(m.off_nose_deg || 0))))}°</td>`
+       + `<td>${fx(med(M.map(m => m.max_unguided_s || 0)), 1)} s</td></tr></table>`;
+  }
+  // heading by phase
+  const PH = [['before_shot', 'BEFORE OUR FIRST SHOT'], ['supporting', 'OUR MISSILE IN FLIGHT'],
+              ['under_fire', 'UNDER FIRE'], ['after', 'AFTER']];
+  const rows = PH.map(([k, name]) => {
+    const c = {}; R.forEach(r => Object.entries((r.phases || {})[k] || {}).forEach(([a, n]) => c[a] = (c[a] || 0) + n));
+    const n = Object.values(c).reduce((a, b) => a + b, 0), sum = f => Object.entries(c).filter(([a]) => f(+a)).reduce((x, [, v]) => x + v, 0);
+    return n ? `<tr><td>${name}</td><td>${n}</td><td>${pc(sum(a => a <= 15), n)}</td><td>${pc(sum(a => a >= 30 && a <= 50), n)}</td>`
+             + `<td>${pc(sum(a => a >= 90), n)}</td></tr>` : '';
+  }).join('');
+  h += `<div class="ws-cap">HEADING BY PHASE · decisions</div><table class="ws-tbl"><tr><th>PHASE</th><th>N</th>`
+     + `<th>AT RED (≤15°)</th><th>CRANK (30–50°)</th><th>AWAY (≥90°)</th></tr>${rows}</table>`;
+  // timeouts and track losses
+  const T = R.filter(r => r.timeout);
+  if (T.length) {
+    const c = {}; T.forEach(r => c[r.timeout.cause] = (c[r.timeout.cause] || 0) + 1);
+    h += `<div class="ws-cap">OUT OF TIME · ${T.length}</div><table class="ws-tbl"><tr><th>CAUSE</th><th>N</th><th>RANGE (MEDIAN)</th></tr>`
+       + Object.entries(c).sort((a, b) => b[1] - a[1]).map(([k, n]) =>
+           `<tr><td>${k}</td><td>${n}</td><td>${fx(med(T.filter(r => r.timeout.cause === k).map(r => r.timeout.range_km)), 1)} km</td></tr>`).join('')
+       + '</table>';
+  }
+  const TL = R.flatMap(r => r.track_losses || []);
+  const causes = {}; TL.forEach(x => { const k = x.cause.split(' (')[0]; causes[k] = (causes[k] || 0) + 1; });
+  h += `<div class="ws-cap">RADAR TRACK LOSSES · ${(TL.length / R.length).toFixed(1)} per fight</div>`
+     + `<div style="font-size:12px;color:var(--muted)">${TL.length ? Object.entries(causes).sort((a, b) => b[1] - a[1])
+         .map(([k, n]) => `${k} ${n}`).join(' · ') + ` · median ${fx(med(TL.map(x => x.s)))} s` : 'none'}</div>`;
+  return h;
 }
 
 function onEpEnd(meta) {

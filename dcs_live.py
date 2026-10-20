@@ -361,6 +361,7 @@ class DcsLiveEnv(BvrEnv):
     def reset(self, seed=None, options=None):
         out = super().reset(seed=seed, options=options)
         w = self._world
+        self._report.red = {"style": "DCS AI", "detail": f"the DCS AI ({getattr(w, 'names', {}).get(2, 'RED-1')})"}
         # Red's own radar and track, for the support rule on its missiles.
         if w.support_rule == "training" and not w.shadow and self._radar_model == "sim":
             self._opp_radar = self._opponent_radar()
@@ -514,6 +515,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
     world = env._world
+    if pilot is not None:
+        env.chaff_presses_fn = lambda: pilot.cms_presses     # each defence in the report counts its chaff
     raw = capture_raw_obs(env)
     stacker = FrameStacker(N_STACK)
     obs, info = env.reset()
@@ -533,6 +536,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         log(f"  WARNING: this mission's bridge (version {bridge_v}) ignores --eta-lock; rebuild "
             f"the mission (python dcs\\make_mission.py) and open the new file in DCS")
     spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
+    follow = []  # (heading deg, altitude m) commanded minus flown, a second after each command
     try:
         while True:
             mask = env.action_masks()
@@ -542,6 +546,9 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
             if pilot is not None and not args.shadow:
                 pilot.chaff(chaff_wanted(raw["obs"]) and not getattr(args, "no_chaff", False))
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
+            if follow is not None and env._state:
+                dh = math.degrees((float(env._cmd_hdg) - float(env._state.get("psi", 0.0)) + math.pi) % (2 * math.pi) - math.pi)
+                follow.append((dh, float(env._cmd_alt) - float(env._state.get("alt", 0.0))))
             world.boost_steps += int(world._boosting)    # once per decision, not per frame
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
@@ -590,7 +597,26 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                bridge_version=bridge_v,
                speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
                if spd and world.speed_boost else "")
+    rep = info.get("report") or {}
+    d = rep.get("defence", [])
+    tb = [x["tti_break"] for x in d if x.get("tti_break") is not None]
+    row.update(red_style=(rep.get("red") or {}).get("style", ""),
+               first_shot=(rep.get("first") or {}).get("who", ""),
+               first_gap_s=(rep.get("first") or {}).get("gap_s", ""),
+               red_missiles=len(d), red_hits=sum(1 for x in d if x.get("end") == "HIT"),
+               broke=sum(1 for x in d if x.get("t_break") is not None),
+               broke_with_track=sum(1 for x in d if x.get("track_at_break") == "TRACK"),
+               tti_at_break_s=";".join(f"{x:.1f}" for x in tb),
+               chaff_per_defence=";".join("" if x.get("chaff") is None else str(x["chaff"]) for x in d),
+               timeout_cause=(rep.get("timeout") or {}).get("cause", ""),
+               track_losses=len(rep.get("track_losses", [])),
+               hdg_err_med_deg=round(float(np.median([abs(h) for h, _ in follow])), 1) if follow else "",
+               hdg_err_p90_deg=round(float(np.percentile([abs(h) for h, _ in follow], 90)), 1) if follow else "",
+               alt_err_med_m=round(float(np.median([abs(a) for _, a in follow])), 0) if follow else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
+    if rep:
+        with open(os.path.join(args.out, "episodes.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(dict(episode=name, **rep)) + "\n")
     log(f"episode {ep}: {outcome} after {env._t_sim:.0f} s, {row['shots']} shots "
         f"({row['fire_timeouts']} fire requests not answered by a launch)"
         + (f"; request to launch {row['launch_delays_s'].replace(';', ', ')} s" if row["launch_delays_s"] else ""))
@@ -605,7 +631,18 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         if world.speed_boost:
             log(f"  speed boost: asked DCS for {world.speed_boost:.0f} m/s "
                 f"{row['speed_boosted_pct']:.0f}% of the time")
-    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv")
+    for x in d:
+        log(f"  red missile at {x.get('range_km', 0):.1f} km ({x.get('r_over_rmax') or 0:.2f} R-max): "
+            + (f"warned {x['tti_warn']:.0f} s before impact; " if x.get("tti_warn") is not None else "no RWR warning; ")
+            + (f"broke at {x['tti_break']:.0f} s to go ({x.get('track_at_break')})" if x.get("t_break") is not None
+               else "no break")
+            + (f"; chaff {x['chaff']} presses" if x.get("chaff") is not None else "") + f"; {x.get('end')}")
+    if rep.get("first"):
+        f = rep["first"]
+        log(f"  first shot: {f['who']}" + (f", {f['gap_s']:.0f} s ahead" if f.get("gap_s") is not None else ""))
+    if rep.get("timeout"):
+        log(f"  out of time: {rep['timeout']['cause']}")
+    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv; the fight's record in episodes.jsonl")
     return row, rec.t_end
 
 

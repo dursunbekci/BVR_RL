@@ -19,6 +19,9 @@ dcs_check/
 # Intermediate pages written by docs/guide/build.py
 docs/guide/_*.html
 
+# WATCH fight records (bvr_gui.py, one line per fight)
+watch_runs/
+
 # DCS live runs (dcs_live.py) and generated missions
 dcs_runs/
 dcs/*.miz

@@ -940,6 +940,10 @@ def test_dcs_live_stick():
             rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
             row, _ = dcs_live.run_episode(link, Scripted(), args, {"platform": "F-16C", "opponent_platform": "F-16C"},
                                           rec, agent, red, 1, log=logs.append)
+            import json as _json
+            recs = [_json.loads(x) for x in open(os.path.join(d, "episodes.jsonl"))]
+            # (the fake cockpit's missile never reaches the fake DCS world, so the record has no missiles here)
+            assert len(recs) == 1 and recs[0]["red"]["style"] == "DCS AI" and recs[0]["phases"], recs
     finally:
         th.join(timeout=120)
         link.close(); fake.close()
@@ -948,6 +952,7 @@ def test_dcs_live_stick():
     launched = [m for m in logs if "fire launched" in m]
     assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
     assert not stick.controlling, "the axes were not released at the end"
+    assert row["red_style"] == "DCS AI" and row["first_shot"] in ("ours", "red", "none") and row["hdg_err_med_deg"] != "", row
     assert any("A-A master mode by the missile override" in m for m in logs), logs[:20]
     delays = [float(x) for x in row["launch_delays_s"].split(";") if x]
     assert delays and all(d > 0 for d in delays), row
@@ -1693,6 +1698,56 @@ def test_offaxis_envelope():
           f"the lead point of a crossing target keeps it all)")
 
 
+def test_episode_report():
+    """bvr_report: each fight's record (info["report"]): red's style, every missile, each defence against a red
+    missile, who fired first, heading choices by phase, track losses, and a timeout's end state."""
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_report import EpisodeReport, summarise
+    env = BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, privileged_critic=False, seed=7, adaptive_dcs_frac=1.0)
+    reps = []
+    for seed in range(6):
+        env.reset(seed=seed)
+        while True:
+            m = env.action_masks()
+            _, _, d, tr, info = env.step([0, 2, 3, int(m[-1])])     # fly at red, fire whenever allowed
+            if d or tr:
+                break
+        r = info["report"]
+        reps.append(r)
+        assert r["outcome"] == info["terminal_outcome"] and r["red"]["style"] == "DCS-like", r["red"]
+        n_dec = sum(sum(c.values()) for c in r["phases"].values())
+        assert n_dec == info["step"], (n_dec, info["step"])
+        ours = [x for x in r["missiles"] if x["owner"] == "ours"]
+        assert len(ours) == info["shots_fired"]
+        for x in r["missiles"]:
+            assert x["end"] in ("HIT", "KINEMATIC", "ENDGAME", "SUPPORT_LOST", "in flight"), x
+            assert x["range_km"] > 0 and x["t_flight"] is not None and x["r_over_rmax"] is not None
+        reds = [x for x in r["missiles"] if x["owner"] == "red"]
+        assert len(r["defence"]) == len(reds)
+        for dd in r["defence"]:
+            assert dd["end"] == next(x["end"] for x in reds if x["id"] == dd["id"])
+            if dd["t_break"] is not None:
+                assert dd["tti_break"] is not None and dd["track_at_break"] in ("TRACK", "COAST", "NONE", "ACQUIRING")
+        assert r["first"]["who"] in ("ours", "red", "none")
+        if r["outcome"] == "TIMEOUT":
+            assert r["timeout"]["cause"] and len(r["timeout"]["last_headings"]) <= 60
+    assert any(r["defence"] for r in reps), "no red missile in 6 fights against the DCS-like red"
+    assert all(set(r["phases"]["before_shot"]) <= {"0"} for r in reps)           # we flew at red throughout
+    # the timeout labels
+    tc = EpisodeReport.timeout_cause
+    assert tc({"aa_deg_t": 170, "aa_deg": 10, "wpn_remaining": 2}) == "red running, we follow"
+    assert tc({"aa_deg_t": 100, "aa_deg": 120, "wpn_remaining": 2}) == "both turned away"
+    assert tc({"aa_deg_t": 10, "aa_deg": 20, "wpn_remaining": 2}) == "both pointing"
+    assert tc({"wpn_remaining": 0, "wpn_remaining_t": 0}) == "both out of missiles"
+    sm = summarise(reps)
+    assert sm["n"] == 6 and sum(sm["first"].values()) == 6
+    print(f"  fight records ............... OK  ({sum(len(r['missiles']) for r in reps)} missiles, "
+          f"{sm['defence']['missiles']} red at us ({sm['defence']['hit']} hit, {sm['defence']['broke']} broken from) "
+          f"in 6 fights; first shot {sm['first']})")
+
+
 def test_mission_seed_starts():
     """dcs/make_mission.py --seed: starts drawn as training draws them, the same for a seed, different across seeds."""
     import importlib.util, os
@@ -1965,6 +2020,7 @@ if __name__ == "__main__":
         ("missile endgame", test_missile_endgame),
         ("missiles as in DCS", test_red_as_dcs),
         ("off-axis envelope", test_offaxis_envelope),
+        ("fight records", test_episode_report),
         ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),
