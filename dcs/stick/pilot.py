@@ -82,6 +82,10 @@ class StickPilot(threading.Thread):
         self.aa_said = None           # the A-A state last reported
         self.center_az = None         # the bearing the cursor was last put on
         # chaff: the main thread says when (chaff()); the frame callback presses CMS forward every CHAFF_EVERY s
+        # --point-before-fire (dcs_live.py): a fire job first turns the nose to within point_deg of the target
+        # and holds it there through the release; None: the policy's heading is flown throughout
+        self.point_deg = None
+        self._point_hdg = None
         self.chaff_on = False
         self.cmds_tried = False       # the countermeasures panel set to MAN, program 1, chaff on (once)
         self.cmds_ok = False
@@ -136,6 +140,8 @@ class StickPilot(threading.Thread):
                 return None
             self.target = (f.crs if f.crs is not None else f.hdg, f.alt, f.tas or 250.0, None, None)
         hdg, alt, v, dive, climb = self.target
+        if self._point_hdg is not None:          # a fire job is pointing the nose at the target
+            hdg = self._point_hdg
         return self.hold.axes(f, hdg, alt, v=v, dive=dive, climb=climb)
 
     def run(self):
@@ -366,10 +372,39 @@ class StickPilot(threading.Thread):
         self.events.put(("bug", "ok" if ok else "timeout", f"{dt:.1f} s (radar {mode} before, target at "
                                                             f"{'?' if az is None else f'{az:+.0f}'} deg)"))
 
+    POINT_MAX_S = 10.0         # s a fire job turns the nose toward the target before it gives up and fires anyway
+
+    def _point(self):
+        """Turn the nose to within point_deg of the target (the nearest aircraft), up to POINT_MAX_S; the heading
+        stays on it (_point_hdg, read by the frame callback) until the fire job ends."""
+        r, fn = self.r, self.fn
+        t0 = r.frames[-1].t
+        az = self._target_az()
+        az0 = az
+        while az is not None and abs(az) > self.point_deg and r.frames[-1].t - t0 < self.POINT_MAX_S:
+            f = r.frames[-1]
+            self._point_hdg = (f.hdg or 0.0) + math.radians(az)
+            cockpit.settle(r, 0.5, fn)
+            az = self._target_az()
+        if az is not None:
+            self._point_hdg = (r.frames[-1].hdg or 0.0) + math.radians(az)
+        if az0 is not None:
+            self.events.put(("point", "ok" if az is not None and abs(az) <= self.point_deg else "timeout",
+                             f"nose to the target before the release: {az0:+.0f} -> "
+                             f"{'?' if az is None else f'{az:+.0f}'} deg in {r.frames[-1].t - t0:.1f} s"))
+
     def _fire(self):
+        try:
+            self._fire_job()
+        finally:
+            self._point_hdg = None
+
+    def _fire_job(self):
         r, d, fn = self.r, self.defs, self.fn
         t0 = r.frames[-1].t
         self._aa()
+        if self.point_deg:
+            self._point()
         if not self._bug():
             self.fire_times.append({"bug_s": None, "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
             self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"))

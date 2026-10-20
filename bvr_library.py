@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 18
+SIM_REV = 19
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -511,6 +511,14 @@ _SIM_REV_NOTES = {
         "shaping term counts our R-max as launched along our heading (off the lead bearing: 0.94 at 50 deg "
         "at 9 km, 0.81 at 5 km; the threat's already shrank as we turned away, ours did not). 1v1. Expect the "
         "win rate to fall at first: cranking alone no longer defeats red's missiles",
+    19: "shots and crank sides (dcsfit_v4 in DCS, 20 October: 10 fire requests at 43-58 deg off the nose, 4 "
+        "never bugged, the 5 launched all ran out of energy; in the simulator its shots beyond 45 deg hit 4%, "
+        "within 71%; and it cranked to the same side in 99% of its choices whatever the geometry): the "
+        "policy may fire only within 40 deg of the nose (was 60; scripted red keeps 60) and inside the R-max a "
+        "launch along its present heading reaches (the off-axis factor, now in the fire mask too); three "
+        "inputs are appended: which way the target crosses our line of sight (signed aspect; trk_aspect is "
+        "unsigned), the signed line-of-sight rate, and range over the off-axis R-max. Older checkpoints are "
+        "widened with zero weights for them and fly as before until trained",
 }
 
 

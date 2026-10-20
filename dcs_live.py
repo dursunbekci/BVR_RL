@@ -502,6 +502,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         from bvr_library import load_platform
         pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out,
                            airframe=load_platform(scen["platform"]).airframe)
+        pilot.point_deg = getattr(args, "point_before_fire", None)
         pilot.start()
         pilot.radar()
 
@@ -683,6 +684,10 @@ def main(argv=None):
                          "make the mission with dcs/make_mission.py --blue-player and sit in BLUE-1")
     ap.add_argument("--stick-gains", help="stick gains file (default dcs_runs/stick_gains.json, from stick_test.py)")
     ap.add_argument("--doctrine", default="BALANCED")
+    ap.add_argument("--point-before-fire", type=float, default=None, metavar="DEG",
+                    help="--stick, a test: a fire request first turns the nose to within DEG of the target (up to "
+                         "10 s) and holds it there through the bug and the release; the policy is not trained "
+                         "for it (SIM_REV 19 trains its own shots within 40 deg). E.g. 20")
     ap.add_argument("--no-chaff", action="store_true",
                     help="--stick: no chaff (by default the pilot presses CMS forward every 1.5 s while a missile is "
                          "inbound with its seeker on or under 20 s from impact)")

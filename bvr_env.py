@@ -96,6 +96,14 @@ WM_PRIV_HIGH = [1,RANGE_MAX,1,1,3,120,120,1]
 # flipped between near-equal choices (wing-rocking).
 HDG_OBS_LABELS = ["hdg_prev_cos","hdg_prev_sin","hdg_turn_cos","hdg_turn_sin"]
 
+# Appended after the heading block (SIM_REV 19). trk_aspect_side: which way the target flies across our
+# line of sight, sin of its aspect with a sign (+ to our right): trk_aspect_* is unsigned (0-180 deg), and with
+# it dcsfit_v4 cranked to the same side in 99% of its choices whatever the geometry. los_rate_signed: the
+# line of sight's horizontal turn rate, deg/s (+ clockwise, to our right); los_rate is its magnitude.
+# r_over_rmax_axis: range over our R-max for a launch along our present heading (the off-axis loss, as
+# the envelope shaping term counts it); r_over_rmax_own is the table's, launched at the target.
+GEO_OBS_LABELS = ["trk_aspect_side","los_rate_signed","r_over_rmax_axis"]
+
 OBS_LABELS = [
     "own_mach","own_alt","own_gamma_fpa","own_phi_cos","own_phi_sin","own_nz",
     "own_energy","own_alpha","wpn_remaining","fuel_frac",
@@ -118,6 +126,7 @@ OBS_LABELS = [
     *WM_OBS_LABELS,
     # Appended after the wingman block, for the same reason.
     *HDG_OBS_LABELS,
+    *GEO_OBS_LABELS,
 ]
 OBS_DIM = len(OBS_LABELS)
 # The input width of checkpoints from before the wingman block was added.
@@ -131,6 +140,7 @@ OBS_PHYS_LOW = np.array([
     0,
     *WM_OBS_LOW,
     -1,-1,-1,-1,
+    -1,-10,0,
 ],dtype=np.float32)
 OBS_PHYS_HIGH = np.array([
     2,ALT_MAX_OP,0.6,1,1,9,30000,0.5,6,1,
@@ -140,6 +150,7 @@ OBS_PHYS_HIGH = np.array([
     SHOT_COST_MAX,
     *WM_OBS_HIGH,
     1,1,1,1,
+    1,10,3,
 ],dtype=np.float32)
 assert len(OBS_PHYS_LOW)==OBS_DIM==len(OBS_PHYS_HIGH)
 
@@ -237,7 +248,13 @@ class BvrEnv(gym.Env):
     # 12 to 30 km, a tail shot hardly at all). The radar's +/-60 deg field
     # of view kept 1v1 shots inside this already; the gate also binds shots
     # on a wingman's datalink track (2v1), which had no angle limit.
-    MAX_OFF_BORESIGHT_DEG = 60.0
+    MAX_OFF_BORESIGHT_DEG = 40.0
+    # SIM_REV 19: 40 deg, was 60. dcsfit_v4 fired at 43-58 deg off the nose (it cranks before shooting): in the
+    # simulator its shots beyond 45 deg hit 4% (balanced; 0% aggressive) against 71% within; in DCS the radar
+    # could not bug the track for 4 of 10 such requests (the TWS scan at its edge) and the 5 launched all ran
+    # out of energy. Scripted red keeps 60 (its observer sets it). And the mask's R-max is the one a launch
+    # along the present heading reaches (OFFAXIS_IN_MASK; _offaxis_factor).
+    OFFAXIS_IN_MASK = True
 
     # Scripted shooters fight under the agent's rules (SIM_REV 9): their
     # missiles are guided on their own radar track, not on the agent's true
@@ -570,6 +587,7 @@ class BvrEnv(gym.Env):
         if not est["valid"]: return False
         if self._off_boresight_deg(est)>self.MAX_OFF_BORESIGHT_DEG: return False
         r=self._est_range(est); r_max,_=self._own_envelope(est)
+        if self.OFFAXIS_IN_MASK: r_max*=self._offaxis_factor(est)
         # BUG FIX: this used to read `r<=1.15*r_max` — a shot up to 15% BEYOND
         # the missile's own computed kinematic reach. That is not a margin,
         # it is a guaranteed-miss shot: the missile runs the clock out
@@ -747,6 +765,8 @@ class BvrEnv(gym.Env):
                      envelope_table=None, platform=self._opp_platform_id,
                      opponent_platform=self._platform_id)
             o._env_own, o._env_thr = self._env_thr, self._env_own
+            # The scripted opponent's fire rule as before SIM_REV 19: 60 deg off the nose, the table's R-max.
+            o.MAX_OFF_BORESIGHT_DEG = 60.0; o.OFFAXIS_IN_MASK = False
             self._sp_observers["opponent_radar"]=o
         o._track.reset()
         if o._radar is not None: o._radar.reset()
@@ -975,6 +995,18 @@ class BvrEnv(gym.Env):
             sup=max(sup,float(m.get("needs_support",0)))
         return n,(tgo or 0.0),sup
 
+    def _geometry_obs(self,est,rm) -> list:
+        """GEO_OBS_LABELS: which way the target crosses our line of sight, the line of sight's signed turn
+        rate, and range over our R-max as launched along our heading."""
+        if not est["valid"]:
+            return [0.0,0.0,3.0]
+        d=est["pos"]-self._own_pos_enu(); rv=est["vel"]-self._own_vel_enu(); tv=est["vel"]
+        r2=max(float(d[0]*d[0]+d[1]*d[1]),1.0); r=math.sqrt(r2)
+        side=float(np.clip((d[1]*tv[0]-d[0]*tv[1])/r/max(float(math.hypot(tv[0],tv[1])),1.0),-1.0,1.0))
+        lrs=float((d[1]*rv[0]-d[0]*rv[1])/r2)*RAD2DEG
+        rax=self._est_range(est)/max(rm*self._offaxis_factor(est),1.0)
+        return [side,lrs,rax]
+
     def _heading_obs(self) -> list:
         """HDG_OBS_LABELS: the last heading choice and the turn still to fly."""
         prev=self._prev_hdg_off*DEG2RAD
@@ -1087,6 +1119,7 @@ class BvrEnv(gym.Env):
             self._shot_cost,
             *self._wingman_obs(),
             *self._heading_obs(),
+            *self._geometry_obs(est,rm),
         ],dtype=np.float32)
         obs=self._norm(obs,self._obs_lo,self._obs_hi)
         if not self._privileged: return obs

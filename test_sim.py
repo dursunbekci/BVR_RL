@@ -936,10 +936,18 @@ def test_dcs_live_stick():
     try:
         with tempfile.TemporaryDirectory() as d:
             args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=200, doctrine="AGGRESSIVE",
-                                   stick_link=stick, stick_gains=gains)
+                                   stick_link=stick, stick_gains=gains, point_before_fire=20.0)
+            # The fake bridge's BLUE-1 does not fly the policy's headings (the fake cockpit's aircraft does), so
+            # its nose is not on the target: the old 60 deg fire cone lets this test reach the cockpit's fire job.
+            from bvr_env import BvrEnv as _B
+            _gate = (_B.MAX_OFF_BORESIGHT_DEG, _B.OFFAXIS_IN_MASK)
+            _B.MAX_OFF_BORESIGHT_DEG, _B.OFFAXIS_IN_MASK = 60.0, False
             rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
-            row, _ = dcs_live.run_episode(link, Scripted(), args, {"platform": "F-16C", "opponent_platform": "F-16C"},
-                                          rec, agent, red, 1, log=logs.append)
+            try:
+                row, _ = dcs_live.run_episode(link, Scripted(), args, {"platform": "F-16C", "opponent_platform": "F-16C"},
+                                              rec, agent, red, 1, log=logs.append)
+            finally:
+                _B.MAX_OFF_BORESIGHT_DEG, _B.OFFAXIS_IN_MASK = _gate
             import json as _json
             recs = [_json.loads(x) for x in open(os.path.join(d, "episodes.jsonl"))]
             # (the fake cockpit's missile never reaches the fake DCS world, so the record has no missiles here)
@@ -953,6 +961,7 @@ def test_dcs_live_stick():
     assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
     assert not stick.controlling, "the axes were not released at the end"
     assert row["red_style"] == "DCS AI" and row["first_shot"] in ("ours", "red", "none") and row["hdg_err_med_deg"] != "", row
+    assert any("point: nose to the target before the release" in m for m in logs), logs[-20:]
     assert any("A-A master mode by the missile override" in m for m in logs), logs[:20]
     delays = [float(x) for x in row["launch_delays_s"].split(";") if x]
     assert delays and all(d > 0 for d in delays), row
@@ -1427,7 +1436,8 @@ def test_selfplay_heading_history():
 
 
 def test_fire_off_boresight():
-    """The fire action is masked for a target more than 60 deg off the nose."""
+    """The fire action is masked for a target more than 40 deg off the nose (SIM_REV 19; it was 60); scripted
+    red's own fire rule keeps 60."""
     import math
     from bvr_env import BvrEnv
     from bvr_opponents import BvrOpponentType as T
@@ -1448,15 +1458,19 @@ def test_fire_off_boresight():
         env._est = lambda: est
         return env._can_fire(), bool(env.action_masks()[-1])
 
-    for az in (0, 30, -45, 59):
+    assert env.MAX_OFF_BORESIGHT_DEG == 40.0
+    for az in (0, 30, -39):
         assert fire_ok(az) == (True, True), az
-    for az in (61, -75, 90, 180):
+    for az in (41, -45, 59, -75, 90, 180):
         assert fire_ok(az) == (False, False), az
-    assert fire_ok(0, el_deg=55) == (True, True)
-    assert fire_ok(0, el_deg=65) == (False, False)
-    assert fire_ok(40, el_deg=40) == (True, True)            # 54 deg off the nose in all
-    assert fire_ok(50, el_deg=45) == (False, False)          # 63 deg off the nose in all
-    print("  fire off-boresight gate ..... OK")
+    assert fire_ok(0, el_deg=35) == (True, True)
+    assert fire_ok(0, el_deg=45) == (False, False)
+    assert fire_ok(25, el_deg=30) == (True, True)            # 38 deg off the nose in all
+    assert fire_ok(30, el_deg=30) == (False, False)          # 41 deg off the nose in all
+    red = BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=1)
+    red.reset(seed=1)
+    assert red._opp_radar.MAX_OFF_BORESIGHT_DEG == 60.0 and not red._opp_radar.OFFAXIS_IN_MASK
+    print("  fire off-boresight gate ..... OK  (40 deg for the policy, 60 for scripted red)")
 
 
 def test_launch_delay():
@@ -1748,6 +1762,42 @@ def test_episode_report():
           f"in 6 fights; first shot {sm['first']})")
 
 
+def test_geometry_inputs():
+    """SIM_REV 19's inputs: which way the target crosses our line of sight (+ to our right), the signed
+    line-of-sight rate, and range over the off-axis R-max (above the table's when cranked); a mirror image
+    flips the first two."""
+    import math
+    import numpy as np
+    from bvr_env import BvrEnv, OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, privileged_critic=False, seed=2)
+    env.reset(seed=2)
+    ix = {k: OBS_LABELS.index(k) for k in ("trk_aspect_side", "los_rate_signed", "r_over_rmax_axis",
+                                         "r_over_rmax_own", "trk_aspect_sin")}
+    def obs(tvx, crank=0.0, mirror=1.0):
+        a = math.radians(crank) * mirror
+        env._own_pos_enu = lambda: np.array([0.0, 0.0, 9000.0])
+        env._own_vel_enu = lambda: np.array([400.0 * math.sin(a), 400.0 * math.cos(a), 0.0])
+        env._state = dict(env._state, alt=9000.0, psi=a, speed=400.0, mach=1.3)
+        est = {"valid": True, "pos": np.array([0.0, 40000.0, 9000.0]), "vel": np.array([mirror * tvx, -250.0, 0.0]),
+               "speed": float(math.hypot(tvx, 250.0)), "age": 0.0, "pos_sigma": 80.0, "vel_sigma": 5.0}
+        env._est = lambda: est
+        o = env._build_obs()
+        lo, hi = env._obs_lo, env._obs_hi
+        return {k: float(lo[i] + (o[i] + 1) * (hi[i] - lo[i]) / 2) for k, i in ix.items()}
+    right, left = obs(200.0), obs(200.0, mirror=-1.0)
+    assert right["trk_aspect_side"] > 0.5 and right["los_rate_signed"] > 0, right       # red flies to our right
+    assert abs(left["trk_aspect_side"] + right["trk_aspect_side"]) < 1e-6
+    assert abs(left["los_rate_signed"] + right["los_rate_signed"]) < 1e-6
+    assert abs(left["trk_aspect_sin"] - right["trk_aspect_sin"]) < 1e-6                 # the old input cannot tell
+    hot, cranked = obs(0.0), obs(0.0, crank=50.0)
+    assert abs(hot["r_over_rmax_axis"] - hot["r_over_rmax_own"]) < 1e-3
+    assert cranked["r_over_rmax_axis"] > 1.04 * cranked["r_over_rmax_own"]
+    print(f"  geometry inputs ............. OK  (crossing {right['trk_aspect_side']:+.2f} / {left['trk_aspect_side']:+.2f}, "
+          f"LOS rate {right['los_rate_signed']:+.2f} deg/s; cranked 50 deg r/Rmax {cranked['r_over_rmax_own']:.2f} -> "
+          f"{cranked['r_over_rmax_axis']:.2f} off-axis)")
+
+
 def test_mission_seed_starts():
     """dcs/make_mission.py --seed: starts drawn as training draws them, the same for a seed, different across seeds."""
     import importlib.util, os
@@ -2021,6 +2071,7 @@ if __name__ == "__main__":
         ("missiles as in DCS", test_red_as_dcs),
         ("off-axis envelope", test_offaxis_envelope),
         ("fight records", test_episode_report),
+        ("geometry inputs", test_geometry_inputs),
         ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),

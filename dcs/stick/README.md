@@ -767,3 +767,32 @@ LOSSES. `dcs_live.py`'s `results.csv` gains `red_style`, `first_shot`, `first_ga
 `broke`, `broke_with_track`, `tti_at_break_s`, `chaff_per_defence`, `timeout_cause`, `track_losses`, and how well the
 stick pilot flew the commands, a second after each (`hdg_err_med_deg`, `hdg_err_p90_deg`, and `alt_as_asked_pct`: the share of decisions whose climb, descent or level was flown as asked; the altitude command is relative, the present altitude plus the action's step, so its distance from the altitude flown is about the step by design); the console
 prints each red missile's defence and who fired first.
+
+## dcsfit_v4 in DCS, and SIM_REV 19 (20 October)
+
+**Five live fights** (seeded missions, `dcs_live.py models_bvr\dcsfit_v4.zip --stick`): five losses, but not the way
+v3 lost. v4 fired first in two, defeated 4 of red's missiles (v3: none) and broke from 6 of 7 (3 with the track
+held); red's next missile then hit, after breaks 13, 9 and 3 s before impact, twice after v4 had dived to the 1 km
+floor and stayed low and slow. All ten fire requests were made with red 43-58 deg off the nose (v4 cranks before it
+shoots): four never got a TWS bug ("no TWS track bugged in 10 s", the target at the edge of the scan) and the five
+launched all ran out of energy (78-100 s of flight) against a DCS AI turning cold. The simulator says the same: of
+v4's shots beyond 45 deg off the nose 4% hit (balanced; aggressive 0%), within 45 deg 71%.
+
+**One crank side.** Before its first shot 99% of v4's off-target heading choices put red on its left (a + offset),
+whether red was on its right or left and whichever way red crossed; mirrored inputs flipped the choice in 2% of
+decisions. Nothing in the simulator prefers a side (red's crank and notch sides are random, starts are mirrored); the
+policy cannot see which way red crosses its line of sight (trk_aspect is unsigned, 0-180 deg, and so is los_rate),
+so it settled on one side. On the same 60 starts v4 scored 0.83 and its mirror image 0.76 (noise), but the better
+side per start 0.97 (an upper bound): the side matters per geometry.
+
+**SIM_REV 19** (`bvr_library._SIM_REV_NOTES[19]`):
+
+- The policy fires only within 40 deg of the nose (`BvrEnv.MAX_OFF_BORESIGHT_DEG`, was 60; scripted red keeps 60),
+  and only inside the R-max a launch along its present heading reaches (`OFFAXIS_IN_MASK`, the off-axis factor).
+- Three inputs at the end of each frame (`GEO_OBS_LABELS`): `trk_aspect_side` (which way red flies across our line of
+  sight, + to our right), `los_rate_signed` (+ clockwise) and `r_over_rmax_axis` (range over the off-axis R-max).
+  `bvr_compat` widens older checkpoints with zero weights for them: widened dcsfit_v4's action probabilities do not
+  change at all with them, so a run resumed from v4 starts as v4 flies.
+- `dcs_live.py --point-before-fire DEG` (a DCS test, not trained for): a fire request first turns the nose to within
+  DEG of the target (up to 10 s), holds it through the bug and the release; the console says how far and how long
+  (`point: nose to the target before the release: -52 -> -18 deg in 4.5 s`).
