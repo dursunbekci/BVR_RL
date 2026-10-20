@@ -765,5 +765,5 @@ fight in the simulator and one in DCS read the same way:
 WATCH STATISTICS gains BY RED STYLE, FIRST SHOT, DEFENCE, OUR MISSILES, HEADING BY PHASE, OUT OF TIME and RADAR TRACK
 LOSSES. `dcs_live.py`'s `results.csv` gains `red_style`, `first_shot`, `first_gap_s`, `red_missiles`, `red_hits`,
 `broke`, `broke_with_track`, `tti_at_break_s`, `chaff_per_defence`, `timeout_cause`, `track_losses`, and how well the
-stick pilot flew the commands, a second after each (`hdg_err_med_deg`, `hdg_err_p90_deg`, `alt_err_med_m`); the console
+stick pilot flew the commands, a second after each (`hdg_err_med_deg`, `hdg_err_p90_deg`, and `alt_as_asked_pct`: the share of decisions whose climb, descent or level was flown as asked; the altitude command is relative, the present altitude plus the action's step, so its distance from the altitude flown is about the step by design); the console
 prints each red missile's defence and who fired first.

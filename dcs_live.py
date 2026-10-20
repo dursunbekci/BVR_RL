@@ -536,19 +536,25 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         log(f"  WARNING: this mission's bridge (version {bridge_v}) ignores --eta-lock; rebuild "
             f"the mission (python dcs\\make_mission.py) and open the new file in DCS")
     spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
-    follow = []  # (heading deg, altitude m) commanded minus flown, a second after each command
+    follow = []  # (heading deg commanded minus flown, altitude moved the way asked: 1/0/None), a second after each
     try:
         while True:
             mask = env.action_masks()
             action, _ = model.predict(sobs, deterministic=not getattr(args, "stochastic", False), action_masks=mask)
+            alt0 = float(env._state.get("alt", 0.0)) if env._state else None
             obs, _, term, trunc, info = env.step(action)
             sobs = stacker.update(obs)
             if pilot is not None and not args.shadow:
                 pilot.chaff(chaff_wanted(raw["obs"]) and not getattr(args, "no_chaff", False))
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
-            if follow is not None and env._state:
+            if env._state and alt0 is not None:
                 dh = math.degrees((float(env._cmd_hdg) - float(env._state.get("psi", 0.0)) + math.pi) % (2 * math.pi) - math.pi)
-                follow.append((dh, float(env._cmd_alt) - float(env._state.get("alt", 0.0))))
+                # The altitude command is relative (present altitude + the action's step, every second), so its
+                # distance from the altitude flown is about the step by design: count whether the jet climbed or
+                # descended as asked instead (a level command counts when within 15 m).
+                dz, ask = float(env._state.get("alt", 0.0)) - alt0, ALT_DELTAS_M[int(np.asarray(action).reshape(-1)[1])]
+                ok = (abs(dz) < 15.0) if ask == 0 else (dz * ask > 0)
+                follow.append((dh, int(ok)))
             world.boost_steps += int(world._boosting)    # once per decision, not per frame
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
@@ -612,7 +618,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                track_losses=len(rep.get("track_losses", [])),
                hdg_err_med_deg=round(float(np.median([abs(h) for h, _ in follow])), 1) if follow else "",
                hdg_err_p90_deg=round(float(np.percentile([abs(h) for h, _ in follow], 90)), 1) if follow else "",
-               alt_err_med_m=round(float(np.median([abs(a) for _, a in follow])), 0) if follow else "")
+               alt_as_asked_pct=round(100.0 * float(np.mean([a for _, a in follow])), 0) if follow else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
     if rep:
         with open(os.path.join(args.out, "episodes.jsonl"), "a", encoding="utf-8") as fh:
