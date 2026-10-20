@@ -515,6 +515,10 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     env = DcsLiveEnv(world_factory,
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
+    cone = getattr(args, "fire_cone", None)
+    if cone is not None:            # a checkpoint trained before SIM_REV 19: its own fire rule (60: the table's R-max too)
+        env.MAX_OFF_BORESIGHT_DEG = float(cone)
+        env.OFFAXIS_IN_MASK = float(cone) < 60.0
     world = env._world
     if pilot is not None:
         env.chaff_presses_fn = lambda: pilot.cms_presses     # each defence in the report counts its chaff
@@ -684,6 +688,10 @@ def main(argv=None):
                          "make the mission with dcs/make_mission.py --blue-player and sit in BLUE-1")
     ap.add_argument("--stick-gains", help="stick gains file (default dcs_runs/stick_gains.json, from stick_test.py)")
     ap.add_argument("--doctrine", default="BALANCED")
+    ap.add_argument("--fire-cone", type=float, default=None, metavar="DEG",
+                    help="the fire rule's angle off the nose (default 40, as trained since SIM_REV 19); 60 flies a "
+                         "checkpoint trained before SIM_REV 19 (dcsfit_v4 and older) under its own rule, the table's "
+                         "R-max with it")
     ap.add_argument("--point-before-fire", type=float, default=None, metavar="DEG",
                     help="--stick, a test: a fire request first turns the nose to within DEG of the target (up to "
                          "10 s) and holds it there through the bug and the release; the policy is not trained "

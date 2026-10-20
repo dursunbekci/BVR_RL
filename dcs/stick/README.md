@@ -796,3 +796,7 @@ side per start 0.97 (an upper bound): the side matters per geometry.
 - `dcs_live.py --point-before-fire DEG` (a DCS test, not trained for): a fire request first turns the nose to within
   DEG of the target (up to 10 s), holds it through the bug and the release; the console says how far and how long
   (`point: nose to the target before the release: -52 -> -18 deg in 4.5 s`).
+- `dcs_live.py --fire-cone 60` flies a checkpoint trained before SIM_REV 19 under its own fire rule (60 deg, the
+  table's R-max): under the 40 deg rule dcsfit_v4, which cranks 30-50 deg before shooting, fired 2 shots in 60
+  simulated fights against the DCS-like red (14 with its actions sampled, half of them hits). To test pointed shots
+  with v4 in DCS: `--fire-cone 60 --point-before-fire 20`.
