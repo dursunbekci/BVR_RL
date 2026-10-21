@@ -1365,6 +1365,36 @@ def test_dcs_unnamed_events():
     print("  DCS unnamed events .......... OK  (a death with no unit is skipped, live and replayed)")
 
 
+def test_dcs_unlimited_weapons():
+    """With DCS's Unlimited Weapons on, a fired missile comes back on the rail (live_20261021_142940: 4 -> 2 -> 4,
+    eight shots from four). The policy's missile count is loaded minus fired, as in training, and the refills are
+    counted."""
+    import json
+    from dcs_world import DcsRecording, DcsReplayWorld, FORMAT
+
+    def unit(name, coal, x, t):
+        return {"name": name, "coal": coal, "type": "F-16C_50", "x": x + 250.0 * t, "y": 8000.0, "z": 0.0,
+                "vx": 250.0, "vy": 0.0, "vz": 0.0, "fx": 1.0, "fy": 0.0, "fz": 0.0, "ux": 0.0, "uy": 1.0, "uz": 0.0,
+                "fuel": 0.9, "radar_on": False}
+    aim = lambda n: [{"type": "weapons.missiles.AIM_120C", "count": n, "aam": True, "guidance": 3}]
+    lines = [{"format": FORMAT, "agent": "BLUE-1", "red": "RED-1", "rate": 0.1, "t0": 0, "bridge": 7}]
+    lines += [{"t": round(0.5 * k, 1), "units": [unit("BLUE-1", 2, 0.0, 0.5 * k), unit("RED-1", 1, 50_000.0, 0.5 * k)],
+               "weapons": []} for k in range(0, 41)]
+    lines += [{"ev": "ammo", "t": 0.0, "unit": "BLUE-1", "items": aim(4)}]
+    for i, ts in enumerate((2.0, 4.0, 12.0), start=1):           # three shots; the rail refilled after the second
+        lines.append({"ev": "shot", "t": ts, "id": i, "shooter": "BLUE-1", "target": "RED-1", "type": "AIM_120C"})
+    lines += [{"ev": "ammo", "t": 2.1, "unit": "BLUE-1", "items": aim(3)},
+              {"ev": "ammo", "t": 4.1, "unit": "BLUE-1", "items": aim(2)},
+              {"ev": "ammo", "t": 10.0, "unit": "BLUE-1", "items": aim(4)},     # refilled
+              {"ev": "ammo", "t": 12.1, "unit": "BLUE-1", "items": aim(3)}]
+    rec = DcsRecording([json.dumps(x) for x in lines])
+    w = DcsReplayWorld(rec, "BLUE-1", "RED-1")
+    got = {t: w._wpn("BLUE-1", t) for t in (1.0, 3.0, 5.0, 11.0, 13.0)}
+    assert got == {1.0: 4, 3.0: 3, 5.0: 2, 11.0: 2, 13.0: 1}, got
+    assert rec.ammo_refills("BLUE-1") == 1 and rec.ammo_refills("BLUE-1", 9.0) == 0
+    print("  DCS unlimited weapons ....... OK  (refilled rails: the count stays loaded minus fired, 4 3 2 2 1)")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -2209,6 +2239,7 @@ if __name__ == "__main__":
         ("defence potential",       test_defence_potential),
         ("heading reference",       test_heading_reference),
         ("DCS unnamed events",      test_dcs_unnamed_events),
+        ("DCS unlimited weapons",   test_dcs_unlimited_weapons),
         ("start reference",         test_start_reference),
         ("turn hold",               test_turn_hold),
         ("stern starts",            test_stern_starts),

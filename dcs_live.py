@@ -110,6 +110,7 @@ class DcsLiveWorld(DcsReplayWorld):
         self.fire_pending = None             # world time a fire request went out
         self.fire_log = []                   # (t_sim, status)
         self.mission_ended = False
+        self.refill_said = set()             # units whose missiles DCS refilled (Unlimited Weapons), said once
         self.last_cmd = None
         self.t_behind_warned = -math.inf
         # The support rule (see _check_support): "training" applies the
@@ -237,6 +238,13 @@ class DcsLiveWorld(DcsReplayWorld):
         self._t_prev = self.t
         tlm = self.telemetry()                 # also latches which seekers are active
         self._check_support(cmd1, cmd2)
+        for i in (1, 2):
+            name = self.names[i]
+            if name not in self.refill_said and self.rec.ammo_refills(name, self.t):
+                self.refill_said.add(name)
+                self.log(f"  WARNING: DCS put a fired missile back on {name}'s rails: Unlimited Weapons is on "
+                         f"(Options > Gameplay, or the mission's options). The policy counts its missiles as "
+                         f"loaded minus fired, as in training; turn it off for fights that compare with training")
         return tlm
 
     def _check_support(self, cmd1, cmd2=None):
@@ -297,6 +305,7 @@ class StickLiveWorld(DcsLiveWorld):
         self.pilot = pilot
         self.t_radar = -math.inf
         self.fire_why = []          # why each fire request that timed out did (e.g. no TWS track bugged)
+        self.pilot_down = False     # our jet is down: the pilot was stopped
 
     def send_command(self, cmd, fire):
         hdg = float(cmd["hdgCmd"])
@@ -324,6 +333,14 @@ class StickLiveWorld(DcsLiveWorld):
 
     def step(self, cmd1, cmd2):
         self._pilot_events()
+        if not self.pilot_down and not self.rec.alive(self.names[1], self.t):
+            # Shot down: hands off. The episode can run on while our missiles still fly (a mutual kill is still
+            # possible); the pilot flew the wreck meanwhile and released the axes at every frame (-7 g, 17 s).
+            self.pilot_down = True
+            self.pilot.stop()
+            self.log(f"  stick pilot: {self.names[1]} is down: hands off")
+        if self.pilot_down:
+            return super().step(cmd1, cmd2)
         if (not self.shadow and self.fire_pending is None and self.pilot.busy is None and self.pilot.jobs.empty()
                 and self.t - self.t_radar >= self.RADAR_EVERY_S):
             self.t_radar = self.t
@@ -612,6 +629,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            if pilot is not None and pilot.chaff_first is not None and pilot.chaff_last is not None else "",
            # the HUD in A-A this share of the fight (a fire request in NAV launches nothing), and the range at which
            # DCS's radar first held a bugged track (the simulator's radar model detects an F-16 at 77-104 km)
+           # times DCS put a fired missile back on our rails (Unlimited Weapons on)
+           "ammo_refills": world.rec.ammo_refills(agent),
            "hud_aa_pct": cp.get("aa_pct", ""), "first_bug_km": cp.get("first_bug_km", ""),
            "first_bug_t": cp.get("first_bug_t", "")}
     # How often BLUE-1 flew well below the speed the policy asked for. The DCS

@@ -884,3 +884,16 @@ dcs_live.py now keeps what the console said in `<episode>_console.txt` (the pilo
 were only on screen), and results.csv records `hud_aa_pct` (the share of the fight with the HUD in A-A) and
 `first_bug_km` / `first_bug_t` (the range and time of DCS's first bugged track): over a few fights, the second
 says how far DCS's radar really tracks an F-16, for `library/builtin/radar/APG-68.json`.
+
+**live_20261021_142940 (dcsfit_v6 with SIM_REV 21 and the A-A recovery).** HUD in A-A the whole fight; wing rocking
+gone (4 bank reversals in 234 s, was 40 a minute); the track was lost cold and regained twice. Two DCS-side findings:
+
+- **Unlimited Weapons was on.** BLUE-1's AIM-120 count went 4 -> 2 and back to 4 three times, and the policy fired
+  eight missiles from four. The policy's count is now loaded minus fired, as in training (`DcsReplayWorld._wpn`), the
+  console warns once per aircraft, and results.csv counts `ammo_refills`. Turn the option off for comparable fights.
+- **The pilot flew the wreck.** After the hit (234.4 s) the episode waited 17 s for our last missile, a mutual kill
+  still being possible, and the pilot released the axes at every frame (-7 g). It now stops when BLUE-1 is down.
+
+The first bugged track came at 46.9 km, though the request at 71.5 km had red nose-on, 11 deg off and co-altitude;
+the same mission bugged at 67 km in 090242 and launched at 71.6 km in 140225. So the bugging, not DCS's detection
+range, is what varies; the fight's stick log (`stick_*_live.jsonl`) shows the radar page markers through it.

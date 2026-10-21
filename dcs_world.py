@@ -303,6 +303,12 @@ class DcsRecording:
         rows = [n for (te, n) in self.ammo.get(name, []) if te <= t + 1e-9]
         return rows[-1] if rows else None
 
+    def ammo_refills(self, name, t=None) -> int:
+        """How often the unit's missile count went up (by t): DCS's Unlimited Weapons option puts a fired missile
+        back on the rail a few seconds later (live_20261021_142940: 4 -> 2 -> 4, eight shots from four)."""
+        rows = [n for (te, n) in self.ammo.get(name, []) if t is None or te <= t + 1e-9]
+        return sum(1 for a, b in zip(rows, rows[1:]) if b > a)
+
 
 class DcsLiveRecording(DcsRecording):
     """A recording that grows while DCS runs (dcs_live.py): extend() it with
@@ -443,13 +449,16 @@ class DcsReplayWorld:
         }
 
     def _wpn(self, name, t) -> int:
-        n = self.rec.radar_missiles(name, t)
-        if n is not None:
-            return int(n)
-        plat = self.plats.get(name)
-        full = plat.wpn_count if plat is not None else 4
         shots = sum(1 for d in self.rec.weapons.values()
                     if d["shooter"] == name and d["t_shot"] is not None and d["t_shot"] <= t)
+        n = self.rec.radar_missiles(name, t)
+        if n is not None:
+            # At most the first report less the shots: with Unlimited Weapons on, DCS refills the rails and the
+            # count would never run out, as no count did in training.
+            loaded = self.rec.ammo[name][0][1]
+            return int(max(0, min(n, loaded - shots)))
+        plat = self.plats.get(name)
+        full = plat.wpn_count if plat is not None else 4
         return max(full - shots, 0)
 
     # ── missiles ─────────────────────────────────────────────────────
