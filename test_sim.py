@@ -1229,7 +1229,7 @@ def test_adaptive_runner():
     assert o._phase == "COMMIT", o._phase
     off = abs(math.degrees((cmd["hdgCmd"] - o._bearing_to_ac1(near) + math.pi) % (2 * math.pi) - math.pi))
     assert off < 1.0, off                                   # hot: it turns to fight
-    # In the environment: a runner opens the range on an agent flying at it slowly.
+    # In the environment: a runner keeps its distance from an agent flying at it slowly.
     env = E.BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=4)
     class Runner(AdaptiveShooterOpponent):          # the env resets it: draw until a runner
         def reset(self, ic):
@@ -1239,9 +1239,13 @@ def test_adaptive_runner():
             self.TURN_RANGE, self.RUN_FAR = 20_000.0, 200_000.0     # running from the start
     env._opponent_factory = lambda e: Runner(rng=np.random.default_rng(11))
     env.reset()
-    r0 = env._state["range"]
     hot = list(E.HDG_OFFSETS_DEG).index(0.0)
-    for _ in range(60):
+    # Red starts nose on and takes about 20 s to turn away. Since SIM_REV 21 "hot" is at red from the start (it
+    # was north before the first track, so this agent flew away and the range opened from the first step).
+    for _ in range(20):
+        env.step([hot, 2, 0, 0])
+    r0 = env._state["range"]
+    for _ in range(100):
         env.step([hot, 2, 0, 0])
     assert env._opponent._phase == "RUN" and env._state["range"] > r0 - 5_000.0, (r0, env._state["range"])
     # Wide start altitudes.
@@ -1831,6 +1835,61 @@ def test_threat_only_while_closing():
     print(f"  threat only while closing ... OK  (an overshot missile warns {off:.1f} s, then drops off; it flies on)")
 
 
+def test_start_reference():
+    """SIM_REV 21: before the first track the heading choices are offsets from the bandit's bearing at the
+    start (the picture call), not from north; without GCI_START, from the own start heading. Self-play's AC2
+    gets the same."""
+    import math
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = BvrEnv(opponent_type=T.STRAIGHT, seed=3)
+    errs = []
+    for seed in range(12):
+        e._ready = False
+        _, info = e.reset(seed=seed)
+        ic = info["ic"]
+        d = e._to_enu(ic["ac2_lat"], ic["ac2_lon"], 0) - e._to_enu(ic["ac1_lat"], ic["ac1_lon"], 0)
+        brg = math.atan2(d[0], d[1])
+        if not e._est()["valid"]:                      # the reference has not been replaced by a track yet
+            errs.append(abs(math.remainder(e._hdg_ref - brg, 2 * math.pi)))
+        assert abs(math.remainder(e._start_ref(ic, 2) - (brg + math.pi), 2 * math.pi)) < 1e-9
+    assert errs and max(errs) < 1e-9, errs
+    e.GCI_START = False
+    e._ready = False
+    _, info = e.reset(seed=1)
+    assert e._est()["valid"] or abs(math.remainder(e._hdg_ref - info["ic"]["ac1_psi"], 2 * math.pi)) < 1e-9
+    print(f"  start reference ............. OK  ({len(errs)} starts without a track: offsets from the bandit's bearing)")
+
+
+def test_turn_hold():
+    """SIM_REV 21: commands alternating either side of the tail (161/191 deg while flying 0, as dcsfit_v6 in
+    DCS on 21 October) turn the aircraft round instead of reversing the bank every second (the stick pilot:
+    dcs/stick/test_stick.py test_turn_hold)."""
+    import math
+    from f16_sim import F16Aircraft, turn_hold, isa
+    r = math.radians
+    assert turn_hold(r(-170), r(20)) > math.pi and turn_hold(r(170), r(-20)) < -math.pi   # held against the bank
+    assert turn_hold(r(-170), r(2)) == r(-170)                                            # wings level: shorter way
+    assert turn_hold(r(-140), r(30)) == r(-140)                                           # inside 150: shorter way
+    ac = F16Aircraft()
+    ac.reset_state(0, 0, 5000.0, 0.0, 0.85 * isa(5000.0)[3], 0.6)
+    revs, sign = 0, 0
+    for k in range(int(40 / 0.02)):
+        cmd = r(161.0) if int(k * 0.02) % 2 == 0 else r(191.0)
+        ac.step(0.02, {"hdgCmd": cmd, "altTarget": 5000.0, "V": ac.V})
+        turned = abs(math.degrees(math.remainder(ac.chi - 0.0, 2 * math.pi)))
+        if turned > 140:                            # round: the commands are ahead of the nose now
+            break
+        if abs(ac.phi) > r(15):
+            sg = 1 if ac.phi > 0 else -1
+            revs += sign and sg != sign
+            sign = sg
+    assert turned > 140 and revs <= 1, (turned, revs)
+    print(f"  turn hold ................... OK  (alternating 161/191 deg off the tail: turned 140 deg in "
+          f"{k * 0.02:.0f} s with {revs} bank reversal(s))")
+
+
 def test_symmetric_policy():
     """--symmetric-policy: the mirror image of the inputs gives the mirror image of the choice, exactly;
     the policy trains and saves with it; off, it is the plain policy."""
@@ -2121,6 +2180,8 @@ if __name__ == "__main__":
         ("missile time-to-go",      test_missile_tgo),
         ("defence potential",       test_defence_potential),
         ("heading reference",       test_heading_reference),
+        ("start reference",         test_start_reference),
+        ("turn hold",               test_turn_hold),
         ("stern starts",            test_stern_starts),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),

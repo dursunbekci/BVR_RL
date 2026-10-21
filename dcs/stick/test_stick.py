@@ -632,6 +632,33 @@ def test_g_loop():
           f"{facs[None]:.2f}, {facs[(0.01, 0.01)]:.2f} without the lag expected)")
 
 
+def test_turn_hold():
+    """SIM_REV 21: commands alternating either side of the tail every second (dcsfit_v6 in DCS, 21 October: 161
+    and 191 deg while flying 0, red behind and no track) turn the pilot round; it reversed the bank every second
+    for a minute and never turned."""
+    import stick_test
+    from fake_export import FakeLink
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    run = stick_test.Run(FakeLink(), None, "turn", stick_test.Limits(min_agl=0, min_alt=0))
+    f0 = run.next()
+    hold = stick_test.Hold(gains, bank_max=math.radians(80), nz_max=8.0)
+    sign, revs = [0], [0]
+
+    def fly(f, tau):
+        side = 161.0 if int(tau) % 2 == 0 else 191.0
+        if abs(f.bank) > math.radians(15):
+            sg = 1 if f.bank > 0 else -1
+            revs[0] += bool(sign[0] and sg != sign[0])
+            sign[0] = sg
+        return hold.axes(f, f0.hdg + math.radians(side), f0.alt, v=None, dive=math.radians(25), climb=math.radians(15))
+    frames = stick_test.drive(run, 30.0, fly)
+    turned = max(abs(math.degrees(stick_test.wrap_pi(f.hdg - f0.hdg))) for f in frames)
+    assert turned > 150 and revs[0] <= 1, (turned, revs[0])
+    print(f"  turn hold ................... OK  (commands 161/191 deg off the tail, alternating: turned {turned:.0f} deg, "
+          f"{revs[0]} bank reversal(s))")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -1213,6 +1240,7 @@ if __name__ == "__main__":
     test_roll_lead()
     test_cockpit()
     test_g_loop()
+    test_turn_hold()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
@@ -1221,4 +1249,4 @@ if __name__ == "__main__":
     test_install()
     test_own_missile()
     test_chaff()
-    print("19/19 passed")
+    print("20/20 passed")

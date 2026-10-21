@@ -832,3 +832,36 @@ deg off, but the policy kept cranking (+40, +50) through the 10 s the bug may ta
   mirror-equivariant (a test checks it, after training too); stored in the checkpoint's policy_kwargs, so a resumed
   checkpoint is switched over and every checkpoint the run saves, self-play snapshots included, keeps it. Off for
   older checkpoints, which fly as before.
+
+## dcsfit_v6 in DCS, and SIM_REV 21 (21 October)
+
+**dcsfit_v6** (3M steps, SIM_REV 20, symmetric policy) in five live fights: one kill, four losses. Two faults, both
+in code the simulator and DCS share:
+
+- **It did not come back after running (live_20261021_093711).** Red started 171 deg off the nose, outside the
+  radar's 60 deg, so v6 never had a track. Without a track the heading choices are offsets from a held reference, and
+  that reference was set in `reset()` from a state not received yet: 0, north. v6 flew 330-345 deg (offsets -30/-15
+  from north) for 240 s with red 100-180 deg off the nose, until red shot it from 7 km. In the simulator against the
+  DCS-like red, the same: 23 of v6's 60 fights never found the bandit (all timeouts), 55% of its decisions had no
+  track, and the reference was a median 164 deg off red's true bearing.
+- **It rocked its wings with a missile behind (093321 from 136 s, 090924 from 186 s).** With red behind and no track,
+  v6 alternated -15/+15 (-30/+30) every second around the held bearing to red, which was behind it: commands 161 and
+  191 deg while flying 0 deg. Both the stick pilot and the simulator's autopilot took the shorter way round, which
+  flips at 180 deg, so the bank reversed every second (+22/-22 deg) for 70 s and the jet never turned. The policy
+  wanted to come back; the autopilot could not. The simulator does the same (3 deg turned in 40 s, 39 reversals),
+  but v6 rarely alternated there.
+
+**SIM_REV 21** (`bvr_library._SIM_REV_NOTES[21]`):
+
+- The fight starts with a picture call (`BvrEnv.GCI_START`, `_start_ref`): until the radar has a track, the
+  heading choices are offsets from the bandit's bearing at the start, then from the last track's bearing, held, as
+  before. Self-play's red gets the same. In DCS the bearing comes from the start positions (`initial_ic`).
+- Turn hold (`f16_sim.turn_hold`, used by the simulator's autopilot and the stick pilot's `Hold`): a heading error
+  beyond 150 deg against the bank the aircraft is already in (over 10 deg) is flown the long way, so it keeps
+  turning. Alternating 161/191 deg off the tail now turns round in 12 s with no reversal.
+
+v6 itself, unchanged, on the SIM_REV 21 simulator against the DCS-like red (the same 60 starts, balanced): 67% kills,
+4 timeouts (was 33% and 33); decisions without a track 18% (was 55%), the reference a median 4 deg from red's true
+bearing. v5 on SIM_REV 20 for comparison: 40% kills, 7 timeouts. Both fixes apply to any checkpoint in DCS: no
+retraining is needed to fly v6 with them, though training on SIM_REV 21 lets the policy learn from starts it used
+to waste.

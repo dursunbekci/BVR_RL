@@ -421,6 +421,7 @@ class BvrEnv(gym.Env):
         self._report.reset(self, red_style(self._opponent))
         self._cmd_hdg=float(ic["ac1_psi"]); self._cmd_alt=float(ic["ac1_alt"])
         self._cmd_spd=float(ic["ac1_spd"])
+        self._hdg_ref=self._start_ref(ic,1)
 
         self._advance(0.5, self._encode_cmd(0,2,2,0), fire=False)
         self._ready=True
@@ -1195,6 +1196,23 @@ class BvrEnv(gym.Env):
         return float(pe+pt+pe2+ps+pd)
 
     # ── action → command ───────────────────────────────────────────────
+    # SIM_REV 21: the fight starts with a picture call (GCI/AWACS): until the radar has a track, the heading
+    # offsets are taken from the bandit's bearing at the start. The reference used to be the own heading, read at
+    # reset from a state not received yet, so it was 0 (north): a fight that began without a track was flown on
+    # offsets from north. dcsfit_v6 in the simulator never found the bandit in 23 of 60 fights against the
+    # DCS-like red (all timeouts), and in DCS flew north for four minutes with red behind it.
+    GCI_START = True
+
+    def _start_ref(self, ic, me) -> float:
+        """The heading reference at the start: the bearing from aircraft `me` to the other (GCI_START), else
+        its own heading."""
+        if not self.GCI_START:
+            return float(ic[f"ac{me}_psi"])
+        o = 3 - me
+        d = (self._to_enu(ic[f"ac{o}_lat"], ic[f"ac{o}_lon"], 0.0)
+             - self._to_enu(ic[f"ac{me}_lat"], ic[f"ac{me}_lon"], 0.0))
+        return math.atan2(d[0], d[1])
+
     def _encode_cmd(self,ih,ia,isp,ifire) -> dict:
         s=self._state; est=self._est()
         if est["valid"]:

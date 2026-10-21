@@ -206,7 +206,7 @@ class PolicyOpponent:
             o._doctrine_cfg = str(self._doctrine).upper()
         o._pick_doctrine()          # the snapshot fights under its own doctrine
         o._prev_hdg_off = 0.0
-        o._hdg_ref = None
+        o._hdg_ref = o._start_ref(ic, 2) if "ac1_lat" in ic else None
         # AC2's start heading, so the "turn still to fly" input starts at 0.
         o._cmd_hdg = float(ic.get("ac2_psi", o._cmd_hdg))
         self._next_decision = -1.0
