@@ -865,3 +865,22 @@ v6 itself, unchanged, on the SIM_REV 21 simulator against the DCS-like red (the 
 bearing. v5 on SIM_REV 20 for comparison: 40% kills, 7 timeouts. Both fixes apply to any checkpoint in DCS: no
 retraining is needed to fly v6 with them, though training on SIM_REV 21 lets the policy learn from starts it used
 to waste.
+
+**The fire timeouts (stick logs of 090242 and 090924).** Two different causes, neither the nose hold:
+
+- **090924: the HUD was in NAV for the first 125 s.** The display markers show no A-A symbology and no AIM-120
+  selected from the start until 125.4 s, so the radar never left RWS for TWS and all four fire requests (81, 66,
+  52, 42 km, red nose-on 1-17 deg off our nose) timed out as "no TWS track bugged in 10 s". The pilot's missile
+  override click did nothing and its one ICP A-A press did not help either; the old pilot on a fake cockpit with
+  the switch already aft and the HUD in NAV fails the same way, with the same message. The pilot now cycles the
+  switch through centre to override when the HUD stays in NAV, presses ICP A-A whenever the HUD has just said NAV,
+  tries again at every radar or fire job, and a timeout in NAV says so ("the HUD was not in A-A (NAV)").
+- **090242: the requests came before DCS's radar had a track to bug.** The HUD was in A-A from 1.2 s. The request
+  at 84 km (red 9-10 deg off, nose-on) timed out; the one at 74 km bugged at 67 km, after 10 s of target
+  management, and launched. The simulator's APG-68 holds a track on an F-16 from 77-104 km (90 km +-15%), so
+  the policy's inputs said TRACK where DCS had nothing yet. One fight is not enough to recalibrate on.
+
+dcs_live.py now keeps what the console said in `<episode>_console.txt` (the pilot's A-A, TWS, bug and fire events
+were only on screen), and results.csv records `hud_aa_pct` (the share of the fight with the HUD in A-A) and
+`first_bug_km` / `first_bug_t` (the range and time of DCS's first bugged track): over a few fights, the second
+says how far DCS's radar really tracks an F-16, for `library/builtin/radar/APG-68.json`.

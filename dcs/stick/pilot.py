@@ -78,7 +78,7 @@ class StickPilot(threading.Thread):
         self.aborts = 0
         self.armed = False
         self.overridden = False       # the DOGFIGHT switch was put to MISSILE OVERRIDE (back to centre at the end)
-        self.icp_aa_tried = False     # the ICP A-A button toggles: pressed at most once
+        self.icp_aa_tried = False     # the ICP A-A button was pressed at least once
         self.aa_said = None           # the A-A state last reported
         self.center_az = None         # the bearing the cursor was last put on
         # chaff: the main thread says when (chaff()); the frame callback presses CMS forward every CHAFF_EVERY s
@@ -96,6 +96,10 @@ class StickPilot(threading.Thread):
         self._chaff_said = False
         # timings, DCS seconds: each fire job {"bug_s", "total_s", "ok"}, each timed bug {"s", "ok", ...} (fire_delay.py)
         self.fire_times, self.bug_times = [], []
+        # the cockpit through the fight (cockpit_summary): display samples, those with the HUD in A-A, and the first
+        # bugged track (DCS time, range m)
+        self.rd_frames = self.aa_frames = 0
+        self.first_bug = None
 
     # ── what the main thread calls ──────────────────────────────────────
     def command(self, hdg, alt, spd, dive=None, climb=None):
@@ -135,6 +139,7 @@ class StickPilot(threading.Thread):
         until the first one comes. Every frame also runs the chaff switch (_cms_tick), so chaff goes out
         during a radar or fire job too."""
         self._cms_tick(f)
+        self._cockpit_tick(f)
         if self.target is None:
             if f.hdg is None or f.alt is None:
                 return None
@@ -143,6 +148,25 @@ class StickPilot(threading.Thread):
         if self._point_hdg is not None:          # a fire job is pointing the nose at the target
             hdg = self._point_hdg
         return self.hold.axes(f, hdg, alt, v=v, dive=dive, climb=climb)
+
+    def _cockpit_tick(self, f):
+        rd = f.raw.get("rd")
+        if rd is None:
+            return
+        self.rd_frames += 1
+        self.aa_frames += bool(rd.get("aa"))
+        if self.first_bug is None and rd.get("tracked"):
+            fo = cockpit.last_with(self.r.frames[-200:], "obj")
+            nr = cockpit.nearest(fo) if fo else None
+            self.first_bug = (f.t, None if nr is None else nr[1])
+
+    def cockpit_summary(self):
+        """{"aa_pct": share of the display samples with the HUD in A-A, %; "first_bug_km", "first_bug_t": the range
+        and DCS time of the first bugged track ("" if none)}."""
+        fb = self.first_bug
+        return {"aa_pct": round(100.0 * self.aa_frames / self.rd_frames) if self.rd_frames else "",
+                "first_bug_km": "" if fb is None or fb[1] is None else round(fb[1] / 1000.0, 1),
+                "first_bug_t": "" if fb is None else round(fb[0], 1)}
 
     def run(self):
         try:
@@ -303,9 +327,11 @@ class StickPilot(threading.Thread):
 
     def _aa(self):
         """The A-A master mode, so that weapon release launches the AIM-120: the throttle's DOGFIGHT switch to MISSILE
-        OVERRIDE (a switch position, through the HOTAS route that target management and weapon release take, so a
-        second press does no harm), then, if the HUD still draws no A-A, the ICP A-A button once (a toggle). In a live
-        run (15 October) the ICP press alone left the HUD in NAV for the whole fight: no missile could leave the rail.
+        OVERRIDE (a switch position, through the HOTAS route that target management and weapon release take), and if
+        the HUD still draws no A-A, the switch through centre to override again, then the ICP A-A button. In a live run
+        (15 October) the ICP press alone left the HUD in NAV for the whole fight; on 21 October (live_..._090924) the
+        override click left it in NAV for 125 s, and every fire request in that time timed out. So each call tries
+        again while the HUD says NAV; the ICP button toggles, so it is pressed only when the HUD has just said NAV.
         True when the HUD shows A-A, False when it does not, None when there is no display data."""
         r, d, fn = self.r, self.defs, self.fn
         mm = cockpit.master_mode(cockpit.last_with(r.frames[-200:], "rd"))
@@ -315,19 +341,26 @@ class StickPilot(threading.Thread):
         cockpit.click(r, "hotas.THROTTLE_DOG_FIGHT", d, value=-1.0, fn=fn, verbose=False)
         self.overridden = True
         cockpit.settle(r, 1.0, fn)
-        mm = cockpit.master_mode(cockpit.last_with(r.frames[-60:], "rd"))
-        if mm is False and not self.icp_aa_tried:
+        mm = cockpit.master_mode(cockpit.last_with(r.frames[-30:], "rd"))
+        if mm is False:
+            how = "missile override, the switch cycled through centre"
+            cockpit.click(r, "hotas.THROTTLE_DOG_FIGHT", d, value=0.0, fn=fn, verbose=False)
+            cockpit.settle(r, 0.5, fn)
+            cockpit.click(r, "hotas.THROTTLE_DOG_FIGHT", d, value=-1.0, fn=fn, verbose=False)
+            cockpit.settle(r, 1.0, fn)
+            mm = cockpit.master_mode(cockpit.last_with(r.frames[-30:], "rd"))
+        if mm is False:
             self.icp_aa_tried = True
             how = "ICP A-A button"
             cockpit.click(r, "ufc.AA", d, fn=fn, verbose=False)
             cockpit.settle(r, 1.0, fn)
-            mm = cockpit.master_mode(cockpit.last_with(r.frames[-60:], "rd"))
-        if mm != self.aa_said:
+            mm = cockpit.master_mode(cockpit.last_with(r.frames[-30:], "rd"))
+        if mm != self.aa_said or mm is False:
             self.aa_said = mm
             self.events.put(("radar", "aa" if mm else "no_aa",
                              f"A-A master mode by the {how}" if mm else
-                             "the HUD is still not in A-A after missile override and the ICP A-A button: "
-                             "weapon release will launch nothing"))
+                             "the HUD is still not in A-A after missile override (cycled) and the ICP A-A button: "
+                             "weapon release will launch nothing; trying again at the next radar or fire job"))
         return mm
 
     def _bug(self, max_secs=10.0):
@@ -402,7 +435,7 @@ class StickPilot(threading.Thread):
     def _fire_job(self):
         r, d, fn = self.r, self.defs, self.fn
         t0 = r.frames[-1].t
-        self._aa()
+        aa = self._aa()
         if self.point_deg:
             self._point()
         else:
@@ -412,7 +445,8 @@ class StickPilot(threading.Thread):
             self._point_hdg = r.frames[-1].hdg
         if not self._bug():
             self.fire_times.append({"bug_s": None, "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
-            self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"))
+            self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"
+                             + ("; the HUD was not in A-A (NAV)" if aa is False else "")))
             return
         t_bug = r.frames[-1].t
         mrm0 = cockpit.hud_mrm(r, self.link)

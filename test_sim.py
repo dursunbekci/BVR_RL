@@ -952,6 +952,9 @@ def test_dcs_live_stick():
             recs = [_json.loads(x) for x in open(os.path.join(d, "episodes.jsonl"))]
             # (the fake cockpit's missile never reaches the fake DCS world, so the record has no missiles here)
             assert len(recs) == 1 and recs[0]["red"]["style"] == "DCS AI" and recs[0]["phases"], recs
+            # the console kept beside the fight's files, with the pilot's events in it
+            con = [f for f in os.listdir(d) if f.endswith("_console.txt")]
+            assert len(con) == 1 and "A-A master mode by the missile override" in open(os.path.join(d, con[0])).read(), con
     finally:
         th.join(timeout=120)
         link.close(); fake.close()
@@ -961,6 +964,7 @@ def test_dcs_live_stick():
     assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
     assert not stick.controlling, "the axes were not released at the end"
     assert row["red_style"] == "DCS AI" and row["first_shot"] in ("ours", "red", "none") and row["hdg_err_med_deg"] != "", row
+    assert row["hud_aa_pct"] != "" and row["hud_aa_pct"] > 50 and row["first_bug_km"] != "", row
     assert any("point: nose to the target before the release" in m for m in logs), logs[-20:]
     assert any("A-A master mode by the missile override" in m for m in logs), logs[:20]
     delays = [float(x) for x in row["launch_delays_s"].split(";") if x]

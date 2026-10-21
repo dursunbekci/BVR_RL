@@ -659,6 +659,46 @@ def test_turn_hold():
           f"{revs[0]} bank reversal(s))")
 
 
+def test_aa_recovery():
+    """The A-A master mode when the first missile-override click does nothing (live_..._090924, 21 October: the HUD
+    stayed in NAV for 125 s and all four fire requests timed out as "no TWS track bugged"): the pilot cycles the
+    switch through centre, the HUD comes to A-A, and a fire request then launches. With the HUD stuck in NAV the
+    timeout says so."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    out = {}
+    for case in ("stuck aft", "NAV for good"):
+        link = FakeLink(cockpit_defs=defs)
+        link.cockpit.dogfight = -1.0                  # aft already, HUD in NAV: a click to -1 does nothing
+        link.cockpit.icp_aa_works = False             # and the ICP press did nothing either (15 and 21 October)
+        if case == "NAV for good":
+            link.cockpit.dogfight_works = link.cockpit.icp_aa_works = False
+        with tempfile.TemporaryDirectory() as d:
+            p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+            p.start()
+            try:
+                p.fire()
+                t0, ev = _time.time(), []
+                while not any(k == "fire" for k, *_ in ev) and _time.time() - t0 < 60:
+                    _time.sleep(0.05)
+                    ev += p.drain_events()
+            finally:
+                p.stop()
+        out[case] = (link.cockpit.aa, [e for e in ev if e[0] == "fire"], p.cockpit_summary())
+    _, fire, cp = out["stuck aft"]                  # (the pilot puts the switch back to centre when it stops)
+    assert fire and fire[0][1] == "launched" and cp["aa_pct"] > 50 and cp["first_bug_km"] != "", out["stuck aft"]
+    _, fire, cp2 = out["NAV for good"]
+    assert fire and fire[0][1] == "timeout" and "not in A-A" in fire[0][2] and cp2["aa_pct"] == 0, out["NAV for good"]
+    print(f"  A-A recovery ................ OK  (override already aft with the HUD in NAV: cycled through centre, "
+          f"A-A, launched; HUD in A-A {cp['aa_pct']}% of the run, first bug at {cp['first_bug_km']} km; a HUD stuck in "
+          f"NAV is named in the timeout)")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -1241,6 +1281,7 @@ if __name__ == "__main__":
     test_cockpit()
     test_g_loop()
     test_turn_hold()
+    test_aa_recovery()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
@@ -1249,4 +1290,4 @@ if __name__ == "__main__":
     test_install()
     test_own_missile()
     test_chaff()
-    print("20/20 passed")
+    print("21/21 passed")

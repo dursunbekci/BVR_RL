@@ -486,6 +486,18 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     stamp = time.strftime("%Y%m%d_%H%M%S")
     name = f"live_{stamp}_ep{ep}" + ("_shadow" if args.shadow else "")
     os.makedirs(args.out, exist_ok=True)
+    # Everything this episode prints, also kept in <name>_console.txt: the stick pilot's events (A-A master mode,
+    # TWS, bugs, fire timeouts) are only in it. On 21 October four fire requests timed out with the HUD in NAV and
+    # the console, which said why, was gone.
+    con_fh = open(os.path.join(args.out, name + "_console.txt"), "w", encoding="utf-8")
+    log_print = log
+
+    def log(msg):
+        log_print(msg)
+        try:
+            con_fh.write(msg + "\n"); con_fh.flush()
+        except ValueError:
+            pass                                     # closed: the episode is over
     raw_fh = open(os.path.join(args.out, name + ".jsonl"), "w", encoding="utf-8")
     raw_fh.write(json.dumps(rec.header) + "\n")
     for e in rec.events:
@@ -581,6 +593,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         link.sink = None
         raw_fh.close(); steps_fh.close()
     outcome = info.get("terminal_outcome", "?")
+    cp = pilot.cockpit_summary() if pilot is not None else {}
     row = {"episode": name, "mode": "shadow" if args.shadow else ("stick" if pilot is not None else "live"),
            "stochastic": bool(getattr(args, "stochastic", False)),
            "agent": agent,
@@ -596,7 +609,11 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            "support_losses": info.get("support_losses", 0),
            "chaff_presses": pilot.cms_presses if pilot is not None else "",
            "chaff_used": (pilot.chaff_first - pilot.chaff_last)
-           if pilot is not None and pilot.chaff_first is not None and pilot.chaff_last is not None else ""}
+           if pilot is not None and pilot.chaff_first is not None and pilot.chaff_last is not None else "",
+           # the HUD in A-A this share of the fight (a fire request in NAV launches nothing), and the range at which
+           # DCS's radar first held a bugged track (the simulator's radar model detects an F-16 at 77-104 km)
+           "hud_aa_pct": cp.get("aa_pct", ""), "first_bug_km": cp.get("first_bug_km", ""),
+           "first_bug_t": cp.get("first_bug_t", "")}
     # How often BLUE-1 flew well below the speed the policy asked for. The DCS
     # AI following a route may not use afterburner; the simulator always does.
     short = [c - f > SPEED_SHORT_MPS for c, f in spd]
@@ -653,7 +670,13 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         log(f"  first shot: {f['who']}" + (f", {f['gap_s']:.0f} s ahead" if f.get("gap_s") is not None else ""))
     if rep.get("timeout"):
         log(f"  out of time: {rep['timeout']['cause']}")
-    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv; the fight's record in episodes.jsonl")
+    if cp:
+        log(f"  cockpit: HUD in A-A {cp['aa_pct']}% of the fight"
+            + (f"; first bugged track at {cp['first_bug_km']} km ({cp['first_bug_t']} s)" if cp.get("first_bug_km") != ""
+               else "; no track was ever bugged"))
+    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv, _console.txt; the fight's record in "
+        f"episodes.jsonl")
+    con_fh.close()
     return row, rec.t_end
 
 

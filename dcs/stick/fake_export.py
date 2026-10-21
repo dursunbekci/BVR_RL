@@ -127,6 +127,12 @@ class FakeCockpit:
         self.chaff, self.flare = 60, 60
         self.icp_aa_works = True           # False: the ICP A-A press does nothing (a live run, 15 October)
         self.aa = self.armed = False
+        # the DOGFIGHT switch: -1 MISSILE OVERRIDE, 0 centre, +1 DOGFIGHT; a click to where it already is changes
+        # nothing. Set to -1 with aa False for a switch that is aft while the HUD stays in NAV (live_..._090924, 21
+        # October: the override click left the HUD in NAV for 125 s)
+        self.dogfight = 0.0
+        self.dogfight_works = True         # False: the switch does nothing at all
+        self.icp_aa = False                # the master mode under the switch: A-A after an ICP A-A press
         self.stage = 0                     # 0 searching, 1 designated (bugged), 2 single-target track
         self.soi_left = True               # which MFD the cursor and target management act on
         self.cursor, self.scan_needed = 0, scan_needed
@@ -173,11 +179,12 @@ class FakeCockpit:
         elif name == "cms_fwd" and value == 1.0:
             if 0.15 < self.cmds_mode < 0.45 and self.cmds_prgm > 0.05 and self.cmds_ch and self.chaff > 0:
                 self.chaff -= 1
-        elif name == "dogfight":
-            if value == -1.0:              # MISSILE OVERRIDE: A-A with the missile selected
-                self.aa = True
+        elif name == "dogfight" and self.dogfight_works:
+            if value != self.dogfight:     # MISSILE OVERRIDE: A-A with the missile selected; centre: the master mode
+                self.dogfight = value
+                self.aa = value == -1.0 or self.icp_aa
         elif name == "aa" and value == 1.0 and self.icp_aa_works:
-            self.aa = True                 # (in DCS the radar page stayed the sensor of interest: no DMS needed)
+            self.icp_aa = self.aa = True   # (in DCS the radar page stayed the sensor of interest: no DMS needed)
         elif name == "cursor" and value == 1.0 and self.soi_left:
             self.cursor += 1
         elif name == "cursor_aft" and value == 1.0 and self.soi_left:
