@@ -207,8 +207,13 @@ class DcsRecording:
                         if d["t_hit"] is None:
                             d["t_hit"], d["hit_target"] = t, e["unit"]
             elif kind == "dead":
-                self.dead.setdefault(e["unit"], (t, e.get("cause", "dead")))
-            elif kind == "ammo":
+                # The bridge names the unit with getName(), which fails for some initiators (a wreck, a weapon); Lua
+                # then drops the nil field and the event comes without "unit" (dcsfit_v6 live, 21 October: a
+                # KeyError ended the run 90 s into the fight). Such an event cannot be told apart from noise; an
+                # aircraft that really died is still found by its kill or hit, or by leaving the frames.
+                if e.get("unit"):
+                    self.dead.setdefault(e["unit"], (t, e.get("cause", "dead")))
+            elif kind == "ammo" and e.get("unit"):
                 n = sum(int(i.get("count", 0)) for i in e.get("items", [])
                         if i.get("aam") and int(i.get("guidance", 0)) in RADAR_GUIDANCE)
                 self.ammo.setdefault(e["unit"], []).append((t, n))

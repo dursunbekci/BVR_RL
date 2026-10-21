@@ -1341,6 +1341,30 @@ def test_env_pickles():
     print("  envs pickle ................. OK")
 
 
+def test_dcs_unnamed_events():
+    """A death or ammo event whose unit DCS could not name (the bridge's getName() failed, so Lua dropped the
+    field) is skipped, live and replayed; it ended a live run with a KeyError on 21 October."""
+    import json
+    from dcs_world import DcsRecording, DcsLiveRecording, FORMAT
+
+    def unit(name, coal, x, t):
+        return {"name": name, "coal": coal, "type": "F-16C_50", "x": x + 250.0 * t, "y": 8000.0, "z": 0.0,
+                "vx": 250.0, "vy": 0.0, "vz": 0.0, "fx": 1.0, "fy": 0.0, "fz": 0.0, "ux": 0.0, "uy": 1.0, "uz": 0.0,
+                "fuel": 0.9, "radar_on": False}
+    lines = [{"format": FORMAT, "agent": "BLUE-1", "red": "RED-1", "rate": 0.1, "t0": 0, "bridge": 7}]
+    lines += [{"t": round(0.1 * k, 1), "units": [unit("BLUE-1", 2, 0.0, 0.1 * k), unit("RED-1", 1, 50_000.0, 0.1 * k)],
+               "weapons": []} for k in range(1, 6)]
+    lines += [{"ev": "dead", "t": 0.3, "cause": "crash"},              # no "unit": the name was nil in Lua
+              {"ev": "ammo", "t": 0.3, "items": []},
+              {"ev": "dead", "t": 0.4, "unit": "RED-1", "cause": "dead"}]
+    rec = DcsRecording([json.dumps(x) for x in lines])
+    live = DcsLiveRecording()
+    live.extend(lines)
+    for r in (rec, live):
+        assert list(r.dead) == ["RED-1"] and abs(r.dead["RED-1"][0] - 0.4) < 1e-9, r.dead
+    print("  DCS unnamed events .......... OK  (a death with no unit is skipped, live and replayed)")
+
+
 def test_dcs_round_trip():
     """A simulator episode written in the DCS logger's format replays to the same inputs."""
     import os, tempfile
@@ -2184,6 +2208,7 @@ if __name__ == "__main__":
         ("missile time-to-go",      test_missile_tgo),
         ("defence potential",       test_defence_potential),
         ("heading reference",       test_heading_reference),
+        ("DCS unnamed events",      test_dcs_unnamed_events),
         ("start reference",         test_start_reference),
         ("turn hold",               test_turn_hold),
         ("stern starts",            test_stern_starts),
