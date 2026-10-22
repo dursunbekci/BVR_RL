@@ -135,6 +135,10 @@ class RadarTrackAdapter:
     N = 6
 
     ACQUIRE_HITS = 5
+    # A NEW track (from nothing, or after a coast timed out) needs this many hits (SIM_REV 22: set from the
+    # radar's ACQUIRE_S; DCS's F-16 took 15-20 s in TWS to make a track it could bug); re-acquiring after a short
+    # coast needs ACQUIRE_HITS.
+    acquire_first_hits = ACQUIRE_HITS
     COAST_TIMEOUT = 15.0
 
     # Process-noise PSD for unmodelled target acceleration during coast,
@@ -165,6 +169,7 @@ class RadarTrackAdapter:
         self.P = np.eye(6) * 1e8
         self.state = TrackState.NONE
         self.n_hits = 0
+        self.ever_tracked = False      # a firm track since the last reset: a coast is not a new track
         self.t_now = 0.0
         self.t_last = -1e9
         self._valid = False
@@ -263,8 +268,9 @@ class RadarTrackAdapter:
         pos_sigma = math.sqrt(max(float(np.trace(cov[:3, :3])), 0.0))
         if pos_sigma > self.SIGMA_DEGRADE_M:
             self.state = TrackState.ACQUIRING
-        elif self.n_hits >= self.ACQUIRE_HITS:
+        elif self.n_hits >= (self.ACQUIRE_HITS if self.ever_tracked else self.acquire_first_hits):
             self.state = TrackState.TRACK
+            self.ever_tracked = True
         else:
             self.state = TrackState.ACQUIRING
 

@@ -44,7 +44,7 @@ import math
 import numpy as np
 
 from f16_sim   import F16Aircraft, _wrap_pi
-from missile_sim import AIM120, MslPhase, THREAT_CLOSING_MPS, is_threat
+from missile_sim import AIM120, MslPhase, THREAT_CLOSING_MPS, is_threat, decoy_rate
 from bvr_library import rcs_scale
 
 G        = 9.80665
@@ -215,6 +215,12 @@ class SimWorld:
         for m in list(self.missiles):
             tgt = m.target
             evs = m.step(self.SIM_DT, ac_pos[tgt], ac_vel[tgt])
+            # SIM_REV 22: the target's beam and chaff can break an active seeker's lock (missile_sim.decoy_rate)
+            if (m.seeker_active and m.phase not in (MslPhase.HIT, MslPhase.MISS) and self.alive[tgt - 1]
+                    and self._rng.random() < decoy_rate(m.pos, ac_pos[tgt], ac_vel[tgt]) * self.SIM_DT):
+                m.phase = MslPhase.MISS
+                evs = evs + [{"type": "MISSILE_MISS", "id": m.id, "owner": m.owner,
+                              "miss_dist": round(float(np.linalg.norm(ac_pos[tgt] - m.pos)), 1), "cause": "DECOYED"}]
             if not self.alive[tgt - 1]:
                 # Nothing left to destroy: a wreck neither fuzes a missile
                 # nor dies twice.

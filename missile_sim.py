@@ -98,6 +98,27 @@ THREAT_CLOSING_MPS = 20.0
 THREAT_HOLD_S = 3.0
 
 
+# SIM_REV 22: an active seeker can be decoyed. Inside DECOY_RANGE, a target that beams the missile (its velocity
+# within DECOY_BEAM_DEG of square to the line of sight: the seeker's Doppler notch) and dispenses chaff (both sides
+# do, automatically, against an active seeker, as dcs_live.py's pilot) breaks the lock at DECOY_P_BEAM per second,
+# otherwise at DECOY_P_OTHER. dcs/missile_replay.py, 45 DCS missiles: the DCS AI's beam, chaff salvos and dive beat
+# five of our active seekers that the model hit, our jet's defence one of thirteen of red's. Rough: few shots.
+DECOY_RANGE = 10_000.0
+DECOY_BEAM_DEG = 25.0
+DECOY_P_BEAM = 0.30
+DECOY_P_OTHER = 0.01
+
+
+def decoy_rate(msl_pos, tgt_pos, tgt_vel) -> float:
+    """Per-second chance that an active seeker is decoyed now (0 beyond DECOY_RANGE)."""
+    los = np.asarray(tgt_pos, dtype=np.float64) - np.asarray(msl_pos, dtype=np.float64)
+    r = float(np.linalg.norm(los))
+    if r > DECOY_RANGE:
+        return 0.0
+    asp = math.degrees(_angle_between(np.asarray(tgt_vel, dtype=np.float64), los))
+    return DECOY_P_BEAM if abs(asp - 90.0) <= DECOY_BEAM_DEG else DECOY_P_OTHER
+
+
 def is_threat(t_now: float, t_last_closing: float) -> bool:
     return (t_now - t_last_closing) <= THREAT_HOLD_S
 

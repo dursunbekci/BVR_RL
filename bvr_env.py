@@ -339,6 +339,8 @@ class BvrEnv(gym.Env):
         self._world   = SimWorld(seed=seed+instance_id*1000,
                                  platform1=self._plat, platform2=self._opp_plat)
         self._track   = RadarTrackAdapter()
+        self._track.acquire_first_hits = max(RadarTrackAdapter.ACQUIRE_HITS, int(round(
+            float(getattr(self._plat.radar, "ACQUIRE_S", 0.5)) * self.TRACK_CONVERT_HZ)))
         # Launch envelopes: ours for our missile, the threat's for his.
         self._env_own = self._load_envelope(self._plat.missile, envelope_table)
         self._env_thr = (self._env_own if self._opp_plat.missile.fingerprint

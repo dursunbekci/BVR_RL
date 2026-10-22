@@ -231,7 +231,8 @@ class StickPilot(threading.Thread):
             self.r.close()
 
     # ── chaff ───────────────────────────────────────────────────────────
-    CHAFF_EVERY = 1.5          # s between presses of CMS forward (each dispenses the MAN program once)
+    CHAFF_EVERY = 0.5          # s between presses of CMS forward (each dispenses the MAN program once). SIM_REV 22: was
+                               # 1.5; the DCS AI's salvos beat our seekers, our one bundle a 1.5 s beat one of 13 of its
     CHAFF_HOLD = 0.3           # s the switch is held forward
 
     def _cmds_setup(self):

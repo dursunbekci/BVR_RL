@@ -177,6 +177,9 @@ SCHEMA = {
         P("LOWDOP_CLOSURE", "Low-Doppler threshold", "m/s", "Clutter", 0, 300,
           help="Below this closure speed the track errors grow (beam manoeuvre)."),
         P("LOWDOP_MAX_INFLATE", "Error growth at zero closure", "×", "Clutter", 1, 50),
+        P("ACQUIRE_S", "Time to build a new track", "s", "Detection", 0.1, 60, advanced=True, default=0.5,
+          help="Seconds of detections before a new track is firm enough to shoot on (SIM_REV 22: DCS's F-16 "
+               "took 15-20 s in TWS). A track that only coasts briefly is not rebuilt."),
     ],
     "platform": [
         P("airframe", "Airframe", "", "Components", kind="ref", ref="airframe"),
@@ -423,7 +426,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 21
+SIM_REV = 22
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -530,6 +533,11 @@ _SIM_REV_NOTES = {
         "never found the bandit in 23 of 60 simulator fights, all timeouts). The autopilot keeps turning "
         "the way it is banked when the heading error is beyond 150 deg the other way (f16_sim.turn_hold, "
         "the stick pilot too): a command near the tail no longer reverses the bank at every crossing of 180",
+    22: "fitted to what 45 DCS missiles did (dcs/missile_replay.py): an active seeker inside 10 km is decoyed "
+        "by a target that beams it at 0.30/s (0.01/s otherwise), both sides alike (missile_sim.decoy_rate); "
+        "a pressing (DCS-like) red runs a fleeing target down at its dash speed; and platform F-16C-DCSFIT-R "
+        "carries the APG-68-DCS radar: 55 km detection and 15 s to build a new track, as the player's F-16 "
+        "in DCS. Missile physics were right (the model hit all 12 of red's DCS hits on our recorded paths)",
 }
 
 

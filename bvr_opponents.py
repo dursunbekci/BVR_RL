@@ -377,8 +377,23 @@ class ShooterOpponent(BvrOpponent):
             hdg = brg + math.pi
             return self._cmd(hdg, self._base_alt - 1000.0, self.FAST_SPEED, fire)
 
-        # COMMIT / REATTACK: hot, climbing for launch energy
+        # COMMIT / REATTACK: hot, climbing for launch energy. SIM_REV 22: a pressing red (the DCS AI's style) runs a
+        # fleeing target down at its dash speed: in DCS 13 of its 20 hits came from under 20 km, after the policy
+        # had turned away (its shots from under 20 km hit 87%), where in the simulator it re-attacked at its
+        # commit speed and a running agent mostly got away.
+        if self.PRESS and self._fleeing(state, brg):
+            return self._cmd(brg, self._base_alt, self.FAST_SPEED, fire)
         return self._cmd(brg, min(self._base_alt + 1500.0, 12_000.0), self.COMMIT_SPEED, fire)
+
+    FLEE_DEG = 60.0     # the target flies within this of straight away from red: it is running
+
+    @staticmethod
+    def _fleeing(state, brg) -> bool:
+        psi = state.get("psi")
+        if psi is None:
+            return False
+        off = (float(psi) - brg + math.pi) % (2.0 * math.pi) - math.pi
+        return abs(off) < math.radians(ShooterOpponent.FLEE_DEG)
 
 
 class AdaptiveShooterOpponent(ShooterOpponent):

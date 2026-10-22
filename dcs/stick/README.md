@@ -957,3 +957,11 @@ read them one by one, released the stick at each and slept 0.5 s, so it flew not
 (the console's 50 "load factor" lines). `UdpLink.flush()` now drops the telemetry already waiting (events kept), and
 the pilot calls it as it starts. The screenshot taken during the fight agrees with the counters: TWS, 40 NM, the cursor
 right of centre with its height readout, and no contact symbol on the radar page.
+
+**SIM_REV 22 (22 October): the simulator fitted to what DCS did.** From dcs/missile_replay.py and the stick logs:
+an active seeker inside 10 km is decoyed by a target that beams it (0.30 per second, 0.01 otherwise; both sides,
+chaff assumed automatic as the pilot's), a pressing red runs a fleeing target down at its dash speed, and the platform
+F-16C-DCSFIT-R carries APG-68-DCS (55 km detection, 15 s to build a new track). The stick pilot drops chaff every
+0.5 s against an active seeker (was 1.5). Train the agent on F-16C-DCSFIT-R against F-16C-DCSFIT. dcsfit_v6 on it
+(24 fights against the DCS-like red, untrained for it): 1.4 shots a fight (3.2 before), its far shots decoyed or
+short, red's hitting 20%.

@@ -1798,7 +1798,7 @@ def test_episode_report():
         ours = [x for x in r["missiles"] if x["owner"] == "ours"]
         assert len(ours) == info["shots_fired"]
         for x in r["missiles"]:
-            assert x["end"] in ("HIT", "KINEMATIC", "ENDGAME", "SUPPORT_LOST", "in flight"), x
+            assert x["end"] in ("HIT", "KINEMATIC", "ENDGAME", "SUPPORT_LOST", "DECOYED", "in flight"), x
             assert x["range_km"] > 0 and x["t_flight"] is not None and x["r_over_rmax"] is not None
         reds = [x for x in r["missiles"] if x["owner"] == "red"]
         assert len(r["defence"]) == len(reds)
@@ -1946,6 +1946,46 @@ def test_turn_hold():
     assert turned > 140 and revs <= 1, (turned, revs)
     print(f"  turn hold ................... OK  (alternating 161/191 deg off the tail: turned 140 deg in "
           f"{k * 0.02:.0f} s with {revs} bank reversal(s))")
+
+
+def test_sim_rev_22():
+    """SIM_REV 22: a beaming target decoys an active seeker, one flying at it hardly ever; a new track on the
+    APG-68-DCS radar takes its 15 s, a short coast does not; a pressing red chases a fleeing target at dash speed."""
+    import math
+    import numpy as np
+    from missile_sim import decoy_rate, DECOY_P_BEAM, DECOY_P_OTHER
+    assert decoy_rate([0, 0, 0], [5000, 0, 0], [0, 300, 0]) == DECOY_P_BEAM          # beam
+    assert decoy_rate([0, 0, 0], [5000, 0, 0], [-300, 0, 0]) == DECOY_P_OTHER        # flying at the missile
+    assert decoy_rate([0, 0, 0], [15000, 0, 0], [0, 300, 0]) == 0.0                  # beyond 10 km
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T, AdaptiveShooterOpponent
+    e = BvrEnv(opponent_type=T.STRAIGHT, seed=2, platform="F-16C-DCSFIT-R", opponent_platform="F-16C-DCSFIT")
+    assert e._track.acquire_first_hits == 150
+    t_first = None
+    for seed in range(6):                             # from the first detection (ACQUIRING) to TRACK
+        e._ready = False
+        e.reset(seed=seed)
+        t_seen = None
+        for k in range(150):
+            e.step([0, 2, 3, 0])
+            st = e._trk_state()
+            if st == 1 and t_seen is None:
+                t_seen = k
+            if st == 2:
+                t_first = None if t_seen is None else k - t_seen
+                break
+        if t_first:
+            break
+    assert t_first is not None and t_first >= 14, t_first
+    o = AdaptiveShooterOpponent(rng=np.random.default_rng(1))
+    o.reset({"ac2_psi": 0.0, "ac2_alt": 9000.0, "ac2_spd": 300.0, "ac1_psi": 0.0})
+    o.PRESS, o._phase, o.FAST_SPEED, o.COMMIT_SPEED = True, "REATTACK", 480.0, 400.0
+    o.rmax_t = 1.0
+    st = {"lat": 0.2, "lon": 0.0, "lat_t": 0.0, "lon_t": 0.0, "range": 22000.0, "wpn_remaining_t": 2, "missiles": []}
+    away, at = o.act(dict(st, psi=0.0), 10.0), o.act(dict(st, psi=math.pi), 11.0)
+    assert away["V"] == 480.0 and at["V"] == 400.0, (away["V"], at["V"])
+    print(f"  SIM_REV 22 .................. OK  (decoy {DECOY_P_BEAM}/s beaming, {DECOY_P_OTHER}/s otherwise; first "
+          f"track after {t_first} s on APG-68-DCS; red chases a runner at dash speed)")
 
 
 def test_symmetric_policy():
@@ -2242,6 +2282,7 @@ if __name__ == "__main__":
         ("DCS unlimited weapons",   test_dcs_unlimited_weapons),
         ("start reference",         test_start_reference),
         ("turn hold",               test_turn_hold),
+        ("SIM_REV 22",              test_sim_rev_22),
         ("stern starts",            test_stern_starts),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
