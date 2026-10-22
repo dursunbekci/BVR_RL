@@ -522,3 +522,21 @@ for /L %s in (1,1,5) do python dcs\make_mission.py --blue-player --seed %s
 
 writes `dcs\bvr_rl_1v1_stick_s1.miz` ... `_s5.miz`, each with its start printed. `dcs_live.py --stochastic` samples the
 policy's actions as training does (results.csv's `stochastic` column says which), for variety within one start.
+
+## missile_replay.py: does the simulator's missile hit where DCS's did? (22 October)
+
+`python dcs\missile_replay.py dcs_runs\live_*.jsonl` flies the library missile (AIM-120C-DCS) from every recorded
+launch against the target's recorded flight path (guided on it all the way, seeker hand-off 8, 12 and 16 km, the flight
+let run 20 s past DCS's with the target going straight on) and sets its outcome beside DCS's, with the DCS missile's
+own closest approach. 45 missiles from 13 dcs_live recordings (20-22 October, dcsfit_v3-v6):
+
+- **Red's missiles at the policy's jet: the model agrees with DCS.** DCS hit 12 of 28; the model hits all 12 and one
+  more (a 13.9 km shot DCS missed by 1.1 km), and misses DCS's long misses kinematically too. Our jet was not hit in
+  DCS because DCS's missile is stronger than the model; it was hit where it was (13 of red's 20 hits came from under
+  20 km, after the policy had turned away, often with no track).
+- **Our missiles at the DCS AI: they differ.** DCS hit 1 of 17, missing by 2-9 km; the model guided all the way hits 9.
+  Flown as the simulator flies them (guided only while the policy's track held, then on the extrapolated estimate,
+  support rule off), the shots whose track was dropped early (8-21 s after launch: the policy turned past 62 deg)
+  run out of energy in the model too, as in DCS. Five shots that the model still hits with the seeker on (142940
+  #4, #5, #7, #8, 111621 #1) missed by 3-9 km in DCS: the DCS AI's defence (beaming, chaff in salvos as the missile
+  closed, diving to 50 m in two shots) defeated the active seeker, which the simulator does not model.
