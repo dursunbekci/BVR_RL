@@ -304,12 +304,20 @@ class StickPilot(threading.Thread):
         self._aa()
         if not self.cmds_tried:
             self._cmds_setup()
+        # Target management right held toggles RWS <-> TWS, so it is held only when the page says RWS: a read that
+        # came back empty (mode None) once held it in TWS and the radar went to RWS for 29 s
+        # (live_20261021_142940). An empty read is read once more; still nothing, the radar is left as it is.
         info = self._page()
-        if info["mode"] != "TWS":
+        if info["mode"] is None:
+            cockpit.settle(r, 0.3, fn)
+            info = self._page()
+        if info["mode"] == "RWS":
             cockpit.click(r, "hotas.STICK_TGT_MANAGE_RIGHT", d, hold=1.5, fn=fn, verbose=False)
             cockpit.settle(r, 1.0, fn)
-            info = self._page()
-            self.events.put(("radar", "tws" if info["mode"] == "TWS" else "no_tws", f"radar {info['mode']}"))
+            after = self._page()["mode"]
+            self.events.put(("radar", "tws" if after == "TWS" else "no_tws", f"radar RWS -> {after}"))
+        elif info["mode"] is None:
+            self.events.put(("radar", "page_unread", "the radar page did not answer: the mode is left as it is"))
         if self._state() not in ("designated", "stt"):
             az = self._target_az()
             # the cursor goes to the target's bearing, again only when that has moved by 10 deg: each move swings

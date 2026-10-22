@@ -699,6 +699,40 @@ def test_aa_recovery():
           f"NAV is named in the timeout)")
 
 
+def test_tws_kept():
+    """A radar page read that comes back empty must not toggle the radar out of TWS: target management right held
+    toggles RWS <-> TWS, and a job that read "no mode" as "not TWS" held it (live_20261021_142940: the scan limits
+    went at 44.7 s, the radar was in RWS for 29 s with red nose-on 12-18 deg off, and nothing could be bugged)."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    link = FakeLink(cockpit_defs=defs)
+    with tempfile.TemporaryDirectory() as d:
+        p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+        p.start()
+        try:
+            def job():
+                p.radar()
+                t0 = _time.time()
+                _time.sleep(0.2)
+                while (p.busy is not None or not p.jobs.empty()) and _time.time() - t0 < 60:
+                    _time.sleep(0.02)
+            job()
+            assert link.cockpit.mode == "TWS", link.cockpit.mode
+            link.cockpit.stage = 0                    # the bug dropped: the next job bugs again
+            link.blank_ind = 1                        # and its first page read comes back empty
+            job()
+            ev = p.drain_events()
+        finally:
+            p.stop()
+    assert link.cockpit.mode == "TWS", (link.cockpit.mode, ev)
+    print("  TWS kept on a blank read .... OK  (an empty radar page read left the radar in TWS)")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -1282,6 +1316,7 @@ if __name__ == "__main__":
     test_g_loop()
     test_turn_hold()
     test_aa_recovery()
+    test_tws_kept()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
@@ -1290,4 +1325,4 @@ if __name__ == "__main__":
     test_install()
     test_own_missile()
     test_chaff()
-    print("21/21 passed")
+    print("22/22 passed")

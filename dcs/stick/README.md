@@ -897,3 +897,12 @@ gone (4 bank reversals in 234 s, was 40 a minute); the track was lost cold and r
 The first bugged track came at 46.9 km, though the request at 71.5 km had red nose-on, 11 deg off and co-altitude;
 the same mission bugged at 67 km in 090242 and launched at 71.6 km in 140225. So the bugging, not DCS's detection
 range, is what varies; the fight's stick log (`stick_*_live.jsonl`) shows the radar page markers through it.
+
+**Why the first bug came at 46.9 km (stick log of 142940).** The radar page's scan-limit marks (drawn in TWS's narrow
+scan) were there from 28.2 to 44.7 s, then gone until 73.5 s, when the target bugged at once: the radar was in RWS
+for 29 s with red nose-on, 12-18 deg off the nose, 65 to 47 km. Target management right held toggles RWS <-> TWS,
+and the pilot held it whenever its read of the page did not say TWS, an empty read (a lost reply: mode None)
+included; on the fake cockpit, one empty read takes the old pilot from TWS to RWS. It now holds it only when the page
+says RWS, reads an empty page once more, and otherwise leaves the radar as it is ("the radar page did not answer");
+the console names each switch ("radar RWS -> TWS"). The fake cockpit now tells a long press (toggle) from a short one
+(bug), as DCS does.

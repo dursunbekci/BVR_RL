@@ -96,6 +96,8 @@ class FakeCockpit:
     (ICP), a lock by target management up (after `scan_needed` radar cursor presses), master arm and weapon
     release. The target is an unarmed aircraft 60 km ahead of the start, not moving."""
 
+    TMS_LONG_S = 1.0                       # target management held this long is a long press
+
     def __init__(self, defs, ac, scan_needed=0, tgt_range=60000.0):
         h = defs["commands"]["hotas"]
         d = defs["devices"]
@@ -153,6 +155,7 @@ class FakeCockpit:
         self.bz = ac.z + 485000.0 * math.sin(ac.hdg)
         self.scale = 40
         self.mode = "RWS"
+        self.tms_right_t = None            # when target management right went down
         self.bull_on = True                # the readout is from the bullseye until the DED's BULL page toggles it
         self.last_key = None
 
@@ -199,10 +202,16 @@ class FakeCockpit:
             self.last_key = name
         elif name == "rng_up" and value == 1.0:
             self.scale = min(160, self.scale * 2)
-        elif name == "tms_right" and value == 1.0 and self.aa and self.soi_left:
-            if self.mode == "RWS":
-                self.mode = "TWS"
-            elif self.stage == 0 and abs(self.target_polar()[1] - self.cur_az) <= 25.0:
+        elif name == "tms_right" and value == 1.0:
+            self.tms_right_t = self.ac0.t          # acted on at the release: long and short presses differ
+        elif name == "tms_right" and value == 0.0 and self.tms_right_t is not None:
+            held, self.tms_right_t = self.ac0.t - self.tms_right_t, None
+            if not (self.aa and self.soi_left):
+                pass
+            elif held >= self.TMS_LONG_S:          # long: RWS <-> TWS, as in DCS (a track bugged in TWS is dropped)
+                self.mode = "TWS" if self.mode == "RWS" else "RWS"
+                self.stage = 0
+            elif self.mode == "TWS" and self.stage == 0 and abs(self.target_polar()[1] - self.cur_az) <= 25.0:
                 self.stage = 1                     # bug the (only) track: TWS scans 25 deg either side of the cursor
         elif name == "tms_down" and value != 0.0:            # the keymap sends -1.0
             self.stage = 0
@@ -294,6 +303,7 @@ class FakeLink:
         self.seq = 0
         self.last_tel_wall = self.last_event_wall = 0.0
         self.ind_items = {}
+        self.blank_ind = 0                     # this many display reads come back empty
         self._wall = 1.0e9
         self.commands_sent = 0
 
@@ -331,6 +341,11 @@ class FakeLink:
         pass
 
     def ind(self, first=0, last=49):
+        if self.blank_ind > 0:                 # a display read that comes back empty (a lost reply)
+            self.blank_ind -= 1
+            self.ind_items = {}
+            self.events["ind_end"] = {"ev": "ind_end", "count": 0}
+            return
         stage = self.cockpit.stage if self.cockpit else 0
         n_amraam = sum(v["count"] for v in self.cockpit.stores.values()) if self.cockpit else 0
         self.ind_items = {1: "-----------\nHUD_glass\nHUD_Boresight_Cross\n" + ("HUD_TD_Box\nHUD_ASEC\n" if stage else "")
