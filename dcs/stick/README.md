@@ -916,3 +916,10 @@ at +32, bugged at +37-39; 142940: put near +12, bugged at +18), which fits a cur
 position is not read back, so the pilot now logs each move (`radar: cursor to +32 deg (edge, then 0.28 s back)`, and
 `ev: cursor` in the stick log) and, at each bug timeout, the radar page's mode, azimuth, bars and range scale in the
 reason, and the whole page in the stick log (`ev: fcr_page`).
+
+**The radar showed nothing (100922).** The bug timeout's page: TWS A6 4B, 40 NM scale, the target +28 deg off the
+nose (the cursor at +22: inside the 60 deg scan), 38 km, the height coverage at the cursor's range 16-39 thousand feet
+(the target at 27.6), and both `AA_RadarTracksKeeper` (contacts) and `System_AirTracksKeeper` (TWS tracks) empty. So
+there was nothing to bug: the late first bugs (35-72 km) are DCS's radar not seeing the target yet, not the cursor. The
+pilot now counts both lists at every bug attempt (`ev: bug_try` in the stick log, and in the timeout reason), which
+dates the first contact in each fight. To check in the mission editor: does RED-1 carry an ECM pod, with ECM allowed?

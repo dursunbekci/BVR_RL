@@ -737,6 +737,20 @@ def test_tws_kept():
     print("  TWS kept on a blank read .... OK  (an empty radar page read left the radar in TWS)")
 
 
+def test_fcr_contacts():
+    """The radar page's contact and track lists are counted (the page of 22 October, 100922: TWS A6 4B, both
+    empty with the target inside the scan; and the same lists with entries)."""
+    import cockpit
+    empty = ["TWS", "AA_RadarTracksKeeper", "System_AirTracksKeeper", "Cursor_Root", "children are {",
+             "Cursor_Line_Left", "Max_Search_Altitude", "39", "}"]
+    full = ["TWS", "AA_RadarTracksKeeper", "children are {", "Contact_0", "children are {", "Contact_0_Sym", "}",
+            "Contact_1", "}", "System_AirTracksKeeper", "children are {", "Track_0", "}"]
+    a, b = cockpit.fcr_info(empty), cockpit.fcr_info(full)
+    assert (a["contacts"], a["tracks"]) == (0, 0) and (b["contacts"], b["tracks"]) == (2, 1), (a, b)
+    assert cockpit.fcr_info(["RWS"])["contacts"] is None
+    print("  radar contacts on the page .. OK  (none, two contacts and a track, list absent)")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -1125,7 +1139,8 @@ def test_cockpit():
             "6", "RWS Table. Root. Unic ID: _id:14", "children are {", "RWS Table. Root. Unic ID: _id:14. Text", "RWS",
             "TWS Table. Root. Unic ID: _id:17", "children are {", "}", "SOI"]
     assert cockpit.fcr_info(real) == {"br": (174, 245), "hi": 34, "lo": 11, "scale": 40, "tuc": True, "tuc_alt": 23,
-                                      "soi": True, "mode": "RWS", "az": 6, "bars": 4}, cockpit.fcr_info(real)
+                                      "soi": True, "mode": "RWS", "az": 6, "bars": 4, "contacts": None,
+                                      "tracks": None}, cockpit.fcr_info(real)
     # the aimed lock: a target 30 deg right and 2 km above, which only aiming designates (scan_needed 999), is locked;
     # one 70 deg off the nose is refused
     # the aimed lock: the readout is switched from the bullseye (485 km ahead, like DCS's default) to our own aircraft
@@ -1321,6 +1336,7 @@ if __name__ == "__main__":
     test_turn_hold()
     test_aa_recovery()
     test_tws_kept()
+    test_fcr_contacts()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
@@ -1329,4 +1345,4 @@ if __name__ == "__main__":
     test_install()
     test_own_missile()
     test_chaff()
-    print("22/22 passed")
+    print("23/23 passed")

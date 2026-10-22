@@ -450,13 +450,37 @@ def stage_lock(run, gains, defs, scan=False, alt=None, match_alt=False, aa=None,
 NM = 1852.0
 
 
+def _children(lines, name):
+    """How many direct children a display element lists (0 if none, None if the element is not on the page)."""
+    for i, x in enumerate(lines):
+        if x.strip() == name:
+            if i + 1 >= len(lines) or lines[i + 1].strip() != "children are {":
+                return 0
+            depth, n = 0, 0
+            for y in lines[i + 2:]:
+                y = y.strip()
+                if y == "}":
+                    if depth == 0:
+                        return n
+                    depth -= 1
+                elif y == "children are {":
+                    depth += 1
+                elif depth == 0:
+                    n += 1
+            return n
+    return None
+
+
 def fcr_info(lines):
     """What the radar page's text says: the cursor's bearing (magnetic deg) and range (NM) from the bullseye, the
     height coverage at the cursor's range (thousands of feet), the range scale, a target under the cursor (and its
     altitude), and whether the page is the sensor of interest."""
     import re
     out = {"br": None, "hi": None, "lo": None, "scale": None, "tuc": False, "tuc_alt": None, "soi": False,
-           "mode": None, "az": None, "bars": None}
+           "mode": None, "az": None, "bars": None,
+           # what the radar shows: AA_RadarTracksKeeper lists the radar's contacts, System_AirTracksKeeper the TWS
+           # system tracks (a bug needs one); both empty on 22 October with the target inside the scan
+           "contacts": _children(lines, "AA_RadarTracksKeeper"), "tracks": _children(lines, "System_AirTracksKeeper")}
 
     def nxt(i):
         return lines[i + 1].strip() if i + 1 < len(lines) else ""

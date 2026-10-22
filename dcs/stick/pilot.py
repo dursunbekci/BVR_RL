@@ -397,6 +397,10 @@ class StickPilot(threading.Thread):
                 if self._state() in ("designated", "stt"):
                     return True
                 lines = cockpit.ind_text(r, self.link, cockpit._fcr_id(r))
+                info = cockpit.fcr_info(lines)
+                az = self._target_az()
+                r.note({"ev": "bug_try", "mode": info["mode"], "contacts": info["contacts"], "tracks": info["tracks"],
+                        "target_az": None if az is None else round(az, 1)})
                 if any(x.strip().startswith("DLZ_AIM120") for x in lines):
                     return True
         return False
@@ -464,8 +468,8 @@ class StickPilot(threading.Thread):
             az = self._target_az()
             r.note({"ev": "fcr_page", "why": "bug timeout", "target_az": None if az is None else round(az, 1),
                     "cursor_az": self.center_az, "info": info, "lines": lines})
-            page = (f"radar page {info['mode']} A{info['az']} {info['bars']}B {info['scale']} NM"
-                    if lines else "radar page did not answer")
+            page = (f"radar page {info['mode']} A{info['az']} {info['bars']}B {info['scale']} NM, "
+                    f"{info['contacts']} contacts, {info['tracks']} tracks" if lines else "radar page did not answer")
             self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"
                              + ("; the HUD was not in A-A (NAV)" if aa is False else "")
                              + f"; {page}; target {'?' if az is None else f'{az:+.0f}'} deg, cursor put at "
