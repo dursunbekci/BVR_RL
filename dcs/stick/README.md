@@ -923,3 +923,20 @@ nose (the cursor at +22: inside the 60 deg scan), 38 km, the height coverage at 
 there was nothing to bug: the late first bugs (35-72 km) are DCS's radar not seeing the target yet, not the cursor. The
 pilot now counts both lists at every bug attempt (`ev: bug_try` in the stick log, and in the timeout reason), which
 dates the first contact in each fight. To check in the mission editor: does RED-1 carry an ECM pod, with ECM allowed?
+
+**102153: DCS's radar needs 15-20 s with the target in the scan; our chaff was taken for the target.** From the same
+start as 095954 (red behind, 52.5 km): red entered the scan about 22 s (TWS A6 4B), nose-on (aspect 3-25 deg, closure
+510 m/s: no notch), 1-2.5 deg above us; the policy asked to fire at 26 s (45 km, its simulated radar's track); every
+bug attempt to 41.8 s read 0 contacts; the bug came at 42.3 s (37 km) and the missile launched at 44.2 s. The earlier
+`stage_twslock` measurement (about 14 s after entering TWS with A6 4B) agrees: DCS builds a TWS track much later than
+the simulator's radar, so requests made as soon as the policy has a track time out. The contact counter is not yet
+proven (it read 0 even 0.5 s before a bug): the page right after a bug is now noted too (`ev: bug_ok`).
+
+From 102.5 s our own chaff and flares (world objects level1 1, level2 3, no name, no coalition, 0-0.6 km away) were
+taken for the nearest aircraft: the cursor and the target bearing went to our tail (-177 deg) while red was at -17.
+`cockpit.nearest` now skips unnamed objects and any but aircraft (level2 1) and helicopters (2).
+
+`dcs_live.py --tws-scan A3,4B` (a test, off by default): the pilot sets a narrower TWS scan once TWS is up, stepping
+the radar page's OSB 18 (azimuth) and 17 (bars) and reading the page back after each press; a press that changes
+nothing ends it ("OSB 18 did not change the scan's az"). A3 4B scans half the azimuth of A6 4B, so each frame takes
+about half as long, with the same height coverage.

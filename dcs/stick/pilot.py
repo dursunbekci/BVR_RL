@@ -86,6 +86,10 @@ class StickPilot(threading.Thread):
         # and holds it there through the release; None: it holds the nose where it was at the request
         self.point_deg = None
         self._point_hdg = None
+        # --tws-scan (dcs_live.py): the TWS scan to set, (azimuth A-number, bars), e.g. (3, 4) for A3 4B; None leaves
+        # DCS's A6 4B. A6 4B took 15-20 s to make a track of a target nose-on in the scan (22 October)
+        self.tws_scan = None
+        self.tws_scan_done = False
         self.chaff_on = False
         self.cmds_tried = False       # the countermeasures panel set to MAN, program 1, chaff on (once)
         self.cmds_ok = False
@@ -318,6 +322,8 @@ class StickPilot(threading.Thread):
             self.events.put(("radar", "tws" if after == "TWS" else "no_tws", f"radar RWS -> {after}"))
         elif info["mode"] is None:
             self.events.put(("radar", "page_unread", "the radar page did not answer: the mode is left as it is"))
+        if self.tws_scan and not self.tws_scan_done and (info["mode"] == "TWS" or self._page()["mode"] == "TWS"):
+            self._set_scan()
         if self._state() not in ("designated", "stt"):
             az = self._target_az()
             # the cursor goes to the target's bearing, again only when that has moved by 10 deg: each move swings
@@ -337,6 +343,30 @@ class StickPilot(threading.Thread):
                     cockpit.click(r, "mmc.MasterArmSw", d, value=1.0, fn=fn, verbose=False)
                     cockpit.settle(r, 0.5, fn)
                     self.armed = True
+
+    SCAN_OSB = {"az": 18, "bars": 17}   # the radar page's azimuth and bar-scan buttons (left MFD; each press steps)
+
+    def _set_scan(self):
+        """The TWS scan to tws_scan, by stepping the azimuth and bar buttons and reading the page back after each
+        press; a press that changes nothing ends the try (the button is not the one thought), and it is not tried
+        again in the fight."""
+        r, d, fn = self.r, self.defs, self.fn
+        self.tws_scan_done = True
+        info = self._page()
+        for key, want in (("az", self.tws_scan[0]), ("bars", self.tws_scan[1])):
+            for _ in range(4):
+                if info[key] == want or info[key] is None:
+                    break
+                before = info[key]
+                cockpit.click(r, f"left_osb.{self.SCAN_OSB[key]}", d, fn=fn, verbose=False)
+                cockpit.settle(r, 0.5, fn)
+                info = self._page()
+                if info[key] == before:
+                    self.events.put(("radar", "scan_failed", f"OSB {self.SCAN_OSB[key]} did not change the scan's "
+                                     f"{key} ({before}): left as it is"))
+                    return
+        r.note({"ev": "scan", "az": info["az"], "bars": info["bars"]})
+        self.events.put(("radar", "scan", f"TWS scan A{info['az']} {info['bars']}B"))
 
     def _aa(self):
         """The A-A master mode, so that weapon release launches the AIM-120: the throttle's DOGFIGHT switch to MISSILE
@@ -395,6 +425,11 @@ class StickPilot(threading.Thread):
             for _ in range(4):
                 cockpit.settle(r, 0.5, fn)
                 if self._state() in ("designated", "stt"):
+                    # the page once bugged: do its contact and track lists show the target? (they read 0 at every
+                    # attempt so far, even 0.5 s before a bug: if they stay 0 here, they are not where tracks go)
+                    info = cockpit.fcr_info(cockpit.ind_text(r, self.link, cockpit._fcr_id(r)))
+                    r.note({"ev": "bug_ok", "mode": info["mode"], "contacts": info["contacts"],
+                            "tracks": info["tracks"]})
                     return True
                 lines = cockpit.ind_text(r, self.link, cockpit._fcr_id(r))
                 info = cockpit.fcr_info(lines)

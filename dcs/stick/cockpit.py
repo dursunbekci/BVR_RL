@@ -165,6 +165,10 @@ def nearest(f):
             continue
         if o.get("l1") not in (None, 1):          # aircraft only: a missile in flight (level1 4) is not the target
             continue
+        # nor our own chaff and flares: level1 1 too, but level2 3, no name and no coalition. Taken for the nearest
+        # aircraft, they turned the "target" to our tail while dispensing (live_20261022_102153: -177 deg, red at -17)
+        if o.get("l2") not in (None, 1, 2) or not (o.get("unit") or o.get("name")):
+            continue
         dx, dz = o["x"] - f.x, o["z"] - f.z
         dy = (o.get("y") or 0.0) - (f.alt or 0.0)
         rng = math.sqrt(dx * dx + dz * dz + dy * dy)

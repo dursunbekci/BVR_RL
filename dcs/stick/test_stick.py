@@ -751,6 +751,54 @@ def test_fcr_contacts():
     print("  radar contacts on the page .. OK  (none, two contacts and a track, list absent)")
 
 
+def test_nearest_not_chaff():
+    """Our own chaff and flares (world objects level1 1, level2 3, no name, no coalition: live_20261022_102153) are
+    not the nearest aircraft: the target stays RED-1."""
+    import cockpit
+    me = {"x": 0.0, "z": 0.0, "alt": 2500.0, "hdg": math.radians(96)}
+    objs = [{"coal": 0, "name": "", "l1": 1, "l2": 3, "l3": 31, "l4": 14, "x": -20.0, "z": 5.0, "y": 2500.0},
+            {"coal": 0, "name": "", "l1": 1, "l2": 3, "l3": 31, "l4": 13, "x": -300.0, "z": 0.0, "y": 2490.0},
+            {"coal": 1, "unit": "RED-1", "name": "F-16C_50", "l1": 1, "l2": 1, "x": 3000.0, "z": 21800.0, "y": 7117.0}]
+    from stick_test import Frame
+    nr = cockpit.nearest(Frame({"t": 1.0, "me": me, "obj": objs}))
+    assert nr is not None and nr[0] == "RED-1" and abs(nr[2] - -14.2) < 1.0, nr
+    print(f"  nearest is not our chaff .... OK  (RED-1 at {nr[2]:+.0f} deg, past two chaff bundles at 0.0-0.3 km)")
+
+
+def test_tws_scan():
+    """--tws-scan: the pilot steps the radar page's azimuth and bar buttons to the scan asked for (A3 4B from DCS's
+    A6 4B), reading the page back; buttons that change nothing end the try, said once, the scan left alone."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    out = {}
+    for works in (True, False):
+        link = FakeLink(cockpit_defs=defs)
+        link.cockpit.scan_osbs_work = works
+        with tempfile.TemporaryDirectory() as d:
+            p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+            p.tws_scan = (3, 4)
+            p.start()
+            try:
+                p.radar()
+                t0 = _time.time()
+                _time.sleep(0.2)
+                while (p.busy is not None or not p.jobs.empty()) and _time.time() - t0 < 60:
+                    _time.sleep(0.02)
+                ev = [e for e in p.drain_events() if e[1] in ("scan", "scan_failed")]
+            finally:
+                p.stop()
+        out[works] = ((link.cockpit.az_sel, link.cockpit.bars), ev)
+    assert out[True][0] == (3, 4) and out[True][1][0][1] == "scan", out[True]
+    assert out[False][0] == (6, 4) and [e[1] for e in out[False][1]] == ["scan_failed"], out[False]
+    print("  TWS scan setting ............ OK  (A6 4B -> A3 4B by OSB 18 and 17, read back; buttons that do nothing: "
+          "said once, left alone)")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -1337,6 +1385,8 @@ if __name__ == "__main__":
     test_aa_recovery()
     test_tws_kept()
     test_fcr_contacts()
+    test_nearest_not_chaff()
+    test_tws_scan()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
@@ -1345,4 +1395,4 @@ if __name__ == "__main__":
     test_install()
     test_own_missile()
     test_chaff()
-    print("23/23 passed")
+    print("25/25 passed")

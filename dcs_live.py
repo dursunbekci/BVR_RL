@@ -403,6 +403,17 @@ class DcsLiveEnv(BvrEnv):
 CHAFF_TTI_S = 20.0      # chaff while a missile is inbound with its seeker on, or this close to impact
 
 
+def parse_tws_scan(text):
+    """'A3,4B' -> (3, 4); None -> None."""
+    if not text:
+        return None
+    import re
+    m = re.fullmatch(r"\s*A?([1236])\s*,\s*([124])B?\s*", text.upper())
+    if not m:
+        raise SystemExit(f"--tws-scan {text!r}: give it as A3,4B (azimuth A1/A2/A3/A6, bars 1B/2B/4B)")
+    return int(m.group(1)), int(m.group(2))
+
+
 def chaff_wanted(obs) -> bool:
     """Chaff from the policy's own inputs (OBS_LABELS): the RWR's launch warning, with the missile's seeker
     active or its time to impact under CHAFF_TTI_S."""
@@ -532,6 +543,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out,
                            airframe=load_platform(scen["platform"]).airframe)
         pilot.point_deg = getattr(args, "point_before_fire", None)
+        pilot.tws_scan = parse_tws_scan(getattr(args, "tws_scan", None))
         pilot.start()
         pilot.radar()
 
@@ -738,6 +750,10 @@ def main(argv=None):
                     help="--stick, a test: a fire request first turns the nose to within DEG of the target (up to "
                          "10 s) and holds it there through the bug and the release; the policy is not trained "
                          "for it (SIM_REV 19 trains its own shots within 40 deg). E.g. 20")
+    ap.add_argument("--tws-scan", default=None, metavar="AN,NB",
+                    help="--stick, a test: the TWS scan the pilot sets, e.g. A3,4B (azimuth A1/A2/A3/A6, bars "
+                         "1B/2B/4B); DCS's default A6,4B took 15-20 s to make a track of a target nose-on in the "
+                         "scan. Set by stepping the radar page's OSB 18 and 17 and reading the page back")
     ap.add_argument("--no-chaff", action="store_true",
                     help="--stick: no chaff (by default the pilot presses CMS forward every 1.5 s while a missile is "
                          "inbound with its seeker on or under 20 s from impact)")

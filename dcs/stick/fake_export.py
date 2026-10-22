@@ -114,6 +114,8 @@ class FakeCockpit:
                      (d["UFC"], defs["commands"]["ufc"]["DIG8_FIX"]): "dig8",
                      (d["UFC"], defs["commands"]["ufc"]["DIG0_M_SEL"]): "dig0",
                      (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_19"]): "rng_up",
+                     (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_18"]): "osb_az",
+                     (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_17"]): "osb_bars",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_LEFT"]): "dms_left",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
@@ -156,6 +158,8 @@ class FakeCockpit:
         self.scale = 40
         self.mode = "RWS"
         self.tms_right_t = None            # when target management right went down
+        self.az_sel, self.bars = 6, 4              # TWS scan: A6, 4 bars (DCS's default); the OSBs step them
+        self.scan_osbs_work = True                 # False: the azimuth and bar OSBs do nothing
         self.bull_on = True                # the readout is from the bullseye until the DED's BULL page toggles it
         self.last_key = None
 
@@ -200,6 +204,10 @@ class FakeCockpit:
             if name == "dig0" and self.last_key == "dig8":       # M-SEL on the BULL page (LIST, 0, 8, 0)
                 self.bull_on = not self.bull_on
             self.last_key = name
+        elif name == "osb_az" and value == 1.0 and self.scan_osbs_work:
+            self.az_sel = {1: 2, 2: 3, 3: 6, 6: 1}[self.az_sel]
+        elif name == "osb_bars" and value == 1.0 and self.scan_osbs_work:
+            self.bars = {1: 2, 2: 4, 4: 1}[self.bars]
         elif name == "rng_up" and value == 1.0:
             self.scale = min(160, self.scale * 2)
         elif name == "tms_right" and value == 1.0:
@@ -255,7 +263,7 @@ class FakeCockpit:
         rng = math.hypot(cx - ox, cz - oz) / 1852.0
         hi, lo = self.coverage(self.cur_r)
         tuc = self.under_cursor() or (self.aa and self.scan_needed and self.cursor == self.scan_needed)
-        return ("%s\nA\n6\n4\nB\n" % self.mode
+        return ("%s\nA\n%d\n%d\nB\n" % (self.mode, self.az_sel, self.bars)
                 + "Range_Scale_Root\nchildren are {\nRange_Scale_Value\n%d\n}\nFCR_Bearing_range\n%d %d\n"
                 "Cursor_Root\nchildren are {\nMax_Search_Altitude\n%d\nMin_Search_Altitude\n%d\n}\n"
                 % (self.scale, round(brg) % 360, round(rng), round(hi), round(lo))
