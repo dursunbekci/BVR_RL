@@ -1059,6 +1059,11 @@ def test_team_ucav_options():
     from bvr_env import HDG_OFFSETS_DEG
     u = load_platform("GENERIC-UCAV-DCS")
     assert u.missile.id == "AIM-120C-DCS" and u.rcs < 0.5 and u.launch_delay_max > 0
+    # Loyal-wingman class: the F-16C-DCSFIT's g lag, thrust/weight a little above a Valkyrie's 0.33.
+    a, f = u.airframe, load_platform("F-16C-DCSFIT").airframe
+    assert a.id == "GENERIC-UCAV-LW" and (a.NZ_TAU_ON, a.NZ_TAU_OFF) == (f.NZ_TAU_ON, f.NZ_TAU_OFF)
+    tw = a.T_MIL_SL / ((a.MASS_EMPTY + a.FUEL_FULL + a.MASS_WPNS) * 9.81)
+    assert 0.38 < tw < 0.46, tw
     U, F = "GENERIC-UCAV-DCS", "F-16C-DCSFIT"
     e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=3, blue_platforms=(U, U), red_platform=F,
                    blue_loss_cost=0.5)
