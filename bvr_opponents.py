@@ -247,6 +247,11 @@ class ShooterOpponent(BvrOpponent):
     # beams were always hit. No ground clutter is modelled, so the dive helps
     # only through the thicker air draining the coasting missile.
     DEFENCE = "shallow"
+    # Set by the 2v1 env (SIM_REV 22): defend against the most urgent inbound missile (shortest time to go,
+    # not the first in the list), and turn relative to that missile's bearing, not the target aircraft's.
+    # In 2v1 the missile is often the wingman's, from another direction: beaming the target aircraft could
+    # point red at it. 1v1 keeps the old rule (the shooter is the target there).
+    TEAM_DEFENCE = False
     DIVE_FLOOR = 1000.0
     # Once its missile no longer needs support: turn cold and run (DRAG), or
     # press: turn hot again and keep attacking, as the DCS AI does (SIM_REV 12).
@@ -291,10 +296,24 @@ class ShooterOpponent(BvrOpponent):
         return out
 
     def _inbound(self, state):
-        for m in state.get("missiles", []) or []:
-            if m.get("owner") == 1 and m.get("state") not in ("HIT", "MISS", "DUD") and m.get("threat", 1):
-                return m
-        return None
+        live = [m for m in state.get("missiles", []) or []
+                if m.get("owner") == 1 and m.get("state") not in ("HIT", "MISS", "DUD") and m.get("threat", 1)]
+        if not live:
+            return None
+        if self.TEAM_DEFENCE:
+            return min(live, key=lambda m: float(m.get("tgo_est", 60.0)))
+        return live[0]
+
+    @staticmethod
+    def _bearing_to_missile(state, m):
+        """Bearing from red (the _t aircraft) to missile m, rad; None without positions."""
+        if not (m.get("lat") or m.get("lon")) or "lat_t" not in state:
+            return None
+        north = (m["lat"] - state["lat_t"]) * DEG2RAD
+        east = (m["lon"] - state["lon_t"]) * DEG2RAD * math.cos(state["lat_t"] * DEG2RAD)
+        if not (north or east):
+            return None
+        return math.atan2(east, north) % (2 * math.pi)
 
     def act(self, state, t_sim):
         rng = float(state.get("range", 1e5))
@@ -306,6 +325,10 @@ class ShooterOpponent(BvrOpponent):
         # ── DEFEND overrides everything ─────────────────────────────
         if inbound is not None:
             tgo = float(inbound.get("tgo_est", 60.0))
+            if self.TEAM_DEFENCE:
+                mb = self._bearing_to_missile(state, inbound)
+                if mb is not None:
+                    brg = mb                    # beam / turn cold relative to the missile itself
             if self.DEFENCE == "deep_cold":
                 return self._cmd(brg + math.pi, self.DIVE_FLOOR, self.FAST_SPEED)
             if self.DEFENCE == "deep_beam":

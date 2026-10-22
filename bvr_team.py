@@ -268,6 +268,8 @@ class TeamBvrEnv:
         else:
             # Truth-guided red keeps the pre-SIM_REV 9 cranks and old defence.
             self._opponent.legacy_crank = True
+        if hasattr(self._opponent, "TEAM_DEFENCE"):
+            self._opponent.TEAM_DEFENCE = True     # most urgent missile, beamed by its own bearing
         # Scripted opponents read their start from the 1v1 key names.
         self._opponent.reset({**ic, "ac2_psi": ic["ac3_psi"], "ac2_alt": ic["ac3_alt"],
                               "ac2_spd": ic["ac3_spd"]})

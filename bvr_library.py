@@ -547,7 +547,9 @@ _SIM_REV_NOTES = {
         "UCAV started at 136-174 m/s), a fifth of the F-16 starts supersonic; wingman formations add a wide "
         "split, a long trail, a high-low stack and heading offsets. New red awareness radar_rwr: scripted "
         "red's RWR hears a blue radar inside its scan volume out to 1.5x its detection range and turns red's "
-        "belief onto that bearing while red has no track. 1v1 is unchanged",
+        "belief onto that bearing while red has no track. Scripted red defends against the most urgent inbound "
+        "missile (shortest time to go; was the first in the list) and beams or turns cold by that missile's "
+        "bearing (was its target aircraft's: the wingman's missile came from elsewhere). 1v1 is unchanged",
 }
 
 

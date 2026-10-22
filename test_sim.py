@@ -1233,6 +1233,43 @@ def test_team_red_rwr():
           f"{p90_r:.0f}/{max_r:.0f} deg on radar alone, {p90_w:.0f}/{max_w:.0f} with the RWR; {heard_w} bearings)")
 
 
+def test_team_defence():
+    """SIM_REV 22: in 2v1 scripted red defends against the most urgent inbound missile and beams it by the
+    missile's own bearing; 1v1 (TEAM_DEFENCE off, the env never sets it) keeps the first missile and the
+    target's bearing."""
+    import math
+    from bvr_opponents import ShooterOpponent
+    from bvr_team import TeamBvrEnv
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    lat0, lon0 = 41.0, 35.0
+    dlat = lambda km: km / 111.2
+    dlon = lambda km: km / (111.2 * math.cos(math.radians(lat0)))
+    # Red at the origin; its target (blue) 40 km north; the missile 20 km east, closing; a farther one west.
+    state = {"lat_t": lat0, "lon_t": lon0, "lat": lat0 + dlat(40), "lon": lon0, "range": 40_000.0,
+             "wpn_remaining_t": 4, "missiles": [
+                 {"owner": 1, "state": "MIDCOURSE", "tgo_est": 50.0, "lat": lat0, "lon": lon0 - dlon(35)},
+                 {"owner": 1, "state": "MIDCOURSE", "tgo_est": 25.0, "lat": lat0, "lon": lon0 + dlon(20)}]}
+    def heading(team):
+        o = ShooterOpponent(rng=np.random.default_rng(1))
+        o.reset({"ac2_lat": lat0, "ac2_lon": lon0, "ac2_alt": 9000.0, "ac2_psi": 0.0, "ac2_spd": 300.0})
+        o.TEAM_DEFENCE = team
+        return math.degrees(o.act(state, 10.0)["hdgCmd"]) % 360
+    old, new = heading(False), heading(True)
+    # Old: beam the target (north): 90 or 270. New: beam the urgent missile (east): 0 or 180.
+    assert min(abs(old - 90), abs(old - 270)) < 1e-6, old
+    assert min(abs(new - 0), abs(new - 360), abs(new - 180)) < 1e-6, new
+    # The 2v1 env turns it on; 1v1 never does.
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=1)
+    e.reset()
+    assert e._opponent.TEAM_DEFENCE
+    b = BvrEnv(opponent_type=T.SHOOTER, seed=1)
+    b.reset()
+    assert not b._opponent.TEAM_DEFENCE
+    print(f"  2v1 red defence ............. OK  (target north, urgent missile east: beams to {new:.0f} deg, "
+          f"was {old:.0f}; 1v1 unchanged)")
+
+
 def test_team_starts():
     """SIM_REV 22: 2v1's own starts. 70% the 1v1 set-ups, the rest free geometry (half at 30-60 km); a faster
     red keeps the starts where it is behind blue and loses only those where it runs; speeds within each
@@ -2827,6 +2864,7 @@ if __name__ == "__main__":
         ("2v1 SIM_REV 22",          test_team_rev22),
         ("2v1 red RWR",             test_team_red_rwr),
         ("2v1 starts",              test_team_starts),
+        ("2v1 red defence",         test_team_defence),
         ("GUI 2v1 options",         test_gui_2v1_options),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
