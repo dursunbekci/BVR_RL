@@ -965,3 +965,9 @@ F-16C-DCSFIT-R carries APG-68-DCS (55 km detection, 15 s to build a new track). 
 0.5 s against an active seeker (was 1.5). Train the agent on F-16C-DCSFIT-R against F-16C-DCSFIT. dcsfit_v6 on it
 (24 fights against the DCS-like red, untrained for it): 1.4 shots a fight (3.2 before), its far shots decoyed or
 short, red's hitting 20%.
+
+**The human red (SIM_REV 22).** A human in a DCS F-16 runs the same player radar as our jet, the DCS AI does not (it
+tracks at once, at full range). For fights against a human, red flies F-16C-DCSFIT-H: radar APG-68-DCS-HUMAN, the same
+55 km, but 4 s to a track (a narrowed scan or a single-target lock; an estimate, not measured). Platforms differing only
+in radar now count as the same aircraft, so self-play runs on F-16C-DCSFIT-R v F-16C-DCSFIT-H, its snapshots flying red
+with the human's radar.

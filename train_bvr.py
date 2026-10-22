@@ -531,6 +531,14 @@ def make_team_env(idx, opponent, seed, privileged, envelope_table, gamma, doctri
     return _init
 
 
+def _same_but_radar(a: str, b: str) -> bool:
+    """Whether two library platforms differ in nothing but their radar."""
+    from bvr_library import get_item
+    pa, pb = dict(get_item("platform", a)["params"]), dict(get_item("platform", b)["params"])
+    pa.pop("radar", None); pb.pop("radar", None)
+    return pa == pb
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=20_000_000)
@@ -647,7 +655,13 @@ def main():
         print(f"[bvr] NOTE: {mid}'s launch envelope was calibrated before target altitude "
               f"was measured (SIM_REV 11), so it assumes a level target. Recalibrate it: "
               f"GUI Library -> Calibrate, or `python sweep_envelope.py --missile {mid}`")
-    heterogeneous = args.platform != args.opponent_platform
+    # Platforms that differ only in their radar (SIM_REV 22: F-16C-DCSFIT-R against the DCS AI's F-16C-DCSFIT or
+    # a human's F-16C-DCSFIT-H) are the same aircraft to the policy: a snapshot can fly the other side, with the
+    # other side's radar.
+    heterogeneous = args.platform != args.opponent_platform and not _same_but_radar(args.platform, args.opponent_platform)
+    if args.platform != args.opponent_platform and not heterogeneous:
+        note(f"{args.platform} v {args.opponent_platform}: the same aircraft with different radars; self-play "
+             f"snapshots fly red with {args.opponent_platform}'s radar")
     if heterogeneous and opponent == BvrOpponentType.SELF_PLAY:
         ap.error(f"self-play needs both sides on the same platform (here {args.platform} v "
                  f"{args.opponent_platform}): a snapshot of the agent cannot fly the other side")

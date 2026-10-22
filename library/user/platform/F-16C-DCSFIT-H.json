@@ -1,0 +1,48 @@
+{
+  "id": "F-16C-DCSFIT-H",
+  "kind": "platform",
+  "name": "F-16C with 4 \u00d7 AIM-120 (AIM-120C-DCS), airframe fitted to DCS, radar as a skilled human runs DCS's (APG-68-DCS-HUMAN)",
+  "description": "F-16C-DCSFIT with the APG-68-DCS-HUMAN radar (SIM_REV 22): DCS's player radar run by a skilled human, 55 km and 4 s to a track. The opponent to train against for fights with a human pilot.",
+  "params": {
+    "airframe": "F-16C-DCSFIT",
+    "radar": "APG-68-DCS-HUMAN",
+    "missile": "AIM-120C-DCS",
+    "WPN_COUNT": 4,
+    "RCS_M2": 1.2,
+    "SPEED_CMDS": [
+      220.0,
+      280.0,
+      340.0,
+      400.0,
+      460.0
+    ],
+    "ALT_MIN_OP": 1000.0,
+    "ALT_MAX_OP": 14000.0,
+    "CLIMB_FPA_LO": 20.0,
+    "CLIMB_FPA_HI": 10.0,
+    "CLIMB_FPA_ALT_LO": 5000.0,
+    "CLIMB_FPA_ALT_HI": 11000.0,
+    "LAUNCH_DELAY_MIN": 2.5,
+    "LAUNCH_DELAY_MAX": 4.0,
+    "LAUNCH_BUG_MIN": 4.5,
+    "LAUNCH_BUG_MAX": 10.5,
+    "LAUNCH_BUG_READY_S": 25.0
+  },
+  "sources": {
+    "WPN_COUNT": "standard BVR loadout in this project",
+    "RCS_M2": "commonly cited open-source frontal estimate (\u2248 1.2 m\u00b2)",
+    "SPEED_CMDS": "the action set existing checkpoints were trained with; 460 m/s added in SIM_REV 14 (Mach 1.5 at 9 km, the DCS AI's dash in combat)",
+    "ALT_MIN_OP": "as trained",
+    "ALT_MAX_OP": "as trained",
+    "CLIMB_FPA_LO": "holds speed on a 3 km climb (measured)",
+    "CLIMB_FPA_HI": "as CLIMB_FPA_LO",
+    "CLIMB_FPA_ALT_LO": "as CLIMB_FPA_LO",
+    "CLIMB_FPA_ALT_HI": "as CLIMB_FPA_LO",
+    "LAUNCH_DELAY_MIN": "split of the 7-14 s measured 14 October (fire_delay_20261014_141533.json, every trial with the bug dropped first, release estimated 2.5 s): the release (master arm, the weapon release held 1.5 s, the launch seen), 2.5-4 s, the delay with the track already bugged; the stick pilot's radar job bugs a held track ahead of a shot. Replace with: python dcs/stick/fire_delay.py set F-16C-DCSFIT <that file>",
+    "LAUNCH_DELAY_MAX": "split of the 7-14 s measured 14 October (fire_delay_20261014_141533.json, every trial with the bug dropped first, release estimated 2.5 s): the release (master arm, the weapon release held 1.5 s, the launch seen), 2.5-4 s, the delay with the track already bugged; the stick pilot's radar job bugs a held track ahead of a shot. Replace with: python dcs/stick/fire_delay.py set F-16C-DCSFIT <that file>",
+    "LAUNCH_BUG_MIN": "split of the 7-14 s measured 14 October (fire_delay_20261014_141533.json, every trial with the bug dropped first, release estimated 2.5 s): the bug, 7-14 s less the release, added for a track held less than LAUNCH_BUG_READY_S",
+    "LAUNCH_BUG_MAX": "split of the 7-14 s measured 14 October (fire_delay_20261014_141533.json, every trial with the bug dropped first, release estimated 2.5 s): the bug, 7-14 s less the release, added for a track held less than LAUNCH_BUG_READY_S",
+    "LAUNCH_BUG_READY_S": "the stick pilot's radar job (every 15 s while idle) bugs a held track with up to 6 s of presses: by 25 s a held track is bugged"
+  },
+  "based_on": "F-16C-DCS"
+}

@@ -1961,6 +1961,10 @@ def test_sim_rev_22():
     from bvr_opponents import BvrOpponentType as T, AdaptiveShooterOpponent
     e = BvrEnv(opponent_type=T.STRAIGHT, seed=2, platform="F-16C-DCSFIT-R", opponent_platform="F-16C-DCSFIT")
     assert e._track.acquire_first_hits == 150
+    # the human red: the same radar, a 4 s track, in the scripted red's own radar and self-play's observer
+    h = BvrEnv(opponent_type=T.STRAIGHT, seed=2, platform="F-16C-DCSFIT-R", opponent_platform="F-16C-DCSFIT-H")
+    assert h._opponent_radar()._track.acquire_first_hits == 40 and h.selfplay_observer(False)._track.acquire_first_hits == 40
+    assert h._opponent_radar()._plat.radar.MAX_RANGE == e._plat.radar.MAX_RANGE
     t_first = None
     for seed in range(6):                             # from the first detection (ACQUIRING) to TRACK
         e._ready = False
