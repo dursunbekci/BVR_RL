@@ -689,12 +689,29 @@ class EvalRunner:
         if opponent == BvrOpponentType.SELF_PLAY:
             raise RuntimeError("2v1 has no self-play opponent yet: choose a scripted one")
         blue = (scen["platform"], scen.get("wingman_platform") or scen["platform"])
+        # What red knows: chosen here, else as the checkpoint was trained (gci before that was recorded).
+        awareness = config.get("red_awareness") or scen.get("red_awareness") or "gci"
+        # Red flown by a 1v1 checkpoint instead of the scripted opponent (the ADAPTIVE_SHOOTER stage only).
+        red_policy = config.get("red_policy")
+        red_policies = ()
+        if red_policy:
+            red_policies = (os.path.join(self._model_dir, red_policy),)
+            if opponent.name != "ADAPTIVE_SHOOTER":
+                HUB.push({"type": "log", "src": "eval", "msg": f"Red flown by {red_policy}: "
+                          f"opponent set to ADAPTIVE_SHOOTER (was {opponent.name})"})
+                opponent = type(opponent)["ADAPTIVE_SHOOTER"]
         env = TeamBvrEnv(opponent_type=opponent, seed=config.get("seed", 0),
                          privileged_critic=privileged, gamma_discount=0.997,
                          doctrine=config.get("doctrine", "BALANCED"),
-                         blue_platforms=blue, red_platform=red_platform)
+                         blue_platforms=blue, red_platform=red_platform,
+                         red_policies=red_policies, red_policy_frac=1.0,
+                         red_awareness=awareness)
+        if scen.get("max_steps"):
+            env.MAX_STEPS = int(scen["max_steps"])
         HUB.push({"type": "log", "src": "eval", "msg": f"Eval 2v1: {blue[0]} + {blue[1]} v {red_platform}"
-                                        f" (one policy flies both blue aircraft)"})
+                                        f" (one policy flies both blue aircraft); red "
+                                        f"{'flown by ' + red_policy if red_policy else 'scripted'}, "
+                                        f"awareness {awareness}, {env.MAX_STEPS} decisions"})
         HUB.set_status(evaluating=True,
                        msg=f"Eval 2v1 vs {opponent.name}, {env._doctrine_cfg} doctrine")
         _eval_team_loop(self, env, model, privileged, self._stop_evt,
@@ -759,6 +776,8 @@ class EvalRunner:
                          selfplay_pool=str(Path(self._model_dir) / "selfplay_pool"),
                          doctrine=config.get("doctrine", "BALANCED"),
                          platform=platform, opponent_platform=opp_platform)
+            if scen.get("max_steps"):                      # the episode length it was trained with
+                env.MAX_STEPS = int(scen["max_steps"])
             HUB.push({"type": "log", "src": "eval", "msg": f"Eval platforms: {platform} v {opp_platform}"})
 
             HUB.set_status(evaluating=True,

@@ -790,6 +790,12 @@ def main():
     # Saved inside every checkpoint this run writes, self-play snapshots included.
     model.bvr_scenario = scenario_record(args.platform, args.opponent_platform,
                                          wingman_platform_id=wingman, fmt=args.format)
+    # How the run was set up, for the GUI's WATCH tab to replay it the same way.
+    model.bvr_scenario["max_steps"] = int(args.max_steps or BvrEnv.MAX_STEPS)
+    if team:
+        model.bvr_scenario["red_awareness"] = args.red_awareness
+        model.bvr_scenario["blue_loss_cost"] = (1.0 if args.blue_loss_cost is None
+                                                else float(args.blue_loss_cost))
 
     if opponent == BvrOpponentType.SELF_PLAY:
         # learn() resets every env before any callback runs, and a SELF_PLAY

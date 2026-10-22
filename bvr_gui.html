@@ -605,7 +605,7 @@ select[multiple] option:checked{background:var(--blue) linear-gradient(var(--blu
               <div class="field-label">
                 <span>2 V 1 OPTIONS</span>
                 <button class="help-btn" onclick="help(this,'2 V 1 OPTIONS',
-                  'RED AWARENESS: what scripted red steers on. GCI (default): the blue aircraft\'s true positions, as if a controller gave it the picture. RADAR: its own radar track only, coasting when it drops; before it first detects an aircraft, on that aircraft\'s start, dead-reckoned. RADAR + RWR: as RADAR, and while it has no track of an aircraft, its RWR\'s bearing to that aircraft\'s radar (heard at 1.5x the radar\'s detection range, inside its scan) turns red\'s belief onto that bearing. Use RADAR + RWR for low-RCS UCAVs that keep their radars on: with GCI red always knows where they are, with RADAR alone it is deaf to their emissions.\n\nBLUE LOSS COST: what losing a blue aircraft costs, 0-2; a kill is worth 1.0. 1.0 for manned aircraft; less for an attritable UCAV (at 0.5 trading a UCAV for the kill nets +0.5, above a timeout).\n\nRED POLICIES: 1v1 checkpoints that fly red in a share of the ADAPTIVE SHOOTER episodes (the last 2 v 1 stage), one drawn per episode. Ctrl/Cmd-click to pick several; none: scripted red only.\n\nRED POLICY SHARE: that share, 50% by default.')">?</button>
+                  'RED AWARENESS: what scripted red steers on. GCI (default): the blue aircraft\'s true positions, as if a controller gave it the picture. RADAR: its own radar track only, coasting when it drops; before it first detects an aircraft, on that aircraft\'s start, dead-reckoned. RADAR + RWR: as RADAR, and while it has no track of an aircraft, its RWR\'s bearing to that aircraft\'s radar (heard at 1.5x the radar\'s detection range, inside its scan) turns red\'s belief onto that bearing. Use RADAR + RWR for low-RCS UCAVs that keep their radars on: with GCI red always knows where they are, with RADAR alone it is deaf to their emissions.\n\nBLUE LOSS COST: what losing a blue aircraft costs, 0-2; a kill is worth 1.0. 1.0 for manned aircraft; less for an attritable UCAV (at 0.5 trading a UCAV for the kill nets +0.5, above a timeout).\n\nRED POLICIES: optional, and best left empty (scripted red only, recommended). 1v1 checkpoints that fly red in a share of the ADAPTIVE SHOOTER episodes (the last 2 v 1 stage), one drawn per episode. They were trained in 1v1 against an F-16: they plan for one target, ignore RED AWARENESS (always their own radar) and never met a slow low-RCS aircraft. Better used to test a trained team in WATCH (RED FLOWN BY) than to train against. Ctrl/Cmd-click to pick or unpick.\n\nRED POLICY SHARE: that share, 50% by default.')">?</button>
               </div>
               <div class="row2">
                 <select id="cfg-red-awareness" title="Red awareness">
@@ -1176,6 +1176,20 @@ select[multiple] option:checked{background:var(--blue) linear-gradient(var(--blu
             <option value="1v1">1 v 1</option>
             <option value="2v1">2 v 1</option>
           </select>
+          <div class="field-label" style="margin-top:6px">
+            <span>RED (2 V 1)</span>
+            <button class="help-btn" onclick="help(this,'RED (2 v 1 eval)',
+              'Used when the fight is 2 v 1.\n\nAWARENESS: what scripted red steers on. By default as the checkpoint was trained (GCI for checkpoints from before this was recorded). Watch a UCAV team against all three: GCI (red knows where they are), RADAR (its own radar only), RADAR + RWR (its radar plus its RWR\'s bearings to their radars).\n\nRED FLOWN BY: scripted (default), or a 1v1 checkpoint flying red, as a test the team was not trained against. A checkpoint flies red at the ADAPTIVE SHOOTER stage only, so the opponent is set to it; it ignores AWARENESS (always its own radar).')">?</button>
+          </div>
+          <div class="row2">
+            <select id="eval-red-awareness" title="Red awareness (2 v 1)">
+              <option value="">— as trained —</option>
+              <option value="gci">GCI picture</option>
+              <option value="radar">own radar only</option>
+              <option value="radar_rwr">own radar + RWR</option>
+            </select>
+            <select id="eval-red-policy" title="Red flown by (2 v 1)"><option value="">scripted red</option></select>
+          </div>
         </div>
 
         <div class="field">
@@ -1326,6 +1340,7 @@ async function refreshModelList() {
     }
   }
   populateModelSelect(document.getElementById('eval-ckpt'),  models, '— random / untrained policy —', true);
+  populateModelSelect(document.getElementById('eval-red-policy'), models, 'scripted red', false);
   xpRenderModels(models);
 }
 refreshModelList();
@@ -1643,7 +1658,7 @@ function engageCheck() {
   } else if (team) {
     w.textContent = opp === 'self_play'
       ? '⚠ 2 v 1 has no self-play stage yet; pick a scripted stage.'
-      : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted, so the curriculum ends at ADAPTIVE SHOOTER.'
+      : '2 v 1: one policy flies both blue aircraft, sharing radar tracks over a datalink. Red is scripted (unless RED POLICIES are picked), so the curriculum ends at ADAPTIVE SHOOTER. Use EPISODE LENGTH 400.'
         + (a && b && a !== b ? ' Blue and red fly different platforms: if blue is outmatched it may never reach 65%; consider a lower ADVANCE AT.' : '');
   } else if (a && b && a !== b) {
     w.textContent = opp === 'self_play'
@@ -2203,6 +2218,11 @@ function renderRun() {
         :`auto-advance at ${Math.round((c.advance_win_rate??0.65)*100)}%, held ${c.advance_hold_checks??5} checks, after ${c.advance_min_episodes??60} episodes`],
       ...(c.sp_scripted_frac!==undefined ? [['SELF-PLAY',
         `${Math.round(c.sp_scripted_frac*100)}% scripted · newest ${Math.round(c.sp_newest_frac*100)}% · snapshot every ${Math.round(c.sp_snapshot_steps/1000)}k steps · pool ${c.sp_pool_size}`]] : []),
+      ...(team ? [['RED', `${c.red_policies&&c.red_policies.length
+          ? `scripted + ${c.red_policies.join(', ')} (${Math.round((c.red_policy_frac??0.5)*100)}% of ADAPTIVE)`
+          : 'scripted'} · awareness ${({radar:'own radar',radar_rwr:'own radar + RWR'})[c.red_awareness]||'GCI'}`],
+        ['BLUE LOSS COST', String(c.blue_loss_cost??1.0)]] : []),
+      ['EPISODE', `${c.max_steps||300} decisions${c.symmetric_policy?' · mirror-averaged policy':''}`],
       ['DOCTRINE', String(c.doctrine||'mixed').toUpperCase()],
       ['STEPS', `${fmt(c.steps||0)} on ${c.n_envs||1} env${(c.n_envs||1)>1?'s':''}`],
       ['PPO', `γ ${c.gamma} · lr ${c.lr} · batch ${c.batch_size}`],
@@ -2964,7 +2984,9 @@ document.getElementById('btn-eval').onclick=()=>{
   wsReset(`${ckpt||'random policy'} v ${opp.replace('_SHOOTER','')} · ${doctrine}`, nEp);
   send({cmd:'start_eval',config:{opponent:opp,checkpoint:ckpt||undefined,speed,doctrine,n_episodes:nEp,
     opponent_platform:document.getElementById('eval-opp-platform').value||undefined,
-    format:document.getElementById('eval-format').value||undefined}});
+    format:document.getElementById('eval-format').value||undefined,
+    red_awareness:document.getElementById('eval-red-awareness').value||undefined,
+    red_policy:document.getElementById('eval-red-policy').value||undefined}});
   send({cmd:'set_eval_speed',speed});
 };
 document.getElementById('btn-stop-eval').onclick=()=>{addLog('■ Stopping eval...','log-warn','watch');send({cmd:'stop_eval'})};

@@ -1315,7 +1315,29 @@ def test_gui_2v1_options():
     assert c2[c2.index("--red-awareness") + 1] == "radar" and c2[c2.index("--blue-loss-cost") + 1] == "0.5"
     assert c2[c2.index("--red-policy-frac") + 1] == "0.4"
     assert not any(a in c1 for a in ("--red-policies", "--red-awareness", "--blue-loss-cost", "--red-policy-frac"))
-    print("  GUI 2v1 options ............. OK  (red awareness, blue loss cost, red policies and share; none in 1v1)")
+
+    # WATCH: a 2v1 checkpoint is replayed with the episode length and red awareness it was trained with
+    # (recorded in its scenario); the panel can override the awareness or have a 1v1 checkpoint fly red.
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_team import TeamPolicyRed
+    got = []
+    real_loop, bvr_gui._eval_team_loop = bvr_gui._eval_team_loop, lambda runner, env, *a, **k: got.append(env)
+    try:
+        r = bvr_gui.EvalRunner("models_bvr")
+        scen = {"platform": "GENERIC-UCAV-DCS", "opponent_platform": "F-16C-DCSFIT", "format": "2v1",
+                "max_steps": 400, "red_awareness": "radar_rwr"}
+        r._run_team({}, None, False, T.SHOOTER, scen, "F-16C-DCSFIT")
+        r._run_team({"red_awareness": "gci", "red_policy": "dcsfit_v6.zip"}, None, False, T.SHOOTER, scen,
+                    "F-16C-DCSFIT")
+    finally:
+        bvr_gui._eval_team_loop = real_loop
+    a, b = got
+    assert a.MAX_STEPS == 400 and a._red_awareness == "radar_rwr" and not a._red_policies
+    assert b._red_awareness == "gci" and b._opponent_type == T.ADAPTIVE_SHOOTER
+    b.reset()
+    assert isinstance(b._opponent, TeamPolicyRed)
+    print("  GUI 2v1 options ............. OK  (red awareness, blue loss cost, red policies and share; none in 1v1; "
+          "WATCH replays the trained episode length and awareness, red flown by a checkpoint on request)")
 
 
 def test_team_roles_far_target():
