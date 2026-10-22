@@ -91,13 +91,13 @@ import numpy as np
 from gymnasium import spaces
 
 from bvr_env import (BvrEnv, OBS_DIM, PRIV_DIM, ACTION_NVEC, HDG_OFFSETS_DEG, FIRE_OPTIONS,
-                     DOCTRINES, DOCTRINE_MIXED, PHI_TERMS, DEG2RAD, R_EARTH, REF_LAT,
-                     _wrap_deg)
+                     DOCTRINES, DOCTRINE_MIXED, PHI_TERMS, DEG2RAD, R_EARTH, REF_LAT, REF_LON,
+                     _wrap_deg, _wrap_2pi)
 from bvr_opponents import BvrOpponent, BvrOpponentType, ShooterOpponent
 from bvr_track_adapter import TrackState
 from bvr_library import DEFAULT_PLATFORM
 from sim_world import SimWorld
-from missile_sim import MslPhase
+from missile_sim import MslPhase, _isa_a
 
 BLUE, RED = 1, 2
 
@@ -680,43 +680,125 @@ class TeamBvrEnv:
         pz[-len(wm):] = o._norm(raw, o._priv_lo, o._priv_hi)[-len(wm):]
         return {"obs": z, "priv": pz}
 
-    # ── start geometry ────────────────────────────────────────────────
-    FORMATIONS = ["abreast", "trail", "echelon"]
+    # ── start geometry (SIM_REV 22) ───────────────────────────────────
+    # 2v1's own start generator. CLASSIC_FRAC of the starts are 1v1's set-ups for the lead (head-on, offset,
+    # beam, stern, half of them swapped), the rest FREE: range, the lead's angle off the line of sight and
+    # red's aspect drawn independently, SHORT_FRAC of those at 30-60 km (late detection). 1v1's set-ups put
+    # one aircraft within 10 deg of nose-on in 60% of the starts and almost never 40-60 deg off or quartering
+    # away. A faster red keeps the stern starts where it is behind blue (swapped; the most dangerous set-up for
+    # a slow UCAV) and loses only those where it runs from blue, which blue could never catch.
+    CLASSIC_FRAC = 0.7
+    SHORT_FRAC = 0.5                  # of the free starts: 30-60 km
+    # Start speeds by Mach (0.75-0.95 at the start altitude), within each aircraft's own speed choices (a UCAV:
+    # 85-100% of its fastest, 212-250 m/s); an
+    # aircraft whose fastest choice reaches Mach 1.2 there starts supersonic (Mach 1.0-1.3) in SUPERSONIC_FRAC
+    # of the starts. 1v1 scales an F-16's 250-320 m/s by the top speed: a UCAV started at 136-174 m/s.
+    START_MACH = (0.75, 0.95)
+    SUPERSONIC_MACH = (1.0, 1.3)
+    SUPERSONIC_FRAC = 0.2
+    # Wingman formations, (name, probability): the three tight ones, a wide split (15-30 km abeam, a pincer
+    # from the start) and a long trail (10-20 km behind). In STACK_FRAC of the starts the wingman flies 3-4 km
+    # above or below the lead (high-low), in HDG_OFF_FRAC 10-30 deg off the lead's heading.
+    FORMATIONS = (("abreast", 0.25), ("trail", 0.2), ("echelon", 0.25), ("split", 0.15), ("long_trail", 0.15))
+    STACK_FRAC = 0.25
+    HDG_OFF_FRAC = 0.25
+    ALT_RANGE = (2000.0, 12500.0)
 
     def blue_top_speed(self) -> float:
         return max(o._plat.speed_cmds[-1] for o in self._obs)
 
+    def _start_speed(self, plat, alt, supersonic=None) -> float:
+        cmds = plat.speed_cmds
+        a = _isa_a(alt)
+        if supersonic is None:
+            supersonic = cmds[-1] >= 1.2 * a and self._rng.random() < self.SUPERSONIC_FRAC
+        if supersonic:
+            return float(np.clip(self._rng.uniform(*self.SUPERSONIC_MACH) * a, cmds[0], cmds[-1]))
+        # Mach 0.75-0.95, the top end held to the fastest choice; a slow aircraft (a UCAV whose fastest
+        # choice is below Mach 0.95) draws evenly from 85% of that to it rather than piling up at the cap.
+        hi = min(self.START_MACH[1] * a, cmds[-1])
+        lo = min(self.START_MACH[0] * a, 0.85 * hi)
+        return float(np.clip(self._rng.uniform(lo, hi), cmds[0], cmds[-1]))
+
+    def _lead_geometry(self) -> dict:
+        """Lead (ac1) and red (ac3) positions, headings and altitudes, before speeds."""
+        rng, lead_env = self._rng, self._obs[0]
+        red_faster = lead_env._opp_plat.speed_cmds[-1] > self.blue_top_speed()
+        if rng.random() < self.CLASSIC_FRAC:
+            while True:
+                g = lead_env._random_ic(blue_top_speed=1e9)          # every set-up, stern included
+                # Red running from blue (unswapped stern) only if blue can catch it.
+                if not (red_faster and g["scenario"] == "stern_conversion" and not g["mirrored"]):
+                    break
+            return {"geometry": "classic", "scenario": g["scenario"], "mirrored": g["mirrored"],
+                    "start_range": g["start_range"],
+                    "ac1_lat": g["ac1_lat"], "ac1_lon": g["ac1_lon"], "ac1_alt": g["ac1_alt"], "ac1_psi": g["ac1_psi"],
+                    "ac3_lat": g["ac2_lat"], "ac3_lon": g["ac2_lon"], "ac3_alt": g["ac2_alt"], "ac3_psi": g["ac2_psi"]}
+        short = rng.random() < self.SHORT_FRAC
+        rm = float(rng.uniform(30_000, 60_000) if short else rng.uniform(60_000, 110_000))
+        br = float(rng.uniform(0, 2 * math.pi))                       # lead -> red
+        ata = float(rng.uniform(0, math.pi)) * (1 if rng.random() < 0.5 else -1)
+        # Red's aspect: 0 nose-on to the lead. A faster red not running from blue (within 120 deg).
+        asp = float(rng.uniform(0, (2 / 3 if red_faster else 1.0) * math.pi)) * (1 if rng.random() < 0.5 else -1)
+        a1 = float(rng.uniform(*self.ALT_RANGE))
+        a3 = float(np.clip(a1 + rng.uniform(-2500, 2500), *self.ALT_RANGE)) if rng.random() < 0.5 \
+            else float(rng.uniform(*self.ALT_RANGE))
+        dn, de = rm * math.cos(br), rm * math.sin(br)
+        return {"geometry": "short" if short else "free", "scenario": "free_short" if short else "free",
+                "mirrored": False, "start_range": rm,
+                "ac1_lat": REF_LAT, "ac1_lon": REF_LON, "ac1_alt": a1, "ac1_psi": _wrap_2pi(br + ata),
+                "ac3_lat": REF_LAT + math.degrees(dn / R_EARTH),
+                "ac3_lon": REF_LON + math.degrees(de / (R_EARTH * math.cos(REF_LAT * DEG2RAD))),
+                "ac3_alt": a3, "ac3_psi": _wrap_2pi(br + math.pi + asp)}
+
     def _random_ic(self) -> dict:
-        """The 1v1 start for the lead against red, plus a wingman in formation."""
-        # Stern starts only if at least one blue aircraft can catch red.
-        lead = self._obs[0]._random_ic(blue_top_speed=self.blue_top_speed())
+        """The lead against red (_lead_geometry), a wingman in formation, and start speeds."""
         rng = self._rng
-        form = str(rng.choice(self.FORMATIONS))
+        g = self._lead_geometry()
+        names, probs = zip(*self.FORMATIONS)
+        p = np.asarray(probs, dtype=float)
+        form = str(names[int(rng.choice(len(names), p=p / p.sum()))])
         side = 1.0 if rng.random() < 0.5 else -1.0
         if form == "abreast":
             fwd, lat = float(rng.uniform(-1000, 1000)), side * float(rng.uniform(3000, 10000))
         elif form == "trail":
             fwd, lat = -float(rng.uniform(4000, 8000)), float(rng.uniform(-1000, 1000))
-        else:
+        elif form == "echelon":
             fwd, lat = -float(rng.uniform(2000, 5000)), side * float(rng.uniform(3000, 6000))
-        psi = lead["ac1_psi"]
+        elif form == "split":
+            fwd, lat = float(rng.uniform(-3000, 3000)), side * float(rng.uniform(15000, 30000))
+        else:                                                        # long_trail
+            fwd, lat = -float(rng.uniform(10000, 20000)), float(rng.uniform(-2000, 2000))
+        psi = g["ac1_psi"]
         dx = fwd * math.sin(psi) + lat * math.cos(psi)       # east
         dy = fwd * math.cos(psi) - lat * math.sin(psi)       # north
-        wing = self._obs[1]._plat
+        stack = rng.random() < self.STACK_FRAC
+        if stack:
+            up = 1.0 if rng.random() < 0.5 else -1.0
+            if not self.ALT_RANGE[0] <= g["ac1_alt"] + up * 3000 <= self.ALT_RANGE[1]:
+                up = -up
+            dz = up * float(rng.uniform(3000, 4000))
+        else:
+            dz = float(rng.uniform(-1000, 1000))
+        hdg_off = float(rng.uniform(10, 30)) * (1 if rng.random() < 0.5 else -1) \
+            if rng.random() < self.HDG_OFF_FRAC else 0.0
+        lead_p, wing_p, red_p = self._obs[0]._plat, self._obs[1]._plat, self._obs[0]._opp_plat
+        a2 = float(np.clip(g["ac1_alt"] + dz, *self.ALT_RANGE))
+        v1 = self._start_speed(lead_p, g["ac1_alt"])
+        sup = v1 > _isa_a(g["ac1_alt"])                       # the wingman flies the lead's regime
         ic = {
-            "scenario": lead["scenario"], "mirrored": lead["mirrored"], "formation": form,
-            "start_range": lead["start_range"],
-            "ac1_lat": lead["ac1_lat"], "ac1_lon": lead["ac1_lon"], "ac1_alt": lead["ac1_alt"],
-            "ac1_psi": psi, "ac1_spd": lead["ac1_spd"],
-            "ac2_lat": lead["ac1_lat"] + math.degrees(dy / R_EARTH),
-            "ac2_lon": lead["ac1_lon"] + math.degrees(dx / (R_EARTH * math.cos(REF_LAT * DEG2RAD))),
-            "ac2_alt": float(np.clip(lead["ac1_alt"] + rng.uniform(-1000, 1000), 4000, 12500)),
-            "ac2_psi": psi,
-            "ac2_spd": lead["ac1_spd"] / self._obs[0]._plat.speed_cmds[-1] * wing.speed_cmds[-1],
-            "ac3_lat": lead["ac2_lat"], "ac3_lon": lead["ac2_lon"], "ac3_alt": lead["ac2_alt"],
-            "ac3_psi": lead["ac2_psi"], "ac3_spd": lead["ac2_spd"],
-            "wpn1": self._obs[0]._plat.wpn_count, "wpn2": wing.wpn_count,
-            "wpn3": self._obs[0]._opp_plat.wpn_count,
+            "scenario": g["scenario"], "mirrored": g["mirrored"], "geometry": g["geometry"],
+            "formation": form, "wing_stack": bool(stack), "wing_hdg_off": hdg_off,
+            "start_range": g["start_range"],
+            "ac1_lat": g["ac1_lat"], "ac1_lon": g["ac1_lon"], "ac1_alt": g["ac1_alt"],
+            "ac1_psi": psi, "ac1_spd": v1,
+            "ac2_lat": g["ac1_lat"] + math.degrees(dy / R_EARTH),
+            "ac2_lon": g["ac1_lon"] + math.degrees(dx / (R_EARTH * math.cos(REF_LAT * DEG2RAD))),
+            "ac2_alt": a2, "ac2_psi": _wrap_2pi(psi + hdg_off * DEG2RAD),
+            "ac2_spd": self._start_speed(wing_p, a2, supersonic=sup and wing_p.speed_cmds[-1] >= 1.2 * _isa_a(a2)),
+            "ac3_lat": g["ac3_lat"], "ac3_lon": g["ac3_lon"], "ac3_alt": g["ac3_alt"],
+            "ac3_psi": g["ac3_psi"], "ac3_spd": self._start_speed(red_p, g["ac3_alt"]),
+            "wpn1": lead_p.wpn_count, "wpn2": wing_p.wpn_count, "wpn3": red_p.wpn_count,
         }
         return ic
 

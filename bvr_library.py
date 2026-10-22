@@ -541,7 +541,11 @@ _SIM_REV_NOTES = {
         "on the nearer one, nearly always the lead). Each 2v1 aircraft's observation reads the run's episode length (t_norm went past 1 with --max-steps above 300), and the 2v1 end state's shaping potential is 0, as 1v1's since SIM_REV 16. 1v1's SIM_REV 18 and "
         "21 now reach 2v1 too: no missile has the support rule (2v1 builds its own world and had kept it for "
         "all three aircraft), and each aircraft starts on a picture call, its heading choices offsets from "
-        "the bearing to its bandit until the radar has a track (they were offsets from north). 1v1 is unchanged",
+        "the bearing to its bandit until the radar has a track (they were offsets from north). 2v1 draws its own "
+        "starts: 70% 1v1's set-ups, 30% free geometry (any angle off and aspect; half at 30-60 km); a faster "
+        "red keeps the starts where it is behind blue; speeds by Mach within each aircraft's own choices (a "
+        "UCAV started at 136-174 m/s), a fifth of the F-16 starts supersonic; wingman formations add a wide "
+        "split, a long trail, a high-low stack and heading offsets. 1v1 is unchanged",
 }
 
 

@@ -380,7 +380,8 @@ def test_heading_reference():
 
 
 def test_stern_starts():
-    """Stern starts (bandit running away) are skipped only when red is the faster side."""
+    """Stern starts (bandit running away) are skipped only when red is the faster side; in 2v1 only the
+    unswapped ones (red running from blue)."""
     from bvr_env import BvrEnv
     from bvr_team import TeamBvrEnv
     def scenarios(env, n=200):
@@ -388,8 +389,12 @@ def test_stern_starts():
     assert "stern_conversion" in scenarios(BvrEnv(platform="F-16C", opponent_platform="F-16C"))
     assert "stern_conversion" in scenarios(BvrEnv(platform="F-16C", opponent_platform="GENERIC-UCAV"))
     assert "stern_conversion" not in scenarios(BvrEnv(platform="GENERIC-UCAV", opponent_platform="F-16C"))
-    assert "stern_conversion" not in scenarios(
-        TeamBvrEnv(blue_platforms=("GENERIC-UCAV", "GENERIC-UCAV"), red_platform="F-16C"))
+    # 2v1 (SIM_REV 22): a faster red keeps the stern starts where it is behind blue (swapped) and loses only
+    # those where it runs from blue.
+    ucav = TeamBvrEnv(blue_platforms=("GENERIC-UCAV", "GENERIC-UCAV"), red_platform="F-16C")
+    sterns = {ic["mirrored"] for ic in (ucav._random_ic() for _ in range(400))
+              if ic["scenario"] == "stern_conversion"}
+    assert sterns == {True}, sterns
     assert "stern_conversion" in scenarios(         # the F-16 wingman can catch red
         TeamBvrEnv(blue_platforms=("GENERIC-UCAV", "F-16C"), red_platform="F-16C"))
     print("  stern starts ................ OK")
@@ -1177,6 +1182,59 @@ def test_team_rev22():
         assert off(r._hdg_ref, brg(pe._world, pe.RED, k)) < 0.02, (k, r._hdg_ref)
     print(f"  2v1 SIM_REV 22 .............. OK  ({len(launched)} missiles from aircraft {owners}, none with "
           f"the support rule; {checked} starts without a track on the picture call's bearing; policy red too)")
+
+
+def test_team_starts():
+    """SIM_REV 22: 2v1's own starts. 70% the 1v1 set-ups, the rest free geometry (half at 30-60 km); a faster
+    red keeps the starts where it is behind blue and loses only those where it runs; speeds within each
+    aircraft's own choices (a UCAV 85-100% of its fastest, not 136-174 m/s); some F-16 starts supersonic;
+    wide splits, long trails, high-low stacks and heading offsets for the wingman."""
+    import math
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_env import REF_LAT, REF_LON, R_EARTH, DEG2RAD
+    from missile_sim import _isa_a
+    enu = lambda la, lo: np.array([(lo - REF_LON) * DEG2RAD * R_EARTH * math.cos(REF_LAT * DEG2RAD),
+                                   (la - REF_LAT) * DEG2RAD * R_EARTH])
+    ang = lambda a: abs((a + math.pi) % (2 * math.pi) - math.pi)
+    out = {}
+    for name, blue in (("ucav", ("GENERIC-UCAV-DCS",) * 2), ("f16", ("F-16C-DCSFIT",) * 2)):
+        e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=4, blue_platforms=blue, red_platform="F-16C-DCSFIT")
+        top = e._obs[0]._plat.speed_cmds[-1]
+        n, geo, form, behind, runs, sup, mid = 2000, {}, {}, 0, 0, 0, 0
+        for _ in range(n):
+            ic = e._random_ic()
+            geo[ic["geometry"]] = geo.get(ic["geometry"], 0) + 1
+            form[ic["formation"]] = form.get(ic["formation"], 0) + 1
+            p1, p2, p3 = (enu(ic[f"ac{k}_lat"], ic[f"ac{k}_lon"]) for k in (1, 2, 3))
+            d = p3 - p1
+            b = math.atan2(d[0], d[1])
+            ata, asp = math.degrees(ang(ic["ac1_psi"] - b)), math.degrees(ang(ic["ac3_psi"] - b - math.pi))
+            behind += ata > 120 and asp < 40
+            runs += asp > 150
+            mid += 40 < ata < 60
+            assert 29_000 < np.linalg.norm(d) < 111_000
+            sup += ic["ac1_spd"] > _isa_a(ic["ac1_alt"])
+            for k in (1, 2):
+                v = ic[f"ac{k}_spd"]
+                assert e._obs[k - 1]._plat.speed_cmds[0] <= v <= e._obs[k - 1]._plat.speed_cmds[-1] + 1e-6, v
+            sep = float(np.linalg.norm(p2 - p1))
+            if ic["formation"] == "split":
+                assert sep > 14_000, sep
+            if ic["wing_stack"]:
+                assert 2_900 < abs(ic["ac2_alt"] - ic["ac1_alt"]) < 4_100 or ic["ac2_alt"] in e.ALT_RANGE
+            if ic["wing_hdg_off"]:
+                assert 10 <= abs(math.degrees(ang(ic["ac2_psi"] - ic["ac1_psi"]))) <= 30.001
+        assert abs(geo.get("classic", 0) / n - 0.7) < 0.05 and abs(geo.get("short", 0) / n - 0.15) < 0.04, geo
+        assert set(form) == {"abreast", "trail", "echelon", "split", "long_trail"}, form
+        assert behind / n > 0.04 and mid / n > 0.02, (behind, mid)
+        out[name] = (behind / n, runs / n, sup / n, top)
+    assert out["ucav"][1] == 0.0, "a faster red started running from the UCAVs"
+    assert out["f16"][1] > 0.03, out["f16"]
+    assert out["ucav"][2] == 0.0 and out["f16"][2] > 0.1, (out["ucav"][2], out["f16"][2])
+    print(f"  2v1 starts .................. OK  (70% 1v1 set-ups, 15% free, 15% at 30-60 km; red behind the "
+          f"UCAV lead {out['ucav'][0]:.0%}, running from it 0%; F-16 starts supersonic {out['f16'][2]:.0%}; "
+          f"5 formations)")
 
 
 def test_gui_2v1_options():
@@ -2696,6 +2754,7 @@ if __name__ == "__main__":
         ("2v1 UCAV options",        test_team_ucav_options),
         ("2v1 end potential",       test_team_end_potential),
         ("2v1 SIM_REV 22",          test_team_rev22),
+        ("2v1 starts",              test_team_starts),
         ("GUI 2v1 options",         test_gui_2v1_options),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
