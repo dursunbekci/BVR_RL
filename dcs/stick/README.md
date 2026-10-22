@@ -906,3 +906,13 @@ included; on the fake cockpit, one empty read takes the old pilot from TWS to RW
 says RWS, reads an empty page once more, and otherwise leaves the radar as it is ("the radar page did not answer");
 the console names each switch ("radar RWS -> TWS"). The fake cockpit now tells a long press (toggle) from a short one
 (bug), as DCS does.
+
+**Bugging is now what keeps v6 from shooting (22 October, three fights, all lost).** First bugs at 71.6, 49.6 and 35.5
+km; 5 of 9 fire requests timed out; two shots in three fights. The scan-limit marks are not a TWS sign (the paragraph
+above reads them as one): in 095954 the radar went to TWS before 10 s and the marks came only at 22.3 s, after the cursor
+was moved. Twice the target became buggable only as it drifted 5-7 deg further out than the cursor was put (095954: put
+at +32, bugged at +37-39; 142940: put near +12, bugged at +18), which fits a cursor left short of where it was sent
+(a timed move back from the display's edge: 0.28 and 0.48 s), but 090654 bugged at once 7 deg off. The cursor's
+position is not read back, so the pilot now logs each move (`radar: cursor to +32 deg (edge, then 0.28 s back)`, and
+`ev: cursor` in the stick log) and, at each bug timeout, the radar page's mode, azimuth, bars and range scale in the
+reason, and the whole page in the stick log (`ev: fcr_page`).

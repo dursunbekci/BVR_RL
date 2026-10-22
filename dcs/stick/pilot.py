@@ -326,6 +326,11 @@ class StickPilot(threading.Thread):
                                                        or abs(az - self.center_az) > 10.0):
                 cockpit.center_cursor(r, d, fn, az, verbose=False)
                 self.center_az = az
+                # where the cursor should now be, for the log: no readout says where it is (in two fights on 21 and
+                # 22 October the target became buggable only as it drifted 5-7 deg further out than asked)
+                back = max(0.0, (60.0 - min(58.0, abs(az))) / cockpit.CURSOR_AZ_RATE)
+                r.note({"ev": "cursor", "az": round(az, 1), "back_s": round(back, 2)})
+                self.events.put(("radar", "cursor", f"cursor to {az:+.0f} deg (edge, then {back:.2f} s back)"))
             if prebug and az is not None and abs(az) < 50.0 and self._press_bug(self.PREBUG_S):
                 self.events.put(("radar", "bugged", f"track bugged ahead of a shot (target {az:+.0f} deg)"))
                 if not self.armed:                   # and master arm on, as a pilot does before the shot
@@ -453,8 +458,18 @@ class StickPilot(threading.Thread):
             self._point_hdg = r.frames[-1].hdg
         if not self._bug():
             self.fire_times.append({"bug_s": None, "total_s": round(r.frames[-1].t - t0, 2), "ok": False})
+            # the radar page as it was, whole, into the stick log (ev "fcr_page"), and its summary into the reason
+            lines = cockpit.ind_text(r, self.link, cockpit._fcr_id(r))
+            info = cockpit.fcr_info(lines)
+            az = self._target_az()
+            r.note({"ev": "fcr_page", "why": "bug timeout", "target_az": None if az is None else round(az, 1),
+                    "cursor_az": self.center_az, "info": info, "lines": lines})
+            page = (f"radar page {info['mode']} A{info['az']} {info['bars']}B {info['scale']} NM"
+                    if lines else "radar page did not answer")
             self.events.put(("fire", "timeout", "no TWS track bugged in 10 s"
-                             + ("; the HUD was not in A-A (NAV)" if aa is False else "")))
+                             + ("; the HUD was not in A-A (NAV)" if aa is False else "")
+                             + f"; {page}; target {'?' if az is None else f'{az:+.0f}'} deg, cursor put at "
+                             + ("?" if self.center_az is None else f"{self.center_az:+.0f}") + " deg"))
             return
         t_bug = r.frames[-1].t
         mrm0 = cockpit.hud_mrm(r, self.link)

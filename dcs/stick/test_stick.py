@@ -689,11 +689,15 @@ def test_aa_recovery():
                     ev += p.drain_events()
             finally:
                 p.stop()
-        out[case] = (link.cockpit.aa, [e for e in ev if e[0] == "fire"], p.cockpit_summary())
-    _, fire, cp = out["stuck aft"]                  # (the pilot puts the switch back to centre when it stops)
+            notes = [json.loads(x) for x in open(p.r.path) if '"ev"' in x]
+        out[case] = (link.cockpit.aa, [e for e in ev if e[0] == "fire"], p.cockpit_summary(), notes)
+    _, fire, cp, _ = out["stuck aft"]               # (the pilot puts the switch back to centre when it stops)
     assert fire and fire[0][1] == "launched" and cp["aa_pct"] > 50 and cp["first_bug_km"] != "", out["stuck aft"]
-    _, fire, cp2 = out["NAV for good"]
+    _, fire, cp2, notes = out["NAV for good"]
     assert fire and fire[0][1] == "timeout" and "not in A-A" in fire[0][2] and cp2["aa_pct"] == 0, out["NAV for good"]
+    # the timeout names the radar page and where the cursor was put, and the whole page is in the stick log
+    assert "radar page" in fire[0][2] and "cursor put at" in fire[0][2], fire
+    assert any(n["ev"] == "fcr_page" and n["lines"] for n in notes) and any(n["ev"] == "cursor" for n in notes), notes
     print(f"  A-A recovery ................ OK  (override already aft with the HUD in NAV: cycled through centre, "
           f"A-A, launched; HUD in A-A {cp['aa_pct']}% of the run, first bug at {cp['first_bug_km']} km; a HUD stuck in "
           f"NAV is named in the timeout)")

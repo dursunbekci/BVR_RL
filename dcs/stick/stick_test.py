@@ -251,6 +251,12 @@ class Run:
         self.check(f)
         return f
 
+    def note(self, rec):
+        """A record of what a job did, in the log beside the frames ({"ev": ..., "t": the latest frame's time})."""
+        if self.fh:
+            t = self.frames[-1].t if self.frames else None
+            self.fh.write(json.dumps({"t": t, **rec}, separators=(",", ":")) + "\n")
+
     def check(self, f):
         L = self.limits
         if f.bank is not None and abs(f.bank) > L.bank:
