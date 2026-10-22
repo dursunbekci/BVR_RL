@@ -1184,6 +1184,55 @@ def test_team_rev22():
           f"the support rule; {checked} starts without a track on the picture call's bearing; policy red too)")
 
 
+def test_team_red_rwr():
+    """red_awareness "radar_rwr" (SIM_REV 22): red's RWR hears a blue radar only inside its scan volume and
+    range (1.5x its detection range), with no range; while red has no track, the bearing turns red's belief
+    onto it, which bounds the belief's bearing error that pure dead reckoning ("radar") lets grow."""
+    import math
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_track_adapter import TrackState
+    U, F = "GENERIC-UCAV-DCS", "F-16C-DCSFIT"
+
+    def run(aw, eps=4):
+        e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=9, blue_platforms=(U, U), red_platform=F, red_awareness=aw)
+        errs, heard = [], 0
+        for _ in range(eps):
+            e.reset()
+            seen = False
+            for _ in range(150):
+                _, _, term, tr, infos = e.step([[3, 2, 4, 0], [3, 2, 4, 0]])
+                w, k = e._world, e._red_tgt
+                r = e._red_obs[k - 1]
+                seen = seen or (r._track.state != TrackState.NONE and r._est()["valid"])
+                if not seen:
+                    pos, vel, t0 = e._red_belief[k]
+                    tb, tt = pos + vel * (e._t_sim - t0) - w.pos(e.RED), w.pos(k) - w.pos(e.RED)
+                    errs.append(abs(math.degrees((math.atan2(tb[0], tb[1]) - math.atan2(tt[0], tt[1]) + math.pi)
+                                                 % (2 * math.pi) - math.pi)))
+                if term or tr:
+                    break
+            heard += sum(e._rwr_heard.values())
+        return float(np.percentile(errs, 90)), float(max(errs)), heard, e
+
+    p90_r, max_r, heard_r, _ = run("radar")
+    p90_w, max_w, heard_w, e = run("radar_rwr")
+    assert heard_r == 0 and heard_w > 50, (heard_r, heard_w)
+    assert p90_w < p90_r and max_w < max_r, (p90_r, p90_w, max_r, max_w)
+
+    # Heard only inside the blue radar's scan volume and range.
+    e.reset()
+    w = e._world
+    assert e._rwr_bearing(1) is not None or np.linalg.norm(w.pos(3) - w.pos(1)) > 1.5 * 70_000
+    chi = w.acs[0].chi
+    d = w.pos(3) - w.pos(1)
+    w.acs[0].chi = math.atan2(d[0], d[1]) + math.pi          # nose away from red
+    assert e._rwr_bearing(1) is None
+    w.acs[0].chi = chi
+    print(f"  2v1 red RWR ................. OK  (belief bearing error before red's track, p90/max: "
+          f"{p90_r:.0f}/{max_r:.0f} deg on radar alone, {p90_w:.0f}/{max_w:.0f} with the RWR; {heard_w} bearings)")
+
+
 def test_team_starts():
     """SIM_REV 22: 2v1's own starts. 70% the 1v1 set-ups, the rest free geometry (half at 30-60 km); a faster
     red keeps the starts where it is behind blue and loses only those where it runs; speeds within each
@@ -2754,6 +2803,7 @@ if __name__ == "__main__":
         ("2v1 UCAV options",        test_team_ucav_options),
         ("2v1 end potential",       test_team_end_potential),
         ("2v1 SIM_REV 22",          test_team_rev22),
+        ("2v1 red RWR",             test_team_red_rwr),
         ("2v1 starts",              test_team_starts),
         ("GUI 2v1 options",         test_gui_2v1_options),
         ("DCS round trip",          test_dcs_round_trip),

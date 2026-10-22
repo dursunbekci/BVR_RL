@@ -605,12 +605,13 @@ select[multiple] option:checked{background:var(--blue) linear-gradient(var(--blu
               <div class="field-label">
                 <span>2 V 1 OPTIONS</span>
                 <button class="help-btn" onclick="help(this,'2 V 1 OPTIONS',
-                  'RED AWARENESS: what scripted red steers on. GCI (default): the blue aircraft\'s true positions, as if a controller gave it the picture. RADAR: its own radar track only, coasting when it drops; before it first detects an aircraft, on that aircraft\'s start, dead-reckoned. Use RADAR for low-RCS UCAVs: with GCI red always knows where they are.\n\nBLUE LOSS COST: what losing a blue aircraft costs, 0-2; a kill is worth 1.0. 1.0 for manned aircraft; less for an attritable UCAV (at 0.5 trading a UCAV for the kill nets +0.5, above a timeout).\n\nRED POLICIES: 1v1 checkpoints that fly red in a share of the ADAPTIVE SHOOTER episodes (the last 2 v 1 stage), one drawn per episode. Ctrl/Cmd-click to pick several; none: scripted red only.\n\nRED POLICY SHARE: that share, 50% by default.')">?</button>
+                  'RED AWARENESS: what scripted red steers on. GCI (default): the blue aircraft\'s true positions, as if a controller gave it the picture. RADAR: its own radar track only, coasting when it drops; before it first detects an aircraft, on that aircraft\'s start, dead-reckoned. RADAR + RWR: as RADAR, and while it has no track of an aircraft, its RWR\'s bearing to that aircraft\'s radar (heard at 1.5x the radar\'s detection range, inside its scan) turns red\'s belief onto that bearing. Use RADAR + RWR for low-RCS UCAVs that keep their radars on: with GCI red always knows where they are, with RADAR alone it is deaf to their emissions.\n\nBLUE LOSS COST: what losing a blue aircraft costs, 0-2; a kill is worth 1.0. 1.0 for manned aircraft; less for an attritable UCAV (at 0.5 trading a UCAV for the kill nets +0.5, above a timeout).\n\nRED POLICIES: 1v1 checkpoints that fly red in a share of the ADAPTIVE SHOOTER episodes (the last 2 v 1 stage), one drawn per episode. Ctrl/Cmd-click to pick several; none: scripted red only.\n\nRED POLICY SHARE: that share, 50% by default.')">?</button>
               </div>
               <div class="row2">
                 <select id="cfg-red-awareness" title="Red awareness">
                   <option value="gci" selected>red: GCI picture</option>
                   <option value="radar">red: own radar only</option>
+                  <option value="radar_rwr">red: own radar + RWR</option>
                 </select>
                 <input type="number" id="cfg-blue-loss" value="1.0" min="0" max="2" step="0.1" title="Blue loss cost">
               </div>

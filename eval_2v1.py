@@ -187,8 +187,9 @@ def main():
                     help="blue's doctrine: MIXED (drawn per episode, default) or one of them")
     ap.add_argument("--red-platform", help="red's platform (default: each checkpoint's opponent)")
     ap.add_argument("--max-steps", type=int, help="episode length in decisions")
-    ap.add_argument("--red-awareness", default="gci", choices=["gci", "radar"],
-                    help="what scripted red steers on: true positions (gci, default) or its own radar track")
+    ap.add_argument("--red-awareness", default="gci", choices=["gci", "radar", "radar_rwr"],
+                    help="what scripted red steers on: true positions (gci, default), its own radar track "
+                         "(radar), or that plus its RWR's bearings to blue radars (radar_rwr)")
     ap.add_argument("--stochastic", action="store_true", help="sample actions instead of the most likely")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1),
                     help="parallel worker processes (default: CPU cores - 1)")

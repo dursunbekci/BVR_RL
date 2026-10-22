@@ -545,7 +545,9 @@ _SIM_REV_NOTES = {
         "starts: 70% 1v1's set-ups, 30% free geometry (any angle off and aspect; half at 30-60 km); a faster "
         "red keeps the starts where it is behind blue; speeds by Mach within each aircraft's own choices (a "
         "UCAV started at 136-174 m/s), a fifth of the F-16 starts supersonic; wingman formations add a wide "
-        "split, a long trail, a high-low stack and heading offsets. 1v1 is unchanged",
+        "split, a long trail, a high-low stack and heading offsets. New red awareness radar_rwr: scripted "
+        "red's RWR hears a blue radar inside its scan volume out to 1.5x its detection range and turns red's "
+        "belief onto that bearing while red has no track. 1v1 is unchanged",
 }
 
 

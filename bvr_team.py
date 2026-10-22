@@ -50,7 +50,10 @@ AWACS gave it the picture; only its shots and missile guidance depend on its
 own radar. "radar": it steers on its own radar track of its target, coasting
 its last estimate when the track drops, and before it first detects that
 aircraft, on the position and velocity it had at the start, dead-reckoned (a
-controller's initial vector, never updated). Against a low-RCS blue team
+controller's initial vector, never updated). "radar_rwr": as "radar", and
+while it has no track of an aircraft, its RWR's bearing to that aircraft's
+radar (heard further away than the radar detects red) turns the belief onto
+that bearing, keeping the believed range. Against a low-RCS blue team
 (GENERIC-UCAV-DCS) that is the difference stealth makes to red's manoeuvring,
 not only to when it can shoot.
 
@@ -136,7 +139,14 @@ class TeamBvrEnv:
     # the choice until red's first launch, then red picks targets as usual.
     OPEN_RULES = (("nearer", 0.5), ("farther", 0.25), ("random", 0.25))
 
-    RED_AWARENESS = ("gci", "radar")
+    RED_AWARENESS = ("gci", "radar", "radar_rwr")
+    # radar_rwr (SIM_REV 22): red's RWR hears a blue aircraft's radar when red is inside that radar's scan
+    # volume and within RWR_RANGE_FACTOR x the radar's detection range against its reference target (one-way
+    # against two-way propagation: an emitter is heard further away than it detects). It gives a bearing
+    # with RWR_BEARING_SIGMA_DEG of noise, no range, once per RWR_UPDATE_S. Illustrative values.
+    RWR_RANGE_FACTOR = 1.5
+    RWR_BEARING_SIGMA_DEG = 5.0
+    RWR_UPDATE_S = 1.0
 
     # Scripted red fights on its own radar tracks (see the module notes).
     # False: the pre-SIM_REV 22 red, truth-guided with the old cranks.
@@ -282,6 +292,8 @@ class TeamBvrEnv:
         # red_awareness "radar": what red believes of each blue aircraft, as
         # (position, velocity, sim time); the start is the controller's vector.
         self._red_belief = {i: (w.pos(i).copy(), w.acs[i - 1].vel_enu.copy(), 0.0) for i in (1, 2)}
+        self._rwr_next = {i: 0.0 for i in (1, 2)}
+        self._rwr_heard = {i: 0 for i in (1, 2)}          # RWR bearings that corrected red's belief
         self._red_wpn0 = w.wpn[self.RED - 1]
         self._red_other = None
         for k, o in enumerate(self._obs, start=1):
@@ -406,7 +418,8 @@ class TeamBvrEnv:
                 "wpn_remaining": sum(self._world.wpn[:self.n_agents]),
                 "killer": self._killer,
                 "red_open_rule": self._open_rule,
-                "red_awareness": self._red_awareness})
+                "red_awareness": self._red_awareness,
+                "red_rwr_bearings": sum(self._rwr_heard.values())})
             self._ready = False
         return obs, np.array(rewards, dtype=np.float32), terminated, truncated, infos
 
@@ -472,7 +485,9 @@ class TeamBvrEnv:
                 self._retarget()
                 self._red_other = self._other_info()
             red_view = w.telemetry(self._red_tgt, self.RED, view="team")
-            if self._red_awareness == "radar" and self._red_radar:
+            if self._red_awareness in ("radar", "radar_rwr") and self._red_radar:
+                if self._red_awareness == "radar_rwr":
+                    self._red_rwr_update()
                 red_view = self._red_believed_view(red_view)
             if self._red_other is not None:
                 red_view["other"] = self._red_other
@@ -594,6 +609,47 @@ class TeamBvrEnv:
         """Whether red may fire at blue aircraft k now: the agent's fire mask
         applied to red's own track of it."""
         return bool(self._obs[k - 1]._alive and self._red_obs[k - 1]._can_fire())
+
+    def _rwr_bearing(self, k):
+        """The bearing at which red's RWR hears blue aircraft k's radar, or None: k alive with a radar, red
+        inside its scan volume and within RWR_RANGE_FACTOR x its detection range (against the radar's
+        reference target, not red's RCS: the RWR hears the emitter's power)."""
+        o, w = self._obs[k - 1], self._world
+        rad = o._radar
+        if not o._alive or rad is None:
+            return None
+        d = w.pos(self.RED) - w.pos(k)
+        rng = float(np.linalg.norm(d))
+        if rng > self.RWR_RANGE_FACTOR * float(o._plat.radar.MAX_RANGE):
+            return None
+        az = abs(_wrap_deg(math.degrees(math.atan2(d[0], d[1]) - w.acs[k - 1].chi)))
+        el = abs(math.degrees(math.atan2(d[2], math.hypot(d[0], d[1]))))
+        if az > math.degrees(rad.fov_az) or el > math.degrees(rad.fov_el):
+            return None
+        b = math.atan2(-d[0], -d[1])                       # red -> blue
+        return b + math.radians(float(self._rng.normal(0.0, self.RWR_BEARING_SIGMA_DEG)))
+
+    def _red_rwr_update(self):
+        """red_awareness "radar_rwr": while red's radar has no track of a blue aircraft, an RWR bearing to it
+        turns red's dead-reckoned belief onto that bearing, keeping the believed range and altitude (an RWR
+        gives no range). Once per RWR_UPDATE_S for each aircraft."""
+        red = self._world.pos(self.RED)
+        for k in (1, 2):
+            if self._t_sim < self._rwr_next[k]:
+                continue
+            self._rwr_next[k] = self._t_sim + self.RWR_UPDATE_S
+            r = self._red_obs[k - 1]
+            if r._track.state != TrackState.NONE and r._est()["valid"]:
+                continue                                   # its own track is better
+            b = self._rwr_bearing(k)
+            if b is None:
+                continue
+            pos, vel, t0 = self._red_belief[k]
+            rel = pos + vel * (self._t_sim - t0) - red
+            rh = float(math.hypot(rel[0], rel[1]))
+            new = red + np.array([rh * math.sin(b), rh * math.cos(b), rel[2]])
+            self._red_belief[k] = (new, vel, self._t_sim)
+            self._rwr_heard[k] += 1
 
     def _red_believed_view(self, view: dict) -> dict:
         """red_awareness "radar": red's packet with its target's position and

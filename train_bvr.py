@@ -609,9 +609,10 @@ def main():
     ap.add_argument("--blue-loss-cost", type=float, default=None,
                     help="2v1: the cost of losing a blue aircraft, 0-2 (default 1.0, as a kill is worth "
                          "1.0); less for an attritable UCAV, e.g. 0.5")
-    ap.add_argument("--red-awareness", default="gci", choices=["gci", "radar"],
+    ap.add_argument("--red-awareness", default="gci", choices=["gci", "radar", "radar_rwr"],
                     help="2v1: what scripted red steers on: gci, the blue aircraft's true positions "
-                         "(a controller's picture; default), or radar, its own radar track only")
+                         "(a controller's picture; default), radar, its own radar track only, or radar_rwr, "
+                         "its radar track plus its RWR's bearing to the blue radars it hears")
     ap.add_argument("--red-policy-frac", type=float, default=0.5,
                     help="2v1: share of ADAPTIVE_SHOOTER episodes flown by a --red-policies "
                          "checkpoint, 0-1 (default %(default)s)")
@@ -658,7 +659,7 @@ def main():
     if team and (args.blue_loss_cost is not None or args.red_awareness != "gci"):
         note(f"2v1: losing a blue aircraft costs "
              f"{1.0 if args.blue_loss_cost is None else args.blue_loss_cost:g}; "
-             f"scripted red steers on {'its own radar track' if args.red_awareness == 'radar' else 'true positions (GCI)'}")
+             f"scripted red steers on {dict(radar='its own radar track', radar_rwr='its own radar track and its RWR bearings to blue radars').get(args.red_awareness, 'true positions (GCI)')}")
     if args.red_policies and not team:
         ap.error("--red-policies needs --format 2v1 (1v1 has self-play)")
     if not 0.0 <= args.red_policy_frac <= 1.0:
