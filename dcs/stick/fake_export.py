@@ -318,6 +318,9 @@ class FakeLink:
     def wall(self):
         return self._wall
 
+    def flush(self):
+        return 0
+
     def next(self, timeout=1.0):
         from stick_test import Frame
         self._wall += DT

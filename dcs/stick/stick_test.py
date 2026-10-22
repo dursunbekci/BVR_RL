@@ -179,6 +179,34 @@ class UdpLink:
             self.events[d.get("ev")] = d
             self.last_event_wall = time.time()
 
+    def flush(self) -> int:
+        """Drop the telemetry frames already waiting (events are kept); the number dropped. Between episodes the
+        previous mission keeps sending: a new pilot read 25 s of its last frames (a wreck at -17 to +14 g) one by
+        one, releasing the stick at each, and did not fly the new fight for its first 26 s (live_20261022_111114)."""
+        n = 0
+        self.rx.setblocking(False)
+        try:
+            while True:
+                try:
+                    data, _ = self.rx.recvfrom(65535)
+                except (BlockingIOError, socket.timeout):
+                    break
+                except OSError:
+                    break
+                try:
+                    d = json.loads(data)
+                except ValueError:
+                    continue
+                if d.get("ev") == "tel":
+                    n += 1
+                else:
+                    if d.get("ev") == "ind":
+                        self.ind_items[d.get("id")] = d.get("text", "")
+                    self.events[d.get("ev")] = d
+        finally:
+            self.rx.setblocking(True)
+        return n
+
     def _send(self, text):
         self.tx.sendto(text.encode(), self.addr)
 

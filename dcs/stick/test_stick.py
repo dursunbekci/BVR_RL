@@ -418,6 +418,15 @@ def test_udp_link():
         f = link.next(timeout=2.0)
         assert f is not None and f.n == 1 and f.hdg == 1.0 and f.alt == 5000 and f.nz == 1.0
         assert link.events["hello"]["codes_from"] == "test" and link.events["stats"]["event_hz"] == 50.0
+        # flush: frames already waiting (the previous mission's last seconds) are dropped, events kept
+        for k in range(40):
+            send(dict(base, n=500 + k, t=159.0 + 0.01 * k, g={"x": 0, "y": -17.0, "z": 0}))
+        send({"ev": "stats", "frame_hz": 62.0, "event_hz": 51.0})
+        time.sleep(0.2)
+        assert link.flush() == 40 and link.events["stats"]["frame_hz"] == 62.0
+        send(dict(base, n=2, t=1.0))
+        f = link.next(timeout=2.0)
+        assert f is not None and f.n == 2 and f.t == 1.0, f
         link.axes(pitch=0.1, roll=-0.5)
         text = cmd_rx.recvfrom(1024)[0].decode()
         assert text == "AXES 1 0.1000 -0.5000 - -", text

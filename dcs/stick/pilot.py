@@ -175,6 +175,11 @@ class StickPilot(threading.Thread):
                 "first_bug_t": "" if fb is None else round(fb[0], 1)}
 
     def run(self):
+        # frames left from before this pilot (the previous mission's last seconds) are not this fight's
+        flush = getattr(self.link, "flush", None)
+        dropped = flush() if flush else 0
+        if dropped:
+            self.log(f"  stick pilot: dropped {dropped} telemetry frames waiting from before the start")
         try:
             while not self._halt.is_set():
                 try:

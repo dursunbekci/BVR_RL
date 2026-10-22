@@ -950,3 +950,10 @@ fire job had no target ("target ? deg"). bvr_stick_export.lua version 3 leaves u
 unnamed objects within 3 km of red, far from us, in 142940 (from 129 s) and 103934 (from 72.7 s), both while our
 missiles flew, so our chaff stays on by default (`--no-chaff` turns it off). test_chaff waited for the setup flag,
 set before the clicks: it now waits for the panel itself.
+
+**111114 (episode 2): the new pilot read the old mission first.** The stick log opens with the previous mission's last
+frames (t 159 s, our wreck at -17 to +14 g), still queued on the stick link when the next episode's pilot started; it
+read them one by one, released the stick at each and slept 0.5 s, so it flew nothing for the new fight's first 26 s
+(the console's 50 "load factor" lines). `UdpLink.flush()` now drops the telemetry already waiting (events kept), and
+the pilot calls it as it starts. The screenshot taken during the fight agrees with the counters: TWS, 40 NM, the cursor
+right of centre with its height readout, and no contact symbol on the radar page.
