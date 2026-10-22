@@ -940,3 +940,13 @@ taken for the nearest aircraft: the cursor and the target bearing went to our ta
 the radar page's OSB 18 (azimuth) and 17 (bars) and reading the page back after each press; a press that changes
 nothing ends it ("OSB 18 did not change the scan's az"). A3 4B scans half the azimuth of A6 4B, so each frame takes
 about half as long, with the same height coverage.
+
+**103934 (--tws-scan A3,4B): a launch 4 s after red's; red hidden by our chaff; red's chaff.** The scan change did not
+take ("OSB 18 did not change the scan's az (6)"), so the fight ran on A6 4B. Even so the pre-bug got red at 26.1 s
+(45.5 km, +44 deg) and the missile left at 27.9 s, 4 s after red's: the track time varies. From 107 s red was absent
+from the pilot's world objects: the export sends the 12 nearest, and all 12 were our own chaff and flares, so the
+fire job had no target ("target ? deg"). bvr_stick_export.lua version 3 leaves unnamed objects out (reinstall it:
+`python dcs\stick\install_export.py`); the pilot says once if the list holds only chaff. Red dispenses chaff too:
+unnamed objects within 3 km of red, far from us, in 142940 (from 129 s) and 103934 (from 72.7 s), both while our
+missiles flew, so our chaff stays on by default (`--no-chaff` turns it off). test_chaff waited for the setup flag,
+set before the clicks: it now waits for the panel itself.

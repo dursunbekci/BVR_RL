@@ -104,6 +104,7 @@ class StickPilot(threading.Thread):
         # bugged track (DCS time, range m)
         self.rd_frames = self.aa_frames = 0
         self.first_bug = None
+        self.obj_full_said = False    # said once: the object list held only our chaff and flares
 
     # ── what the main thread calls ──────────────────────────────────────
     def command(self, hdg, alt, spd, dive=None, climb=None):
@@ -288,6 +289,14 @@ class StickPilot(threading.Thread):
     def _target_az(self):
         fo = cockpit.last_with(self.r.frames[-200:], "obj")
         nr = cockpit.nearest(fo) if fo else None
+        if nr is None and fo is not None and not self.obj_full_said and len(fo.raw.get("obj") or []) >= 12:
+            # bvr_stick_export.lua before version 3 sends the 12 nearest objects, our chaff and flares included
+            self.obj_full_said = True
+            h = self.link.events.get("hello") or {}
+            self.events.put(("radar", "no_target", "the export's object list is full of our own chaff and flares and "
+                             "holds no aircraft" + ("" if (h.get("version") or 0) >= 3 else
+                                                    ": install bvr_stick_export.lua version 3 "
+                                                    "(python dcs\\stick\\install_export.py)")))
         return None if nr is None else nr[2]
 
     def _state(self):
@@ -437,6 +446,8 @@ class StickPilot(threading.Thread):
                 r.note({"ev": "bug_try", "mode": info["mode"], "contacts": info["contacts"], "tracks": info["tracks"],
                         "target_az": None if az is None else round(az, 1)})
                 if any(x.strip().startswith("DLZ_AIM120") for x in lines):
+                    r.note({"ev": "bug_ok", "mode": info["mode"], "contacts": info["contacts"],
+                            "tracks": info["tracks"], "by": "DLZ"})
                     return True
         return False
 

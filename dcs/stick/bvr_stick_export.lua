@@ -46,7 +46,8 @@ local CFG = {
   ind_every = 20,        -- every Nth frame look for the radar and HUD markers below (0: never)
   allow_click = true,    -- accept CLICK lines (some devices and commands are always refused, below)
   codes = nil,           -- {pitch=, roll=, rudder=, throttle=} to force the command numbers
-  version = 2,           -- 2: countermeasures panel MODE/PROGRAM/CH clicks pass; chaff and flare counts (cm)
+  version = 3,           -- 2: countermeasures panel MODE/PROGRAM/CH clicks pass; chaff and flare counts (cm)
+                         -- 3: unnamed world objects (our chaff and flares) are left out of obj
 }
 if type(BVR_STICK_CFG) == "table" then
   for k, v in pairs(BVR_STICK_CFG) do CFG[k] = v end
@@ -375,7 +376,10 @@ local function objects(me, kind)
   local px, pz = 0, 0
   if me and me.Position then px, pz = me.Position.x or 0, me.Position.z or 0 end
   for id, o in pairs(all) do
-    if type(o) == "table" and o.Position and not (me and o.Name == me.Name and o.UnitName == me.UnitName
+    -- unnamed objects are our chaff and flares (level1 1, level2 3): the nearest max_objects were all ours while we
+    -- dispensed, and the bandit was not in the list (live_20261022_103934)
+    local named = (o.UnitName and o.UnitName ~= "") or (o.Name and o.Name ~= "")
+    if type(o) == "table" and o.Position and named and not (me and o.Name == me.Name and o.UnitName == me.UnitName
                                                   and o.GroupName == me.GroupName) then
       local dx, dz = (o.Position.x or 0) - px, (o.Position.z or 0) - pz
       local ty = o.Type or {}

@@ -82,7 +82,11 @@ function LoGetWorldObjects()
                   LatLongAlt = {Lat = 42.5, Long = 41.9, Alt = 9000}, Heading = 3.0, Pitch = 0, Bank = 0,
                   Position = {x = 60000, y = 9000, z = 50000}},
           [11] = {Name = "F-16C_50", UnitName = "Viper-1", GroupName = "G", CoalitionID = 2, Type = {level1 = 1, level2 = 1},
-                  LatLongAlt = {Lat = 42.1, Long = 41.2, Alt = 7000.5}, Position = {x = 1000, y = 7000, z = 2000}}}
+                  LatLongAlt = {Lat = 42.1, Long = 41.2, Alt = 7000.5}, Position = {x = 1000, y = 7000, z = 2000}},
+          -- our own chaff, unnamed, right beside us: left out (version 3)
+          [12] = {Name = "", CoalitionID = 0, Type = {level1 = 1, level2 = 3, level3 = 31, level4 = 14},
+                  Position = {x = 1010, y = 7000, z = 2005}},
+          [13] = {Type = {level1 = 1, level2 = 3, level3 = 31, level4 = 13}, Position = {x = 990, y = 6990, z = 1995}}}
 end
 function LoGetPayloadInfo() return {CurrentStation = 7, Stations = {{count = 1, CLSID = "{AIM-120C}"}}} end
 function LoSetCommand(c, v) CMDS[#CMDS + 1] = {c, v} end
@@ -176,7 +180,8 @@ def test_lua_export():
     assert abs(f.tas - 250.5) < 1e-9 and abs(f.nz - 1.2) < 1e-9 and f.rpm == 88.0 and f.fuel_flow == 1.2 and f.agl == 6800.0
     assert f.t > 50 and f.rt > 1000
     objs = [d for d in tel if d.get("obj")]
-    assert objs and len(objs[-1]["obj"]) == 1 and objs[-1]["obj"][0]["unit"] == "Bandit-1", "own aircraft not excluded"
+    assert objs and len(objs[-1]["obj"]) == 1 and objs[-1]["obj"][0]["unit"] == "Bandit-1", \
+        "own aircraft or unnamed chaff not excluded"
     assert any("radar" in d for d in tel) and any("pay" in d for d in tel)
     assert any(json.loads(d)["ev"] == "stats" for _, d in sent()), "no stats line"
 
@@ -1343,7 +1348,8 @@ def test_chaff():
         try:
             p.radar()
             t0 = _time.time()
-            while not p.cmds_tried and _time.time() - t0 < 30:
+            # cmds_tried is set as the setup starts, before its three clicks: wait for the panel itself
+            while not (p.cmds_tried and link.cockpit.cmds_ch) and _time.time() - t0 < 30:
                 _time.sleep(0.01)
             assert link.cockpit.cmds_ch and abs(link.cockpit.cmds_mode - 0.2) < 1e-9, "panel not set up"
             assert link.cockpit.chaff == 60, "chaff before any missile"
