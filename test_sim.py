@@ -1179,6 +1179,38 @@ def test_team_rev22():
           f"the support rule; {checked} starts without a track on the picture call's bearing; policy red too)")
 
 
+def test_gui_2v1_options():
+    """The GUI's training command carries the 2v1 options (red awareness, blue loss cost, red policies and
+    their share), the policies joined with the model dir as --resume is; a 1v1 run gets none of them."""
+    import subprocess, bvr_gui
+    cmds = []
+    class _Stop(Exception):
+        pass
+    def fake(cmd, *a, **k):
+        cmds.append(cmd)
+        raise _Stop
+    real, subprocess.Popen = subprocess.Popen, fake
+    try:
+        m = bvr_gui.TrainingManager("models_bvr")
+        for cfg in (dict(format="2v1", platform="GENERIC-UCAV-DCS", opponent_platform="F-16C-DCSFIT",
+                         red_awareness="radar", blue_loss_cost=0.5, red_policies=["dcsfit_v6.zip", "dcsfit_v4.zip"],
+                         red_policy_frac=0.4),
+                    dict(format="1v1", red_awareness="radar", blue_loss_cost=0.5, red_policies=["dcsfit_v6.zip"])):
+            try:
+                m.start(cfg)
+            except _Stop:
+                pass
+    finally:
+        subprocess.Popen = real
+    c2, c1 = cmds
+    i = c2.index("--red-policies")
+    assert c2[i + 1:i + 3] == [os.path.join("models_bvr", "dcsfit_v6.zip"), os.path.join("models_bvr", "dcsfit_v4.zip")]
+    assert c2[c2.index("--red-awareness") + 1] == "radar" and c2[c2.index("--blue-loss-cost") + 1] == "0.5"
+    assert c2[c2.index("--red-policy-frac") + 1] == "0.4"
+    assert not any(a in c1 for a in ("--red-policies", "--red-awareness", "--blue-loss-cost", "--red-policy-frac"))
+    print("  GUI 2v1 options ............. OK  (red awareness, blue loss cost, red policies and share; none in 1v1)")
+
+
 def test_team_roles_far_target():
     """team_roles.py: red opens on the farther blue aircraft and holds it until it fires."""
     from team_roles import FarTargetTeamEnv
@@ -2664,6 +2696,7 @@ if __name__ == "__main__":
         ("2v1 UCAV options",        test_team_ucav_options),
         ("2v1 end potential",       test_team_end_potential),
         ("2v1 SIM_REV 22",          test_team_rev22),
+        ("GUI 2v1 options",         test_gui_2v1_options),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS live stick",          test_dcs_live_stick),

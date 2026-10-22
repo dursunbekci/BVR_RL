@@ -242,6 +242,9 @@ input[type=text],input[type=number],select{
   padding:6px 10px;font-size:13px;font-family:inherit;border-radius:1px}
 input:focus,select:focus{outline:none;border-color:var(--blue)}
 select option{background:#050810}
+select[multiple]{padding:4px 0}
+select[multiple] option{padding:3px 10px;line-height:1.3}
+select[multiple] option:checked{background:var(--blue) linear-gradient(var(--blue),var(--blue));color:#fff}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 
@@ -598,6 +601,29 @@ select option{background:#050810}
               <span></span></div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
               <span></span><span>WINGMAN FLIES</span><span></span></div>
+            <div class="field" style="margin-top:8px">
+              <div class="field-label">
+                <span>2 V 1 OPTIONS</span>
+                <button class="help-btn" onclick="help(this,'2 V 1 OPTIONS',
+                  'RED AWARENESS: what scripted red steers on. GCI (default): the blue aircraft\'s true positions, as if a controller gave it the picture. RADAR: its own radar track only, coasting when it drops; before it first detects an aircraft, on that aircraft\'s start, dead-reckoned. Use RADAR for low-RCS UCAVs: with GCI red always knows where they are.\n\nBLUE LOSS COST: what losing a blue aircraft costs, 0-2; a kill is worth 1.0. 1.0 for manned aircraft; less for an attritable UCAV (at 0.5 trading a UCAV for the kill nets +0.5, above a timeout).\n\nRED POLICIES: 1v1 checkpoints that fly red in a share of the ADAPTIVE SHOOTER episodes (the last 2 v 1 stage), one drawn per episode. Ctrl/Cmd-click to pick several; none: scripted red only.\n\nRED POLICY SHARE: that share, 50% by default.')">?</button>
+              </div>
+              <div class="row2">
+                <select id="cfg-red-awareness" title="Red awareness">
+                  <option value="gci" selected>red: GCI picture</option>
+                  <option value="radar">red: own radar only</option>
+                </select>
+                <input type="number" id="cfg-blue-loss" value="1.0" min="0" max="2" step="0.1" title="Blue loss cost">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
+                <span>RED AWARENESS</span><span>BLUE LOSS COST</span></div>
+              <select id="cfg-red-policies" multiple size="4" title="Red policies" style="width:100%;margin-top:6px"></select>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;margin-top:4px">
+                <span style="font-size:11px;color:var(--muted)">RED POLICIES (1v1 checkpoints)</span>
+                <input type="number" id="cfg-red-policy-pct" value="50" min="0" max="100" step="5" title="Red policy share (%)">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;color:var(--muted)">
+                <span></span><span>RED POLICY SHARE (%)</span></div>
+            </div>
           </div>
           <div id="cfg-engage-warn" style="font-size:11px;color:var(--amber);margin-top:3px"></div>
         </div>
@@ -1288,6 +1314,16 @@ async function refreshModelList() {
   catch (e) { return; }
   const models = data.models || [];
   populateModelSelect(document.getElementById('cfg-resume'), models, '— fresh start —', false);
+  const rp = document.getElementById('cfg-red-policies');
+  if (rp) {
+    const keep = new Set([...rp.selectedOptions].map(o => o.value));
+    rp.innerHTML = '';
+    for (const m of models) {
+      const o = document.createElement('option');
+      o.value = m.path; o.textContent = m.path; o.selected = keep.has(m.path);
+      rp.appendChild(o);
+    }
+  }
   populateModelSelect(document.getElementById('eval-ckpt'),  models, '— random / untrained policy —', true);
   xpRenderModels(models);
 }
@@ -2846,6 +2882,13 @@ document.getElementById('btn-train').onclick=()=>{
   const dcsPct=parseFloat(document.getElementById('cfg-adaptive-dcs').value);
   if(!(dcsPct>=0 && dcsPct<=100)){ alert('ADAPTIVE DCS-LIKE must be between 0 and 100%.'); return; }
   const symmetric=document.getElementById('cfg-symmetric').checked;
+  const team2=document.getElementById('cfg-format').value==='2v1';
+  const redAware=document.getElementById('cfg-red-awareness').value;
+  const blueLoss=parseFloat(document.getElementById('cfg-blue-loss').value);
+  const redPols=[...document.getElementById('cfg-red-policies').selectedOptions].map(o=>o.value);
+  const redPct=parseFloat(document.getElementById('cfg-red-policy-pct').value);
+  if(team2 && !(blueLoss>=0 && blueLoss<=2)){ alert('BLUE LOSS COST must be between 0 and 2.'); return; }
+  if(team2 && redPols.length && !(redPct>=0 && redPct<=100)){ alert('RED POLICY SHARE must be between 0 and 100%.'); return; }
   const resume=document.getElementById('cfg-resume').value.trim();
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';
   const doctrine=document.getElementById('cfg-doctrine').value;
@@ -2891,7 +2934,11 @@ document.getElementById('btn-train').onclick=()=>{
     format:fmtSel, wingman_platform:(fmtSel==='2v1'&&wingSel)||undefined,
     max_steps:parseInt(document.getElementById('cfg-maxsteps').value)||undefined,
     adaptive_dcs_frac:dcsPct===33?undefined:dcsPct/100,
-    symmetric_policy:symmetric||undefined}});
+    symmetric_policy:symmetric||undefined,
+    red_awareness:team2&&redAware!=='gci'?redAware:undefined,
+    blue_loss_cost:team2&&blueLoss!==1?blueLoss:undefined,
+    red_policies:team2&&redPols.length?redPols:undefined,
+    red_policy_frac:team2&&redPols.length&&redPct!==50?redPct/100:undefined}});
 };
 document.getElementById('btn-stop-train').onclick=()=>{
   const runName=document.getElementById('cfg-runname').value.trim()||'latest';

@@ -533,6 +533,17 @@ class TrainingManager:
             cmd += ["--adaptive-dcs-frac", str(float(config["adaptive_dcs_frac"]))]
         if config.get("symmetric_policy"):
             cmd += ["--symmetric-policy"]
+        if config.get("format") == "2v1":
+            # 2v1 options; red policies are paths relative to the model dir, as --resume.
+            if config.get("red_awareness"):
+                cmd += ["--red-awareness", str(config["red_awareness"])]
+            if config.get("blue_loss_cost") is not None:
+                cmd += ["--blue-loss-cost", str(float(config["blue_loss_cost"]))]
+            if config.get("red_policies"):
+                cmd += ["--red-policies"] + [os.path.join(self._model_dir, str(p))
+                                             for p in config["red_policies"]]
+                if config.get("red_policy_frac") is not None:
+                    cmd += ["--red-policy-frac", str(float(config["red_policy_frac"]))]
         for key, flag, cast in (("sp_scripted_frac", "--sp-scripted-frac", float),
                                 ("sp_newest_frac", "--sp-newest-frac", float),
                                 ("sp_snapshot_steps", "--sp-snapshot-steps", int),
