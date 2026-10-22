@@ -105,6 +105,7 @@ class StickPilot(threading.Thread):
         self.rd_frames = self.aa_frames = 0
         self.first_bug = None
         self.obj_full_said = False    # said once: the object list held only our chaff and flares
+        self.bug_page_saved = False   # the whole radar page saved once, right after a bug
 
     # ── what the main thread calls ──────────────────────────────────────
     def command(self, hdg, alt, spd, dive=None, climb=None):
@@ -436,9 +437,12 @@ class StickPilot(threading.Thread):
                 if self._state() in ("designated", "stt"):
                     # the page once bugged: do its contact and track lists show the target? (they read 0 at every
                     # attempt so far, even 0.5 s before a bug: if they stay 0 here, they are not where tracks go)
-                    info = cockpit.fcr_info(cockpit.ind_text(r, self.link, cockpit._fcr_id(r)))
+                    page = cockpit.ind_text(r, self.link, cockpit._fcr_id(r))
+                    info = cockpit.fcr_info(page)
+                    # the whole page too, once: how DCS lists a real track (the counters read 0 so far)
                     r.note({"ev": "bug_ok", "mode": info["mode"], "contacts": info["contacts"],
-                            "tracks": info["tracks"]})
+                            "tracks": info["tracks"], **({} if self.bug_page_saved else {"lines": page})})
+                    self.bug_page_saved = True
                     return True
                 lines = cockpit.ind_text(r, self.link, cockpit._fcr_id(r))
                 info = cockpit.fcr_info(lines)
@@ -447,7 +451,8 @@ class StickPilot(threading.Thread):
                         "target_az": None if az is None else round(az, 1)})
                 if any(x.strip().startswith("DLZ_AIM120") for x in lines):
                     r.note({"ev": "bug_ok", "mode": info["mode"], "contacts": info["contacts"],
-                            "tracks": info["tracks"], "by": "DLZ"})
+                            "tracks": info["tracks"], "by": "DLZ", **({} if self.bug_page_saved else {"lines": lines})})
+                    self.bug_page_saved = True
                     return True
         return False
 
