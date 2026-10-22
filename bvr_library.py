@@ -423,7 +423,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 18
+SIM_REV = 22
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -501,15 +501,47 @@ _SIM_REV_NOTES = {
         "that reached the target were scored misses at 10-11 m, and red's too (60 fights against DCS-like "
         "ADAPTIVE: ours 27 -> 34 hits of 39 -> 37, misses now 11-35 m). Missiles kill as in DCS; R-max "
         "is unchanged (8 envelope points identical), so no recalibration",
-    18: "2v1 red fights under the agent's rules, as 1v1 red has since SIM_REV 9: one "
+    18: "red as in DCS (five live fights of 15 October, all lost to red's first missile while the "
+        "policy only cranked): no missile has the 3-second support rule any more, ours and red's alike "
+        "(a DCS missile is not removed when its shooter loses the lock; 30% of red's were; support still "
+        "pays in accuracy, it no longer keeps the missile alive); the radar's azimuth "
+        "limit is drawn from 57-63 deg, not 51-69 (a 50 deg crank lost the track in many episodes and the "
+        "policy learned to break only when the track dropped, which DCS never did); the DCS-like red fires "
+        "at 0.72-0.90 of R-max (a fifth at 0.95-1.0), as the DCS AI did, not 0.95-1.0; the envelope "
+        "shaping term counts our R-max as launched along our heading (off the lead bearing: 0.94 at 50 deg "
+        "at 9 km, 0.81 at 5 km; the threat's already shrank as we turned away, ours did not). 1v1. Expect the "
+        "win rate to fall at first: cranking alone no longer defeats red's missiles",
+    19: "shots and crank sides (dcsfit_v4 in DCS, 20 October: 10 fire requests at 43-58 deg off the nose, 4 "
+        "never bugged, the 5 launched all ran out of energy; in the simulator its shots beyond 45 deg hit 4%, "
+        "within 71%; and it cranked to the same side in 99% of its choices whatever the geometry): the "
+        "policy may fire only within 40 deg of the nose (was 60; scripted red keeps 60) and inside the R-max a "
+        "launch along its present heading reaches (the off-axis factor, now in the fire mask too); three "
+        "inputs are appended: which way the target crosses our line of sight (signed aspect; trk_aspect is "
+        "unsigned), the signed line-of-sight rate, and range over the off-axis R-max. Older checkpoints are "
+        "widened with zero weights for them and fly as before until trained",
+    20: "a missile is a threat only while it closes on its target, and 3 s after (missile_sim.is_threat): "
+        "the RWR warning, the threat missile in the observation, the defence term, scripted red's defence "
+        "and the fight records go by it, in the simulator and in DCS alike. A defeated missile kept the "
+        "warning on until it was gone: a median 18 s after its closest approach in the simulator (up to "
+        "94 s), 146 s once in DCS (dcsfit_v5, 20 October), and the policy ran from it all that time. With "
+        "it, train_bvr.py --symmetric-policy: each choice averaged over the fight and its mirror image",
+    21: "the fight starts with a picture call: until the radar has a track, the heading choices are offsets "
+        "from the bandit's bearing at the start (it was 0, north, read at reset before any state: dcsfit_v6 "
+        "never found the bandit in 23 of 60 simulator fights, all timeouts). The autopilot keeps turning "
+        "the way it is banked when the heading error is beyond 150 deg the other way (f16_sim.turn_hold, "
+        "the stick pilot too): a command near the tail no longer reverses the bank at every crossing of 180",
+    22: "2v1 red fights under the agent's rules, as 1v1 red has since SIM_REV 9: one "
         "radar track per blue aircraft, fire only on a firm track of the aircraft it "
         "shoots at (also its second shot, at the other blue aircraft), each missile "
-        "guided on red's track of its target, so the support rule binds it. It also "
+        "guided on red's track of its target. It also "
         "gets the 1v1 opponents' cranks, defences, long shots, pressing, running and "
         "DCS speeds (2v1 had kept the pre-SIM_REV 9 red). Red's opening target is drawn "
         "per episode: the nearer blue aircraft in half the episodes, the farther or a "
         "random one in a quarter each, held until red's first launch (it always opened "
-        "on the nearer one, nearly always the lead). Each 2v1 aircraft's observation reads the run's episode length (t_norm went past 1 with --max-steps above 300), and the 2v1 end state's shaping potential is 0, as 1v1's since SIM_REV 16. 1v1 is unchanged",
+        "on the nearer one, nearly always the lead). Each 2v1 aircraft's observation reads the run's episode length (t_norm went past 1 with --max-steps above 300), and the 2v1 end state's shaping potential is 0, as 1v1's since SIM_REV 16. 1v1's SIM_REV 18 and "
+        "21 now reach 2v1 too: no missile has the support rule (2v1 builds its own world and had kept it for "
+        "all three aircraft), and each aircraft starts on a picture call, its heading choices offsets from "
+        "the bearing to its bandit until the radar has a track (they were offsets from north). 1v1 is unchanged",
 }
 
 

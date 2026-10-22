@@ -46,7 +46,7 @@ local CFG = {
   ind_every = 20,        -- every Nth frame look for the radar and HUD markers below (0: never)
   allow_click = true,    -- accept CLICK lines (some devices and commands are always refused, below)
   codes = nil,           -- {pitch=, roll=, rudder=, throttle=} to force the command numbers
-  version = 1,
+  version = 2,           -- 2: countermeasures panel MODE/PROGRAM/CH clicks pass; chaff and flare counts (cm)
 }
 if type(BVR_STICK_CFG) == "table" then
   for k, v in pairs(BVR_STICK_CFG) do CFG[k] = v end
@@ -151,7 +151,7 @@ local API = {"LoGetModelTime", "LoGetSelfData", "LoGetTrueAirSpeed", "LoGetIndic
   "LoGetVerticalVelocity", "LoGetAltitudeAboveSeaLevel", "LoGetAltitudeAboveGroundLevel",
   "LoGetADIPitchBankYaw", "LoGetVectorVelocity", "LoGetAngularVelocity", "LoGetEngineInfo",
   "LoGetWorldObjects", "LoGetTargetInformation", "LoGetLockedTargetInformation",
-  "LoGetPayloadInfo", "LoSetCommand", "LoGetMagneticYaw"}
+  "LoGetPayloadInfo", "LoSetCommand", "LoGetMagneticYaw", "LoGetSnares"}
 
 -- The axis command numbers: DCS's own table if it can be read, else 2001-2004.
 local CODES = {pitch = 2001, roll = 2002, rudder = 2003, throttle = 2004}
@@ -279,6 +279,9 @@ end
 local CLICK_DENY_DEVICE = {[2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true,
                            [8] = true, [10] = true, [32] = true}
 local CLICK_DENY = {["19:3003"] = true, ["19:3004"] = true, ["19:3005"] = true, ["19:3018"] = true}
+-- ...but three countermeasures-panel controls pass, so the pilot can set up chaff (version 2): the MODE knob
+-- (3010), the PROGRAM knob (3009) and the CH (chaff) switch (3007). The panel's JETT switch stays refused.
+local CLICK_ALLOW = {["32:3010"] = true, ["32:3009"] = true, ["32:3007"] = true}
 
 -- ── input ──────────────────────────────────────────────────────────────
 local function num(s, lo, hi)
@@ -313,7 +316,8 @@ local function handle(line)
   elseif cmd == "CLICK" and CFG.allow_click then
     local dev, c, v = num(w[2]), num(w[3]), num(w[4])
     if dev and c and v then
-      if CLICK_DENY_DEVICE[dev] or CLICK_DENY[string.format("%d:%d", dev, c)] then
+      local key = string.format("%d:%d", dev, c)
+      if (CLICK_DENY_DEVICE[dev] and not CLICK_ALLOW[key]) or CLICK_DENY[key] then
         send({ev = "click", ok = false, err = "refused", dev = dev, cmd = c, value = v, rt = now()})
       else
         -- how the command reaches the cockpit: "c" (default) the clickable element, as a mouse click;
@@ -428,6 +432,7 @@ local function emit()
                locked = plain(try("LoGetLockedTargetInformation"))}
   end
   if S.n % CFG.payload_every == 1 then f.pay = plain(try("LoGetPayloadInfo")) end
+  if S.n % CFG.objects_every == 0 then f.cm = plain(try("LoGetSnares")) end   -- chaff and flares left
   if CFG.ind_every > 0 and S.n % CFG.ind_every == 0 then
     local okd, rd = pcall(scan_displays)
     if okd then f.rd = rd end

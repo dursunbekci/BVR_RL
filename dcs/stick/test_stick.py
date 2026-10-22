@@ -274,7 +274,8 @@ def test_click():
     refused = ["CLICK 10 3006 1",                           # CPT_MECH: ejection handle
                "CLICK 10 3003 1", "CLICK 7 3001 1",         # canopy, landing gear handle
                "CLICK 6 3003 1", "CLICK 4 3001 1", "CLICK 3 3001 1", "CLICK 2 3001 1",
-               "CLICK 32 3004 1",                           # countermeasures jettison
+               "CLICK 32 3004 1", "CLICK 32 3015 1",        # countermeasures jettison (switch, iterator)
+               "CLICK 32 3011 1", "CLICK 32 3001 1",        # the rest of the panel: dispense button, RWR source
                "CLICK 19 3003 1", "CLICK 19 3004 1", "CLICK 19 3005 1", "CLICK 19 3018 1"]   # stores jettison, ALT REL
     for text in refused:
         m.send(text)
@@ -290,13 +291,21 @@ def test_click():
     assert [dv[k] for k in ("CONTROL_INTERFACE", "ELEC_INTERFACE", "FUEL_INTERFACE", "HYDRO_INTERFACE", "ENGINE_INTERFACE",
                             "GEAR_INTERFACE", "OXYGEN_INTERFACE", "CPT_MECH", "CMDS")] == [2, 3, 4, 5, 6, 7, 8, 10, 32]
     assert defs["devices"]["MMC"] == 19 and defs["commands"]["cmds"]["Jett"] == 3004
+    # three countermeasures-panel controls pass (version 2): MODE, PROGRAM, CH
+    cm = defs["commands"]["cmds"]
+    assert (cm["Mode"], cm["Prgm"], cm["ChExp"]) == (3010, 3009, 3007)
+    n = len(clicks())
+    for text in ("CLICK 32 3010 0.2", "CLICK 32 3009 0.1", "CLICK 32 3007 1"):
+        m.send(text)
+    m.run(0.2)
+    assert clicks()[n:] == [(32, 3010, 0.2), (32, 3009, 0.1), (32, 3007, 1)], clicks()[n:]
     # a failing DCS call is reported, not fatal
     m.L.execute("function GetDevice(id) error('no device') end")
     m.send("CLICK 16 3010 1")
     m.run(0.1)
     last = [d for d in m.lines() if d["ev"] == "click"][-1]
     assert last["ok"] is False and "no device" in last["err"], last
-    print("  CLICK ....................... OK  (5 cockpit commands pass; 12 dangerous ones refused, the deny list "
+    print("  CLICK ....................... OK  (5 cockpit commands and 3 chaff-panel ones pass; 15 refused, the deny list "
           "matches the module's numbers; a DCS error is reported)")
 
 
@@ -621,6 +630,73 @@ def test_g_loop():
           f"late: factor {hold.nz_gain:.2f} learnt (0.71), altitude within {climb:.0f} m through turn and roll-out; bank limit 80/{lims[200.0][1]:.0f}/"
           f"{lims[150.0][1]:.0f} deg at 312/200/150 m/s; a right stick with DCS's slow g: factor at least "
           f"{facs[None]:.2f}, {facs[(0.01, 0.01)]:.2f} without the lag expected)")
+
+
+def test_turn_hold():
+    """SIM_REV 21: commands alternating either side of the tail every second (dcsfit_v6 in DCS, 21 October: 161
+    and 191 deg while flying 0, red behind and no track) turn the pilot round; it reversed the bank every second
+    for a minute and never turned."""
+    import stick_test
+    from fake_export import FakeLink
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    run = stick_test.Run(FakeLink(), None, "turn", stick_test.Limits(min_agl=0, min_alt=0))
+    f0 = run.next()
+    hold = stick_test.Hold(gains, bank_max=math.radians(80), nz_max=8.0)
+    sign, revs = [0], [0]
+
+    def fly(f, tau):
+        side = 161.0 if int(tau) % 2 == 0 else 191.0
+        if abs(f.bank) > math.radians(15):
+            sg = 1 if f.bank > 0 else -1
+            revs[0] += bool(sign[0] and sg != sign[0])
+            sign[0] = sg
+        return hold.axes(f, f0.hdg + math.radians(side), f0.alt, v=None, dive=math.radians(25), climb=math.radians(15))
+    frames = stick_test.drive(run, 30.0, fly)
+    turned = max(abs(math.degrees(stick_test.wrap_pi(f.hdg - f0.hdg))) for f in frames)
+    assert turned > 150 and revs[0] <= 1, (turned, revs[0])
+    print(f"  turn hold ................... OK  (commands 161/191 deg off the tail, alternating: turned {turned:.0f} deg, "
+          f"{revs[0]} bank reversal(s))")
+
+
+def test_aa_recovery():
+    """The A-A master mode when the first missile-override click does nothing (live_..._090924, 21 October: the HUD
+    stayed in NAV for 125 s and all four fire requests timed out as "no TWS track bugged"): the pilot cycles the
+    switch through centre, the HUD comes to A-A, and a fire request then launches. With the HUD stuck in NAV the
+    timeout says so."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    out = {}
+    for case in ("stuck aft", "NAV for good"):
+        link = FakeLink(cockpit_defs=defs)
+        link.cockpit.dogfight = -1.0                  # aft already, HUD in NAV: a click to -1 does nothing
+        link.cockpit.icp_aa_works = False             # and the ICP press did nothing either (15 and 21 October)
+        if case == "NAV for good":
+            link.cockpit.dogfight_works = link.cockpit.icp_aa_works = False
+        with tempfile.TemporaryDirectory() as d:
+            p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+            p.start()
+            try:
+                p.fire()
+                t0, ev = _time.time(), []
+                while not any(k == "fire" for k, *_ in ev) and _time.time() - t0 < 60:
+                    _time.sleep(0.05)
+                    ev += p.drain_events()
+            finally:
+                p.stop()
+        out[case] = (link.cockpit.aa, [e for e in ev if e[0] == "fire"], p.cockpit_summary())
+    _, fire, cp = out["stuck aft"]                  # (the pilot puts the switch back to centre when it stops)
+    assert fire and fire[0][1] == "launched" and cp["aa_pct"] > 50 and cp["first_bug_km"] != "", out["stuck aft"]
+    _, fire, cp2 = out["NAV for good"]
+    assert fire and fire[0][1] == "timeout" and "not in A-A" in fire[0][2] and cp2["aa_pct"] == 0, out["NAV for good"]
+    print(f"  A-A recovery ................ OK  (override already aft with the HUD in NAV: cycled through centre, "
+          f"A-A, launched; HUD in A-A {cp['aa_pct']}% of the run, first bug at {cp['first_bug_km']} km; a HUD stuck in "
+          f"NAV is named in the timeout)")
 
 
 def test_manoeuvre():
@@ -1135,6 +1211,60 @@ def test_install():
     print("  install_export.py ........... OK  (block in and out byte for byte, loads the right file, install/undo)")
 
 
+def test_own_missile():
+    """A launch is our own missile just off the rail: not the bandit's missile, chaff or a flare, nor one far off."""
+    from pilot import StickPilot
+    me = {"coal": 2, "x": 0.0, "z": 0.0}
+    ours = {"l1": 4, "l2": 4, "coal": 2, "x": 300.0, "z": 50.0}
+    assert StickPilot._own_missile(ours, me)
+    assert not StickPilot._own_missile(dict(ours, coal=1), me)                 # the bandit's
+    assert not StickPilot._own_missile(dict(ours, l2=8), me)                   # not a missile (countermeasure)
+    assert not StickPilot._own_missile(dict(ours, x=20000.0), me)              # far away: an earlier one
+    assert StickPilot._own_missile({"l1": 4, "l2": 4}, None)                   # no position data: as before
+    print("  own-missile launch check .... OK  (own side, missile type, near the jet)")
+
+
+def test_chaff():
+    """The pilot sets the countermeasures panel up in its radar job and, while chaff is on, presses CMS forward
+    every CHAFF_EVERY s (on the fake cockpit each press of MAN program 1 is one chaff); it says when the jet's
+    chaff count goes down; nothing goes out once chaff is off."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    link = FakeLink(cockpit_defs=defs)
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+    with tempfile.TemporaryDirectory() as d:
+        p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+        p.start()
+        try:
+            p.radar()
+            t0 = _time.time()
+            while not p.cmds_tried and _time.time() - t0 < 30:
+                _time.sleep(0.01)
+            assert link.cockpit.cmds_ch and abs(link.cockpit.cmds_mode - 0.2) < 1e-9, "panel not set up"
+            assert link.cockpit.chaff == 60, "chaff before any missile"
+            p.chaff(True)
+            t0 = _time.time()
+            while link.cockpit.chaff > 55 and _time.time() - t0 < 60:
+                _time.sleep(0.01)
+            p.chaff(False)
+            _time.sleep(0.5)
+            n_off = link.cockpit.chaff
+            _time.sleep(1.0)
+            ev = p.drain_events()
+        finally:
+            p.stop()
+    assert n_off <= 55 and link.cockpit.chaff == n_off, (n_off, link.cockpit.chaff)
+    assert any(k == "chaff" and st == "setup" for k, st, _ in ev), ev
+    assert any(k == "chaff" and st == "ok" for k, st, _ in ev), ev
+    assert p.chaff_first == 60 and p.cms_presses >= 5, (p.chaff_first, p.cms_presses)
+    print(f"  chaff ....................... OK  (panel MAN / program 1 / CH on; {p.cms_presses} CMS presses, "
+          f"chaff 60 -> {link.cockpit.chaff}; none once off)")
+
+
 if __name__ == "__main__":
     if lua() is None:
         print("lupa is not installed (pip install lupa): skipped")
@@ -1150,10 +1280,14 @@ if __name__ == "__main__":
     test_roll_lead()
     test_cockpit()
     test_g_loop()
+    test_turn_hold()
+    test_aa_recovery()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
     test_fire_delay()
     test_stall_message()
     test_install()
-    print("17/17 passed")
+    test_own_missile()
+    test_chaff()
+    print("21/21 passed")

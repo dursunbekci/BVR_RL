@@ -631,3 +631,269 @@ against a target flying straight (0.03-0.7 m at 500 Hz). Now the last 2.5 km of 
 12 misses -> 34 / 3 (hits at about 1 m), red's misses now 11-490 m (real evasion). R-max is unchanged at 8 envelope
 points, so no recalibration. Still to look at: red's missiles that die because red's radar loses us (14-24 of 102 in
 those fights; none in the DCS fight, where the DCS AI kept us in its radar).
+
+**A launch that was not ours (15 October, dcsfit_v3_selfplay, live_20261015_152411)**: the first fire request printed
+`fire launched at 68.7 s: HUD None -> None MRM`, yet the episode ended with 0 shots: DCS reported no missile from BLUE-1.
+The HUD count could not be read (None: the HUD did not draw `N MRM`), so the fire job went by new world objects alone, and
+it took any new weapon object (level 4) for our launch: the bandit's missile or a countermeasure would do. A launch now has to
+be a missile (level 4 4) of our own coalition within 5 km of the jet, and the launched line names it (`AIM_120C off the
+rail`). A request that times out now says whether the HUD was in A-A and showed the AIM-120 selected, and the radar's lock
+state, so the next run tells why no missile left the rail.
+
+**Why nothing left the rail (same run, its cockpit log `stick_20261015_152411_live.jsonl`)**: the HUD never drew the A-A
+master mode: `rd.aa` and `rd.msl120` were false in all 453 display reads from 0 to 109 s, while the HUD itself was read (its
+target locator line `tll` came on at 35 s, the bug) and the payload showed four AIM-120C on stations 1, 2, 8 and 9 with
+`CurrentStation` 0 (no weapon selected). The radar job pressed the ICP A-A button every 15 s (it does so whenever the HUD reads
+not-A-A) and the HUD stayed in NAV: the ICP press does not work from this route in a live run. The radar ran in TWS and bugged
+the target in NAV all the same, so only the release failed. The `AIM_120C` at 68.8 s was RED's (coalition 1, 42 km away)
+and at 108.5 s RED's second. The radar job and each fire job now put the throttle's DOGFIGHT switch to MISSILE OVERRIDE
+(HOTAS device 16 command 3030, value -1: the HOTAS route that target management and weapon release take; a switch position,
+not a toggle) and press the ICP A-A button once only if the HUD still reads not-A-A; the console says which worked
+(`radar: A-A master mode by the missile override`) or that the HUD stayed out of A-A. The switch goes back to centre at the
+end of the episode. To check by hand in a mission: `python dcs\stick\stick_test.py click hotas.THROTTLE_DOG_FIGHT --value -1`
+(the HUD should show `4 MRM`), `--value 0` back to centre.
+
+## Five live fights with dcsfit_v3_selfplay, SIM_REV 18 and chaff (15 October)
+
+**The fights** (seeded missions, `dcs_live.py --stick`, missiles leaving the rail by missile override): one mutual kill,
+four shot down. In all five the DCS AI fired first, at 42.7-49.5 km (0.73-1.02 of its R-max against us, median 0.77), and
+its first missile hit every time. The policy shot twice (42.7 km, the same second as red; 31.8 km with red's missile in the
+air) and under fire never defended: it held a +30 to +50 deg crank, climbed, and in the last 10 s before impact turned 90 deg
+or more at no decision (P(break) 0.2-4%).
+
+**Why it did not defend.** Replayed through the policy, the DCS inputs gave the same RWR picture as the simulator (launch
+warning, time to impact, seeker active, the last on earlier in DCS). In the simulator dcsfit_v3 broke with under 10 s to
+impact at 3% of decisions while it held a radar track, 4% while coasting, 89% with none; with the track inputs of the DCS
+frames set to "no track" P(break) rose from about 0.005 to 0.1-0.95. It had learned to break when the track dropped. The
+simulated radar's azimuth limit was drawn from 51-69 deg per episode, so a 50 deg crank lost the track in many episodes
+just as red's missile arrived; the F-16's radar in DCS held it at 56 deg off the nose to impact. And cranking alone was
+enough in the simulator: of red's long shots (beyond 38 km) 5 of 36 hit; 10 were removed by the 3-second support rule
+(red turned away and its radar lost us), 9 ran out of energy and 12 missed in the endgame by 50-460 m against a target only
+cranking (red fired at 0.95-1.0 of R-max, 64.7 km median, and its missiles arrived slow). In DCS, 5 of 5 from 0.75.
+
+**SIM_REV 18** (1v1; `bvr_library._SIM_REV_NOTES[18]`):
+
+- No missile has the 3-second support rule (`BvrEnv.SUPPORT_RULE = False`, `AIM120.support_rule`), ours, a scripted
+  red's and a self-play snapshot's alike: without its shooter's guidance a missile flies on to the extrapolated last
+  estimate and turns its seeker on as usual, as a DCS missile does when its shooter loses the lock. Support still pays (a
+  missile on fresh guidance aims where the target is, an unsupported one where it was going); it is no longer required to
+  keep the missile. `dcs_live.py` now leaves every missile to DCS by default (`--support-rule dcs`); `--support-rule
+  training` is the old rule, both sides, for checkpoints trained before SIM_REV 18. (A first version of this change kept the
+  rule for our missiles and, in `dcs_live.py --support-rule training`, still removed red's DCS missiles when red's
+  simulated radar lost us, the opposite of training: now one rule for both, in training and in DCS.)
+- The radar's azimuth limit is drawn from 60 deg x (1 +- 0.05), 57-63 deg (`RadarSim.FOV_AZ_SPREAD`; was 0.15), ours and
+  red's; range and noise randomisation unchanged.
+- The DCS-like red (ADAPTIVE LONG_SHOT) fires at 0.72-0.90 of R-max, a fifth of episodes at 0.95-1.0 (was 0.95-1.0).
+
+Measured, dcsfit_v3_selfplay against the DCS-like red, the same 60 starts:
+
+| | SIM_REV 17 | SIM_REV 18, rule off for red only (first version) | SIM_REV 18 |
+|---|---|---|---|
+| red's missiles | 110 | 75 | 72 |
+| hit | 27 (25%) | 22 (29%) | 19 (26%) |
+| removed by the support rule | 33 | 0 | 0 |
+| ran out of energy | 16 | 29 (22 after our jet turned cold, guidance long lost) | 32 |
+| missed in the endgame | 19 (8 within 50 m) | 16 (10 within 50 m) | 14 (11 within 50 m) |
+| our missiles: hit / ran out of energy / endgame miss | | | 41 / 31 / 5 of 82; 17 ended without our guidance, 6 of them hits (the rule would have removed all 17) |
+| score / win / loss | 0.60 / 47% / 27% | 0.55 / 47% / 37% | 0.56 / 47% / 35% |
+| we fired first | 3% | 17% | 17% |
+
+Turning away from red no longer kills red's missile; only defeating the missile does (running it out of energy cold,
+or beating it in the endgame), and the track no longer drops at a 50 deg crank, so the inputs left to defend on are the
+missile ones (RWR warning, time to impact, seeker active), which look the same in DCS. Still easier than DCS (5 of 5);
+the next model has to learn the defence there. Fuze radius left at 10 m: at SIM_REV 17 a 15 m fuze would have turned 1 of
+red's 19 endgame misses into a hit and none of ours.
+
+**Chaff (our jet, DCS only; the simulator has no countermeasures).** The radar job sets the countermeasures panel once:
+MODE to MAN, PROGRAM to 1, CH (chaff) ON. While a missile is inbound with its seeker active or under 20 s from impact
+(`dcs_live.chaff_wanted`, from the policy's own RWR inputs), the pilot presses CMS forward for 0.3 s every 1.5 s (each press
+dispenses manual program 1), from the frame callback, so also during a radar or fire job. The console says when the panel is
+set (`chaff: countermeasures panel MAN, program 1, CH on (N chaff, M flares)`), when the count goes down
+(`chaff: dispensing (60 -> 59)`) or that four presses changed nothing; `results.csv` gains `chaff_presses` and
+`chaff_used`; `--no-chaff` turns it off. It needs **bvr_stick_export.lua version 2**: version 1 refused the whole
+countermeasures panel; version 2 lets its MODE (32 3010), PROGRAM (32 3009) and CH (32 3007) controls through (JETT and the
+rest stay refused) and sends the chaff and flare counts (`LoGetSnares`, `cm` in the telemetry). Re-install it:
+`python dcs\stick\install_export.py`. Whether chaff decoys red's AIM-120 in DCS, and how often, is not modelled in training.
+
+**Going direct, and the envelope term (SIM_REV 18, 15 October).** dcsfit_v3 cranks 30-50 deg before its first shot. Forced
+to fly at red until either side fired and to shoot inside a set fraction of R-max (then flown as trained), against the
+DCS-like red at SIM_REV 18, the same 60 starts: as trained 0.56 (win 47%, loss 35%); hot, shooting inside 0.85 of R-max,
+0.53 (win 28%: the missiles arrived slow); inside 0.70, **0.68** (win 52%, loss 15%); inside 0.55, 0.64. Going direct pays
+in the simulator now; shooting at the edge does not. No reward for either was added: the shaping is potential-based
+(gamma*phi' - phi, phi 0 at the end), so it cannot change which tactic wins, and a bonus would also pay where it is wrong.
+
+The envelope term (our R-max band minus the threat's) had a slant. The threat's R-max is computed for our aspect, so it
+shrinks as we turn away, but ours was the table's, launched at the target, whatever our heading, so cranking paid at once
+and pointing never did. Ours is now scaled by the R-max an off-axis launch keeps (`BvrEnv._offaxis_factor`, shaping only;
+the inputs and the fire mask keep the table's), measured with sweep_envelope's idealised shot, AIM-120C-DCS against a
+target flying at us:
+
+| off the lead bearing | 15 | 30 | 45 | 60 | 75 | 90 deg |
+|---|---|---|---|---|---|---|
+| launched at 5 km | 0.99 | 0.95 | 0.88 | 0.69 | 0.46 | 0.19 |
+| launched at 9 km | 0.99 | 0.98 | 0.96 | 0.92 | 0.87 | 0.80 |
+
+The angle is to the lead (collision) bearing, so cranking toward a crossing target's lead point costs nothing. The effect
+is small: at 9 km, red at Mach 0.9 flying at us, the term's gain from a 50 deg crank falls from +0.23 to +0.19 at 70 km
+(+0.21 to +0.19 at 45 km). Most of the crank's pay is real: it cuts red's R-max against us from 98 to 58 km, ours by 6%.
+What decides the tactic is the fight's outcome, which SIM_REV 18 changed; check v4's heading before its first shot.
+
+## Fight records: the same log for the simulator and DCS (20 October)
+
+Every 1v1 fight now ends with a record (`bvr_report.py`, `info["report"]` from `BvrEnv`), written one JSON line per fight
+by WATCH (`watch_runs/watch_<time>_<checkpoint>_<opponent>.jsonl`) and by `dcs_live.py` (`dcs_runs/episodes.jsonl`), so a
+fight in the simulator and one in DCS read the same way:
+
+- **red**: the bandit's style. In the simulator ADAPTIVE is `DCS-like` (shoots first from long range and presses, the
+  style the DCS AI fights in), `runner`, or `defence shallow / deep_beam / deep_cold`; a self-play snapshot; in DCS
+  `DCS AI`. WATCH's default ADAPTIVE mix has about a third DCS-like.
+- **missiles**, ours and red's: at launch the range, the shooter's r/Rmax (red's from the truth, plus our estimate of it),
+  how far off the shooter's nose the target was, both aircraft's speed and altitude; at the end HIT, KINEMATIC (out of
+  energy), ENDGAME with the miss distance, or still flying; the time of flight and the longest it flew without its
+  shooter's guidance.
+- **defence**, each red missile at us: the RWR warning and the time to impact then, our heading choices while it flew,
+  the first turn of 90 deg or more (time to impact, our radar track then), the chaff presses while it flew (DCS), how
+  it ended. This is the check on the DCS failure of 15 October: no break while the track was held.
+- **first**: who fired first, and by how many seconds.
+- **phases**: heading choices (|offset|) before our first shot, while our missile flies, under fire, and after.
+- **track_losses**: each loss of the radar track, how long, and its likely cause (outside the azimuth limit, beyond
+  the radar's range, low closure, other).
+- **timeout**, for a fight out of time: range, both aspects, closure, missiles left on each side, fuel, a cause (red
+  running and we follow / turned away, both turned away, red cranking or beaming, both pointing, both out of missiles),
+  our last 60 heading choices.
+
+WATCH STATISTICS gains BY RED STYLE, FIRST SHOT, DEFENCE, OUR MISSILES, HEADING BY PHASE, OUT OF TIME and RADAR TRACK
+LOSSES. `dcs_live.py`'s `results.csv` gains `red_style`, `first_shot`, `first_gap_s`, `red_missiles`, `red_hits`,
+`broke`, `broke_with_track`, `tti_at_break_s`, `chaff_per_defence`, `timeout_cause`, `track_losses`, and how well the
+stick pilot flew the commands, a second after each (`hdg_err_med_deg`, `hdg_err_p90_deg`, and `alt_as_asked_pct`: the share of decisions whose climb, descent or level was flown as asked; the altitude command is relative, the present altitude plus the action's step, so its distance from the altitude flown is about the step by design); the console
+prints each red missile's defence and who fired first.
+
+## dcsfit_v4 in DCS, and SIM_REV 19 (20 October)
+
+**Five live fights** (seeded missions, `dcs_live.py models_bvr\dcsfit_v4.zip --stick`): five losses, but not the way
+v3 lost. v4 fired first in two, defeated 4 of red's missiles (v3: none) and broke from 6 of 7 (3 with the track
+held); red's next missile then hit, after breaks 13, 9 and 3 s before impact, twice after v4 had dived to the 1 km
+floor and stayed low and slow. All ten fire requests were made with red 43-58 deg off the nose (v4 cranks before it
+shoots): four never got a TWS bug ("no TWS track bugged in 10 s", the target at the edge of the scan) and the five
+launched all ran out of energy (78-100 s of flight) against a DCS AI turning cold. The simulator says the same: of
+v4's shots beyond 45 deg off the nose 4% hit (balanced; aggressive 0%), within 45 deg 71%.
+
+**One crank side.** Before its first shot 99% of v4's off-target heading choices put red on its left (a + offset),
+whether red was on its right or left and whichever way red crossed; mirrored inputs flipped the choice in 2% of
+decisions. Nothing in the simulator prefers a side (red's crank and notch sides are random, starts are mirrored); the
+policy cannot see which way red crosses its line of sight (trk_aspect is unsigned, 0-180 deg, and so is los_rate),
+so it settled on one side. On the same 60 starts v4 scored 0.83 and its mirror image 0.76 (noise), but the better
+side per start 0.97 (an upper bound): the side matters per geometry.
+
+**SIM_REV 19** (`bvr_library._SIM_REV_NOTES[19]`):
+
+- The policy fires only within 40 deg of the nose (`BvrEnv.MAX_OFF_BORESIGHT_DEG`, was 60; scripted red keeps 60),
+  and only inside the R-max a launch along its present heading reaches (`OFFAXIS_IN_MASK`, the off-axis factor).
+- Three inputs at the end of each frame (`GEO_OBS_LABELS`): `trk_aspect_side` (which way red flies across our line of
+  sight, + to our right), `los_rate_signed` (+ clockwise) and `r_over_rmax_axis` (range over the off-axis R-max).
+  `bvr_compat` widens older checkpoints with zero weights for them: widened dcsfit_v4's action probabilities do not
+  change at all with them, so a run resumed from v4 starts as v4 flies.
+- `dcs_live.py --point-before-fire DEG` (a DCS test, not trained for): a fire request first turns the nose to within
+  DEG of the target (up to 10 s), holds it through the bug and the release; the console says how far and how long
+  (`point: nose to the target before the release: -52 -> -18 deg in 4.5 s`).
+- `dcs_live.py --fire-cone 60` flies a checkpoint trained before SIM_REV 19 under its own fire rule (60 deg, the
+  table's R-max): under the 40 deg rule dcsfit_v4, which cranks 30-50 deg before shooting, fired 2 shots in 60
+  simulated fights against the DCS-like red (14 with its actions sampled, half of them hits). To test pointed shots
+  with v4 in DCS: `--fire-cone 60 --point-before-fire 20`.
+
+## dcsfit_v5 in DCS, and SIM_REV 20 (20 October)
+
+**dcsfit_v5** (3M steps from v4, SIM_REV 19) against the DCS-like red in the simulator, the same 60 starts: balanced
+0.71, aggressive 0.85 (v4 under its own 60 deg rule 0.83); 1% of its shots beyond 40 deg off the nose (v4 44%), median
+21-22 deg; red's missiles hit it 14-19% (v4 25%), and under fire it turns away at 52-59% of decisions (v4 27%). It
+still cranked to the + side in 99% of its choices, whatever the geometry (mirrored inputs flipped 3%): the new
+crossing inputs went unused in 3M steps.
+
+**In DCS (live_20261020_165232)** red's first missile was defeated (v5 broke 29 s before impact, the track held), but
+DCS kept it flying until 301 s (249 s of flight), and the RWR built from DCS's missile list warned for 146 s: v5 ran
+from it, climbing to 12.9 km, until red fired again (250 s, 313 s) and hit. In the simulator a defeated missile also
+kept the warning on, until it was gone: a median 18 s after its closest approach (up to 94 s). All three of v5's fire
+requests went unbugged ("no TWS track bugged in 10 s"): one at 83 km, 9 deg off the nose; two at 69 and 54 km, 32-36
+deg off, but the policy kept cranking (+40, +50) through the 10 s the bug may take and the target drifted to 45-47 deg.
+
+**SIM_REV 20** (`bvr_library._SIM_REV_NOTES[20]`):
+
+- A missile is a threat only while it closes on its target (closing faster than 20 m/s), and 3 s after
+  (`missile_sim.is_threat`, `THREAT_CLOSING_MPS`, `THREAT_HOLD_S`): the RWR warning, the missile list's `threat` flag,
+  the threat missile in the observation and the defence term, scripted red's defence and the fight records'
+  "under fire" go by it, in `sim_world.py` and `dcs_world.py` alike. A missile that has overshot or run out of
+  energy drops off in 3 s, as a real RWR stops warning once the seeker loses the aircraft.
+- The stick pilot holds the nose where it was at the request through the bug and the release (unless
+  `--point-before-fire` points it first), so the target stays in the TWS scan while the radar bugs it.
+- `train_bvr.py --symmetric-policy` (GUI: SYMMETRIC POLICY, on by default): each choice is the average of the
+  policy's logits for the fight as seen and, mirrored back, for its mirror image (`bvr_policy.AsymmetricMaskablePolicy`,
+  `MIRROR_LABELS`). In a mirror-symmetric world a policy left to itself settles on one side; averaged, a choice not
+  tied to the geometry comes out even, so the side has to come from the inputs that tell left from right. Exactly
+  mirror-equivariant (a test checks it, after training too); stored in the checkpoint's policy_kwargs, so a resumed
+  checkpoint is switched over and every checkpoint the run saves, self-play snapshots included, keeps it. Off for
+  older checkpoints, which fly as before.
+
+## dcsfit_v6 in DCS, and SIM_REV 21 (21 October)
+
+**dcsfit_v6** (3M steps, SIM_REV 20, symmetric policy) in five live fights: one kill, four losses. Two faults, both
+in code the simulator and DCS share:
+
+- **It did not come back after running (live_20261021_093711).** Red started 171 deg off the nose, outside the
+  radar's 60 deg, so v6 never had a track. Without a track the heading choices are offsets from a held reference, and
+  that reference was set in `reset()` from a state not received yet: 0, north. v6 flew 330-345 deg (offsets -30/-15
+  from north) for 240 s with red 100-180 deg off the nose, until red shot it from 7 km. In the simulator against the
+  DCS-like red, the same: 23 of v6's 60 fights never found the bandit (all timeouts), 55% of its decisions had no
+  track, and the reference was a median 164 deg off red's true bearing.
+- **It rocked its wings with a missile behind (093321 from 136 s, 090924 from 186 s).** With red behind and no track,
+  v6 alternated -15/+15 (-30/+30) every second around the held bearing to red, which was behind it: commands 161 and
+  191 deg while flying 0 deg. Both the stick pilot and the simulator's autopilot took the shorter way round, which
+  flips at 180 deg, so the bank reversed every second (+22/-22 deg) for 70 s and the jet never turned. The policy
+  wanted to come back; the autopilot could not. The simulator does the same (3 deg turned in 40 s, 39 reversals),
+  but v6 rarely alternated there.
+
+**SIM_REV 21** (`bvr_library._SIM_REV_NOTES[21]`):
+
+- The fight starts with a picture call (`BvrEnv.GCI_START`, `_start_ref`): until the radar has a track, the
+  heading choices are offsets from the bandit's bearing at the start, then from the last track's bearing, held, as
+  before. Self-play's red gets the same. In DCS the bearing comes from the start positions (`initial_ic`).
+- Turn hold (`f16_sim.turn_hold`, used by the simulator's autopilot and the stick pilot's `Hold`): a heading error
+  beyond 150 deg against the bank the aircraft is already in (over 10 deg) is flown the long way, so it keeps
+  turning. Alternating 161/191 deg off the tail now turns round in 12 s with no reversal.
+
+v6 itself, unchanged, on the SIM_REV 21 simulator against the DCS-like red (the same 60 starts, balanced): 67% kills,
+4 timeouts (was 33% and 33); decisions without a track 18% (was 55%), the reference a median 4 deg from red's true
+bearing. v5 on SIM_REV 20 for comparison: 40% kills, 7 timeouts. Both fixes apply to any checkpoint in DCS: no
+retraining is needed to fly v6 with them, though training on SIM_REV 21 lets the policy learn from starts it used
+to waste.
+
+**The fire timeouts (stick logs of 090242 and 090924).** Two different causes, neither the nose hold:
+
+- **090924: the HUD was in NAV for the first 125 s.** The display markers show no A-A symbology and no AIM-120
+  selected from the start until 125.4 s, so the radar never left RWS for TWS and all four fire requests (81, 66,
+  52, 42 km, red nose-on 1-17 deg off our nose) timed out as "no TWS track bugged in 10 s". The pilot's missile
+  override click did nothing and its one ICP A-A press did not help either; the old pilot on a fake cockpit with
+  the switch already aft and the HUD in NAV fails the same way, with the same message. The pilot now cycles the
+  switch through centre to override when the HUD stays in NAV, presses ICP A-A whenever the HUD has just said NAV,
+  tries again at every radar or fire job, and a timeout in NAV says so ("the HUD was not in A-A (NAV)").
+- **090242: the requests came before DCS's radar had a track to bug.** The HUD was in A-A from 1.2 s. The request
+  at 84 km (red 9-10 deg off, nose-on) timed out; the one at 74 km bugged at 67 km, after 10 s of target
+  management, and launched. The simulator's APG-68 holds a track on an F-16 from 77-104 km (90 km +-15%), so
+  the policy's inputs said TRACK where DCS had nothing yet. One fight is not enough to recalibrate on.
+
+dcs_live.py now keeps what the console said in `<episode>_console.txt` (the pilot's A-A, TWS, bug and fire events
+were only on screen), and results.csv records `hud_aa_pct` (the share of the fight with the HUD in A-A) and
+`first_bug_km` / `first_bug_t` (the range and time of DCS's first bugged track): over a few fights, the second
+says how far DCS's radar really tracks an F-16, for `library/builtin/radar/APG-68.json`.
+
+**live_20261021_142940 (dcsfit_v6 with SIM_REV 21 and the A-A recovery).** HUD in A-A the whole fight; wing rocking
+gone (4 bank reversals in 234 s, was 40 a minute); the track was lost cold and regained twice. Two DCS-side findings:
+
+- **Unlimited Weapons was on.** BLUE-1's AIM-120 count went 4 -> 2 and back to 4 three times, and the policy fired
+  eight missiles from four. The policy's count is now loaded minus fired, as in training (`DcsReplayWorld._wpn`), the
+  console warns once per aircraft, and results.csv counts `ammo_refills`. Turn the option off for comparable fights.
+- **The pilot flew the wreck.** After the hit (234.4 s) the episode waited 17 s for our last missile, a mutual kill
+  still being possible, and the pilot released the axes at every frame (-7 g). It now stops when BLUE-1 is down.
+
+The first bugged track came at 46.9 km, though the request at 71.5 km had red nose-on, 11 deg off and co-altitude;
+the same mission bugged at 67 km in 090242 and launched at 71.6 km in 140225. So the bugging, not DCS's detection
+range, is what varies; the fight's stick log (`stick_*_live.jsonl`) shows the radar page markers through it.

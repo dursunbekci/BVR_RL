@@ -280,7 +280,7 @@ class F16Aircraft:
         phi_lim  = min(self.cfg.PHI_MAX,
                        math.acos(min(1.0, math.cos(self.gamma)
                                      / (self.cfg.BANK_NZ_MARGIN * nz_avail))))
-        hdg_err  = _wrap_pi(hdg_cmd - self.chi)
+        hdg_err  = turn_hold(_wrap_pi(hdg_cmd - self.chi), self.phi)
         phi_cmd  = float(np.clip(self.cfg.K_HDG_PHI * hdg_err, -phi_lim, phi_lim))
         phi_err  = phi_cmd - self.phi
         phi_dot  = float(np.clip(self.cfg.K_PHI_ROLL * phi_err,
@@ -383,3 +383,19 @@ class F16Aircraft:
 
 def _wrap_pi(a: float) -> float:
     return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+TURN_HOLD_DEG = 150.0      # SIM_REV 21: heading errors beyond this keep the turn the aircraft is banked into
+TURN_HOLD_BANK_DEG = 10.0  # banked at least this far
+
+
+def turn_hold(err: float, bank: float) -> float:
+    """The heading error to fly (rad): the shorter way round, except that an error beyond TURN_HOLD_DEG against
+    the bank the aircraft is already in is flown the long way, so it keeps turning. Without this, a command
+    near the tail flips the shorter way at every crossing of 180 deg: in DCS a policy alternating -15/+15 off
+    a bandit straight behind (commands 161 and 191 deg, flying 0 deg) reversed the bank every second for a
+    minute and never turned round."""
+    hold, b = math.radians(TURN_HOLD_DEG), math.radians(TURN_HOLD_BANK_DEG)
+    if abs(err) > hold and abs(bank) > b and (err > 0) != (bank > 0):
+        return err + (2.0 * math.pi if bank > 0 else -2.0 * math.pi)
+    return err

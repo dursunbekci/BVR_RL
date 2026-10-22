@@ -55,7 +55,7 @@ from bvr_env import (BvrEnv, HDG_OFFSETS_DEG, ALT_DELTAS_M, DEG2RAD, RAD2DEG, G,
 from bvr_library import DEFAULT_PLATFORM, rcs_scale
 from bvr_opponents import BvrOpponentType
 from bvr_track_adapter import body_to_enu_matrix
-from missile_sim import _isa_a
+from missile_sim import _isa_a, THREAT_CLOSING_MPS, is_threat
 from sim_world import _enu_to_latlon
 
 FORMAT = "bvr_rl.dcs.v1"
@@ -207,8 +207,13 @@ class DcsRecording:
                         if d["t_hit"] is None:
                             d["t_hit"], d["hit_target"] = t, e["unit"]
             elif kind == "dead":
-                self.dead.setdefault(e["unit"], (t, e.get("cause", "dead")))
-            elif kind == "ammo":
+                # The bridge names the unit with getName(), which fails for some initiators (a wreck, a weapon); Lua
+                # then drops the nil field and the event comes without "unit" (dcsfit_v6 live, 21 October: a
+                # KeyError ended the run 90 s into the fight). Such an event cannot be told apart from noise; an
+                # aircraft that really died is still found by its kill or hit, or by leaving the frames.
+                if e.get("unit"):
+                    self.dead.setdefault(e["unit"], (t, e.get("cause", "dead")))
+            elif kind == "ammo" and e.get("unit"):
                 n = sum(int(i.get("count", 0)) for i in e.get("items", [])
                         if i.get("aam") and int(i.get("guidance", 0)) in RADAR_GUIDANCE)
                 self.ammo.setdefault(e["unit"], []).append((t, n))
@@ -298,6 +303,12 @@ class DcsRecording:
         rows = [n for (te, n) in self.ammo.get(name, []) if te <= t + 1e-9]
         return rows[-1] if rows else None
 
+    def ammo_refills(self, name, t=None) -> int:
+        """How often the unit's missile count went up (by t): DCS's Unlimited Weapons option puts a fired missile
+        back on the rail a few seconds later (live_20261021_142940: 4 -> 2 -> 4, eight shots from four)."""
+        rows = [n for (te, n) in self.ammo.get(name, []) if t is None or te <= t + 1e-9]
+        return sum(1 for a, b in zip(rows, rows[1:]) if b > a)
+
 
 class DcsLiveRecording(DcsRecording):
     """A recording that grows while DCS runs (dcs_live.py): extend() it with
@@ -359,6 +370,7 @@ class DcsReplayWorld:
 
     # ── SimWorld interface ───────────────────────────────────────────
     def reset(self, ic=None, episode_id: int = 0) -> None:
+        self._closing_t = {}              # weapon id -> time it last closed on its target (SIM_REV 20)
         self.episode_id = int(episode_id)
         self.t = self.t0
         self._t_prev = self.t0 - 1e-9
@@ -437,13 +449,16 @@ class DcsReplayWorld:
         }
 
     def _wpn(self, name, t) -> int:
-        n = self.rec.radar_missiles(name, t)
-        if n is not None:
-            return int(n)
-        plat = self.plats.get(name)
-        full = plat.wpn_count if plat is not None else 4
         shots = sum(1 for d in self.rec.weapons.values()
                     if d["shooter"] == name and d["t_shot"] is not None and d["t_shot"] <= t)
+        n = self.rec.radar_missiles(name, t)
+        if n is not None:
+            # At most the first report less the shots: with Unlimited Weapons on, DCS refills the rails and the
+            # count would never run out, as no count did in training.
+            loaded = self.rec.ammo[name][0][1]
+            return int(max(0, min(n, loaded - shots)))
+        plat = self.plats.get(name)
+        full = plat.wpn_count if plat is not None else 4
         return max(full - shots, 0)
 
     # ── missiles ─────────────────────────────────────────────────────
@@ -489,6 +504,14 @@ class DcsReplayWorld:
         rng = float(np.linalg.norm(los))
         closing = float(np.dot(vel - tk["vel"], los / max(rng, 1.0)))
         tgo = rng / closing if closing > 10.0 else 999.0
+        # A threat while it closes on its target, and THREAT_HOLD_S after (SIM_REV 20, as the simulator):
+        # DCS keeps a defeated missile flying for minutes, and the RWR built from its list warned all along.
+        if not hasattr(self, "_closing_t"):
+            self._closing_t = {}
+        last = self._closing_t.setdefault(d["id"], t)
+        if closing > THREAT_CLOSING_MPS:
+            self._closing_t[d["id"]] = last = t
+        threat = int(is_threat(t, last))
         handoff = self._handoff(d["shooter"], tgt)
         if rng < handoff:
             self._seeker.add(d["id"])
@@ -506,7 +529,7 @@ class DcsReplayWorld:
             "t_flight": round(t_flight, 3), "tgo_est": round(tgo, 2),
             "seeker_active": int(seeker), "needs_support": int(not seeker),
             "t_since_update": round(tsu, 3), "handoff_range": round(handoff, 0),
-            "guidance_valid": int(tsu == 0.0), "rng_to_target": round(rng, 1),
+            "guidance_valid": int(tsu == 0.0), "rng_to_target": round(rng, 1), "threat": threat,
             "vel": [round(float(x), 1) for x in vel],
         }
 
@@ -581,7 +604,7 @@ class DcsReplayWorld:
                 m["owner"] = 1 if owner == me else 2
                 m["target"] = 1 if tgt == blue else 2
             msl.append(m)
-            if owner != me and tgt == blue:
+            if owner != me and tgt == blue and m["threat"]:
                 inbound.append((dw, m))
         if inbound:
             dw, m = min(inbound, key=lambda x: float(np.linalg.norm(

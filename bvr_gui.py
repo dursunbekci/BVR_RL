@@ -531,6 +531,8 @@ class TrainingManager:
             cmd += ["--advance-hold-checks", str(int(config["advance_hold_checks"]))]
         if config.get("adaptive_dcs_frac") is not None:
             cmd += ["--adaptive-dcs-frac", str(float(config["adaptive_dcs_frac"]))]
+        if config.get("symmetric_policy"):
+            cmd += ["--symmetric-policy"]
         for key, flag, cast in (("sp_scripted_frac", "--sp-scripted-frac", float),
                                 ("sp_newest_frac", "--sp-newest-frac", float),
                                 ("sp_snapshot_steps", "--sp-snapshot-steps", int),
@@ -752,6 +754,12 @@ class EvalRunner:
                            msg=f"Eval vs {opponent_name}, {env._doctrine_cfg} doctrine")
             episode = 0
             n_max = int(config.get("n_episodes") or 0)     # 0: until stopped
+            # One line per fight (bvr_report.py): the same record dcs_live.py writes for DCS fights.
+            log_dir = HERE / "watch_runs"
+            log_dir.mkdir(exist_ok=True)
+            log_path = log_dir / (f"watch_{time.strftime('%Y%m%d_%H%M%S')}_"
+                                  f"{(ckpt_path.stem if ckpt_path else 'random')}_{opponent_name}.jsonl")
+            HUB.push({"type": "log", "src": "eval", "msg": f"Fight records: {log_path}"})
             while not self._stop_evt.is_set() and (n_max <= 0 or episode < n_max):
                 obs, info = env.reset()
                 sobs = stacker.reset(obs) if stacker else None
@@ -800,7 +808,17 @@ class EvalRunner:
                         "doctrine": step_info.get("doctrine", ""),
                         "bank_rev_per_min": round(60.0 * step_info.get("bank_reversals", 0)
                                                   / max(step_info.get("flight_time", 0.0), 1.0), 1),
-                        **_episode_facts(info.get("ic"), step_info, n_max)}
+                        **_episode_facts(info.get("ic"), step_info, n_max),
+                        "report": step_info.get("report")}
+                if meta["report"] and meta["outcome"] != "?":
+                    try:
+                        with open(log_path, "a", encoding="utf-8") as fh:
+                            fh.write(json.dumps({"episode": episode, "checkpoint": ckpt or "",
+                                                 "opponent": opponent_name, "doctrine": meta["doctrine"],
+                                                 "scenario": meta["scenario"], "mirrored": meta["mirrored"],
+                                                 "start_range": meta["start_range"], **meta["report"]}) + "\n")
+                    except OSError:
+                        pass
                 HUB.set_replay(list(frames), meta)
                 HUB.push({"type":"episode_end","meta":meta})
                 episode += 1

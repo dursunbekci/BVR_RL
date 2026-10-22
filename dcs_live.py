@@ -99,7 +99,7 @@ class DcsLiveWorld(DcsReplayWorld):
     BEHIND_WARN_S = 2.0     # warn when DCS's data is this far ahead of the policy
 
     def __init__(self, link, rec, blue, red, blue_platform=None, red_platform=None,
-                 shadow=False, log=print, support_rule="training", speed_boost=None,
+                 shadow=False, log=print, support_rule="dcs", speed_boost=None,
                  eta_lock=None):
         super().__init__(rec, blue, red, blue_platform, red_platform, t_start=rec.t_end)
         self.t_end = math.inf
@@ -110,6 +110,7 @@ class DcsLiveWorld(DcsReplayWorld):
         self.fire_pending = None             # world time a fire request went out
         self.fire_log = []                   # (t_sim, status)
         self.mission_ended = False
+        self.refill_said = set()             # units whose missiles DCS refilled (Unlimited Weapons), said once
         self.last_cmd = None
         self.t_behind_warned = -math.inf
         # The support rule (see _check_support): "training" applies the
@@ -237,6 +238,13 @@ class DcsLiveWorld(DcsReplayWorld):
         self._t_prev = self.t
         tlm = self.telemetry()                 # also latches which seekers are active
         self._check_support(cmd1, cmd2)
+        for i in (1, 2):
+            name = self.names[i]
+            if name not in self.refill_said and self.rec.ammo_refills(name, self.t):
+                self.refill_said.add(name)
+                self.log(f"  WARNING: DCS put a fired missile back on {name}'s rails: Unlimited Weapons is on "
+                         f"(Options > Gameplay, or the mission's options). The policy counts its missiles as "
+                         f"loaded minus fired, as in training; turn it off for fights that compare with training")
         return tlm
 
     def _check_support(self, cmd1, cmd2=None):
@@ -297,6 +305,7 @@ class StickLiveWorld(DcsLiveWorld):
         self.pilot = pilot
         self.t_radar = -math.inf
         self.fire_why = []          # why each fire request that timed out did (e.g. no TWS track bugged)
+        self.pilot_down = False     # our jet is down: the pilot was stopped
 
     def send_command(self, cmd, fire):
         hdg = float(cmd["hdgCmd"])
@@ -320,10 +329,18 @@ class StickLiveWorld(DcsLiveWorld):
                     self.fire_why.append(why)
                 self.log(f"  fire {status} at {self.t - self.t0:.1f} s: {why}")
             else:
-                self.log(f"  radar: {why}")
+                self.log(f"  {kind}: {why}")
 
     def step(self, cmd1, cmd2):
         self._pilot_events()
+        if not self.pilot_down and not self.rec.alive(self.names[1], self.t):
+            # Shot down: hands off. The episode can run on while our missiles still fly (a mutual kill is still
+            # possible); the pilot flew the wreck meanwhile and released the axes at every frame (-7 g, 17 s).
+            self.pilot_down = True
+            self.pilot.stop()
+            self.log(f"  stick pilot: {self.names[1]} is down: hands off")
+        if self.pilot_down:
+            return super().step(cmd1, cmd2)
         if (not self.shadow and self.fire_pending is None and self.pilot.busy is None and self.pilot.jobs.empty()
                 and self.t - self.t_radar >= self.RADAR_EVERY_S):
             self.t_radar = self.t
@@ -361,6 +378,7 @@ class DcsLiveEnv(BvrEnv):
     def reset(self, seed=None, options=None):
         out = super().reset(seed=seed, options=options)
         w = self._world
+        self._report.red = {"style": "DCS AI", "detail": f"the DCS AI ({getattr(w, 'names', {}).get(2, 'RED-1')})"}
         # Red's own radar and track, for the support rule on its missiles.
         if w.support_rule == "training" and not w.shadow and self._radar_model == "sim":
             self._opp_radar = self._opponent_radar()
@@ -380,6 +398,16 @@ class DcsLiveEnv(BvrEnv):
             info["terminal_outcome"] = self._outcome or "MISSION_END"
             self._ready = False
         return obs, reward, terminated, truncated, info
+
+
+CHAFF_TTI_S = 20.0      # chaff while a missile is inbound with its seeker on, or this close to impact
+
+
+def chaff_wanted(obs) -> bool:
+    """Chaff from the policy's own inputs (OBS_LABELS): the RWR's launch warning, with the missile's seeker
+    active or its time to impact under CHAFF_TTI_S."""
+    o = {k: float(obs[i]) for i, k in enumerate(OBS_LABELS) if k in ("rwr_warn", "rwr_seeker_active", "inbound_tti")}
+    return o["rwr_warn"] > 0.5 and (o["rwr_seeker_active"] > 0.5 or 0.0 < o["inbound_tti"] < CHAFF_TTI_S)
 
 
 def launch_delays(fire_log) -> list:
@@ -475,6 +503,18 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     stamp = time.strftime("%Y%m%d_%H%M%S")
     name = f"live_{stamp}_ep{ep}" + ("_shadow" if args.shadow else "")
     os.makedirs(args.out, exist_ok=True)
+    # Everything this episode prints, also kept in <name>_console.txt: the stick pilot's events (A-A master mode,
+    # TWS, bugs, fire timeouts) are only in it. On 21 October four fire requests timed out with the HUD in NAV and
+    # the console, which said why, was gone.
+    con_fh = open(os.path.join(args.out, name + "_console.txt"), "w", encoding="utf-8")
+    log_print = log
+
+    def log(msg):
+        log_print(msg)
+        try:
+            con_fh.write(msg + "\n"); con_fh.flush()
+        except ValueError:
+            pass                                     # closed: the episode is over
     raw_fh = open(os.path.join(args.out, name + ".jsonl"), "w", encoding="utf-8")
     raw_fh.write(json.dumps(rec.header) + "\n")
     for e in rec.events:
@@ -484,13 +524,14 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     link.sink = lambda line: raw_fh.write(line + "\n")
 
     privileged = isinstance(model.observation_space, spaces.Dict)
-    rule = getattr(args, "support_rule", "training")
+    rule = getattr(args, "support_rule", "dcs")
     pilot = None
     if getattr(args, "stick_link", None) is not None:
         from pilot import StickPilot
         from bvr_library import load_platform
         pilot = StickPilot(args.stick_link, gains=args.stick_gains, log=log, out_dir=args.out,
                            airframe=load_platform(scen["platform"]).airframe)
+        pilot.point_deg = getattr(args, "point_before_fire", None)
         pilot.start()
         pilot.radar()
 
@@ -503,7 +544,13 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     env = DcsLiveEnv(world_factory,
                      platform=scen["platform"], opponent_platform=args.opp_platform or scen["opponent_platform"],
                      max_steps=args.max_steps, privileged_critic=privileged, doctrine=args.doctrine)
+    cone = getattr(args, "fire_cone", None)
+    if cone is not None:            # a checkpoint trained before SIM_REV 19: its own fire rule (60: the table's R-max too)
+        env.MAX_OFF_BORESIGHT_DEG = float(cone)
+        env.OFFAXIS_IN_MASK = float(cone) < 60.0
     world = env._world
+    if pilot is not None:
+        env.chaff_presses_fn = lambda: pilot.cms_presses     # each defence in the report counts its chaff
     raw = capture_raw_obs(env)
     stacker = FrameStacker(N_STACK)
     obs, info = env.reset()
@@ -523,13 +570,25 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         log(f"  WARNING: this mission's bridge (version {bridge_v}) ignores --eta-lock; rebuild "
             f"the mission (python dcs\\make_mission.py) and open the new file in DCS")
     spd = []    # (commanded, flown) m/s each decision: does DCS fly the speed asked for?
+    follow = []  # (heading deg commanded minus flown, altitude moved the way asked: 1/0/None), a second after each
     try:
         while True:
             mask = env.action_masks()
             action, _ = model.predict(sobs, deterministic=not getattr(args, "stochastic", False), action_masks=mask)
+            alt0 = float(env._state.get("alt", 0.0)) if env._state else None
             obs, _, term, trunc, info = env.step(action)
             sobs = stacker.update(obs)
+            if pilot is not None and not args.shadow:
+                pilot.chaff(chaff_wanted(raw["obs"]) and not getattr(args, "no_chaff", False))
             spd.append((float(env._cmd_spd), float(env._state.get("speed", 0.0))))
+            if env._state and alt0 is not None:
+                dh = math.degrees((float(env._cmd_hdg) - float(env._state.get("psi", 0.0)) + math.pi) % (2 * math.pi) - math.pi)
+                # The altitude command is relative (present altitude + the action's step, every second), so its
+                # distance from the altitude flown is about the step by design: count whether the jet climbed or
+                # descended as asked instead (a level command counts when within 15 m).
+                dz, ask = float(env._state.get("alt", 0.0)) - alt0, ALT_DELTAS_M[int(np.asarray(action).reshape(-1)[1])]
+                ok = (abs(dz) < 15.0) if ask == 0 else (dz * ask > 0)
+                follow.append((dh, int(ok)))
             world.boost_steps += int(world._boosting)    # once per decision, not per frame
             a = [int(x) for x in np.asarray(action).reshape(-1)]
             c = world.last_cmd or ("", "", "")
@@ -551,6 +610,7 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         link.sink = None
         raw_fh.close(); steps_fh.close()
     outcome = info.get("terminal_outcome", "?")
+    cp = pilot.cockpit_summary() if pilot is not None else {}
     row = {"episode": name, "mode": "shadow" if args.shadow else ("stick" if pilot is not None else "live"),
            "stochastic": bool(getattr(args, "stochastic", False)),
            "agent": agent,
@@ -563,7 +623,16 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            "launch_delays_s": ";".join(f"{d:.1f}" for d in launch_delays(world.fire_log)),
            "fire_timeout_reasons": ";".join(getattr(world, "fire_why", [])),
            "missiles_removed": sum(1 for *_, st in world.support_log if st == "destroyed"),
-           "support_losses": info.get("support_losses", 0)}
+           "support_losses": info.get("support_losses", 0),
+           "chaff_presses": pilot.cms_presses if pilot is not None else "",
+           "chaff_used": (pilot.chaff_first - pilot.chaff_last)
+           if pilot is not None and pilot.chaff_first is not None and pilot.chaff_last is not None else "",
+           # the HUD in A-A this share of the fight (a fire request in NAV launches nothing), and the range at which
+           # DCS's radar first held a bugged track (the simulator's radar model detects an F-16 at 77-104 km)
+           # times DCS put a fired missile back on our rails (Unlimited Weapons on)
+           "ammo_refills": world.rec.ammo_refills(agent),
+           "hud_aa_pct": cp.get("aa_pct", ""), "first_bug_km": cp.get("first_bug_km", ""),
+           "first_bug_t": cp.get("first_bug_t", "")}
     # How often BLUE-1 flew well below the speed the policy asked for. The DCS
     # AI following a route may not use afterburner; the simulator always does.
     short = [c - f > SPEED_SHORT_MPS for c, f in spd]
@@ -575,7 +644,26 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                bridge_version=bridge_v,
                speed_boosted_pct=round(100.0 * world.boost_steps / len(spd), 1)
                if spd and world.speed_boost else "")
+    rep = info.get("report") or {}
+    d = rep.get("defence", [])
+    tb = [x["tti_break"] for x in d if x.get("tti_break") is not None]
+    row.update(red_style=(rep.get("red") or {}).get("style", ""),
+               first_shot=(rep.get("first") or {}).get("who", ""),
+               first_gap_s=(rep.get("first") or {}).get("gap_s", ""),
+               red_missiles=len(d), red_hits=sum(1 for x in d if x.get("end") == "HIT"),
+               broke=sum(1 for x in d if x.get("t_break") is not None),
+               broke_with_track=sum(1 for x in d if x.get("track_at_break") == "TRACK"),
+               tti_at_break_s=";".join(f"{x:.1f}" for x in tb),
+               chaff_per_defence=";".join("" if x.get("chaff") is None else str(x["chaff"]) for x in d),
+               timeout_cause=(rep.get("timeout") or {}).get("cause", ""),
+               track_losses=len(rep.get("track_losses", [])),
+               hdg_err_med_deg=round(float(np.median([abs(h) for h, _ in follow])), 1) if follow else "",
+               hdg_err_p90_deg=round(float(np.percentile([abs(h) for h, _ in follow], 90)), 1) if follow else "",
+               alt_as_asked_pct=round(100.0 * float(np.mean([a for _, a in follow])), 0) if follow else "")
     _append_result(os.path.join(args.out, "results.csv"), row)
+    if rep:
+        with open(os.path.join(args.out, "episodes.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(dict(episode=name, **rep)) + "\n")
     log(f"episode {ep}: {outcome} after {env._t_sim:.0f} s, {row['shots']} shots "
         f"({row['fire_timeouts']} fire requests not answered by a launch)"
         + (f"; request to launch {row['launch_delays_s'].replace(';', ', ')} s" if row["launch_delays_s"] else ""))
@@ -590,7 +678,24 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
         if world.speed_boost:
             log(f"  speed boost: asked DCS for {world.speed_boost:.0f} m/s "
                 f"{row['speed_boosted_pct']:.0f}% of the time")
-    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv")
+    for x in d:
+        log(f"  red missile at {x.get('range_km', 0):.1f} km ({x.get('r_over_rmax') or 0:.2f} R-max): "
+            + (f"warned {x['tti_warn']:.0f} s before impact; " if x.get("tti_warn") is not None else "no RWR warning; ")
+            + (f"broke at {x['tti_break']:.0f} s to go ({x.get('track_at_break')})" if x.get("t_break") is not None
+               else "no break")
+            + (f"; chaff {x['chaff']} presses" if x.get("chaff") is not None else "") + f"; {x.get('end')}")
+    if rep.get("first"):
+        f = rep["first"]
+        log(f"  first shot: {f['who']}" + (f", {f['gap_s']:.0f} s ahead" if f.get("gap_s") is not None else ""))
+    if rep.get("timeout"):
+        log(f"  out of time: {rep['timeout']['cause']}")
+    if cp:
+        log(f"  cockpit: HUD in A-A {cp['aa_pct']}% of the fight"
+            + (f"; first bugged track at {cp['first_bug_km']} km ({cp['first_bug_t']} s)" if cp.get("first_bug_km") != ""
+               else "; no track was ever bugged"))
+    log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv, _console.txt; the fight's record in "
+        f"episodes.jsonl")
+    con_fh.close()
     return row, rec.t_end
 
 
@@ -608,10 +713,11 @@ def main(argv=None):
                                         "unless --opp-platform says otherwise")
     ap.add_argument("--opp-platform", help="library platform for red's envelopes "
                                             "(default: the checkpoint's training opponent)")
-    ap.add_argument("--support-rule", choices=["training", "dcs"], default="training",
-                    help="training (default): a missile without support from its shooter for 3 s "
-                         "before its seeker takes over is removed, as in the simulator; dcs: DCS "
-                         "decides (its missiles usually fly on and go active)")
+    ap.add_argument("--support-rule", choices=["training", "dcs"], default="dcs",
+                    help="dcs (default, as training since SIM_REV 18): DCS decides, every missile flies on "
+                         "without its shooter's support and turns its seeker on; training: the old rule, a "
+                         "missile of either side without support for 3 s before its seeker takes over is "
+                         "removed (for checkpoints trained before SIM_REV 18)")
     ap.add_argument("--speed-boost", type=float, nargs="?", const=550.0, default=None, metavar="M_S",
                     help="while BLUE-1 is more than 20 m/s below the policy's speed, ask DCS for "
                          "this speed instead (default 550 m/s), to make the DCS AI use afterburner")
@@ -624,6 +730,17 @@ def main(argv=None):
                          "make the mission with dcs/make_mission.py --blue-player and sit in BLUE-1")
     ap.add_argument("--stick-gains", help="stick gains file (default dcs_runs/stick_gains.json, from stick_test.py)")
     ap.add_argument("--doctrine", default="BALANCED")
+    ap.add_argument("--fire-cone", type=float, default=None, metavar="DEG",
+                    help="the fire rule's angle off the nose (default 40, as trained since SIM_REV 19); 60 flies a "
+                         "checkpoint trained before SIM_REV 19 (dcsfit_v4 and older) under its own rule, the table's "
+                         "R-max with it")
+    ap.add_argument("--point-before-fire", type=float, default=None, metavar="DEG",
+                    help="--stick, a test: a fire request first turns the nose to within DEG of the target (up to "
+                         "10 s) and holds it there through the bug and the release; the policy is not trained "
+                         "for it (SIM_REV 19 trains its own shots within 40 deg). E.g. 20")
+    ap.add_argument("--no-chaff", action="store_true",
+                    help="--stick: no chaff (by default the pilot presses CMS forward every 1.5 s while a missile is "
+                         "inbound with its seeker on or under 20 s from impact)")
     ap.add_argument("--stochastic", action="store_true",
                     help="sample the policy's actions (as training does) instead of always the most likely: repeated "
                          "runs from one mission then differ. For different fights use missions with different starts "
@@ -661,9 +778,9 @@ def main(argv=None):
         print("stick: the policy flies the player's Viper (BLUE-1) through Export.lua; hands off the stick "
               "and throttle once the mission runs")
     if not args.shadow:
-        print("support rule: " + ("as in training (3 s without support before the seeker takes "
+        print("support rule: " + ("the old training rule (3 s without support before the seeker takes "
                                   "over: the missile is removed)" if args.support_rule == "training"
-                                  else "DCS's own"))
+                                  else "none, as in training since SIM_REV 18 (DCS's own: missiles fly on)"))
     last_t, rows = None, []
     try:
         for ep in range(1, args.episodes + 1):

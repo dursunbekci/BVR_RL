@@ -791,9 +791,9 @@ def test_team_red_targeting():
 
 
 def test_team_red_radar():
-    """2v1 red fights on its own radar tracks (SIM_REV 16): it fires only on a
-    firm track of the aircraft it shoots at, its missiles are guided on its
-    estimate, and without that estimate they lose support."""
+    """2v1 red fights on its own radar tracks (SIM_REV 22): it fires only on a
+    firm track of the aircraft it shoots at, and its missiles are guided on its
+    estimate; without it they fly on, unless BvrEnv.SUPPORT_RULE is set."""
     from bvr_team import TeamBvrEnv
     from bvr_opponents import BvrOpponentType as T
     from bvr_track_adapter import TrackState
@@ -830,29 +830,44 @@ def test_team_red_radar():
     assert shots >= 2 and untracked == 0, (shots, untracked)
     assert est_pkts > 0 and truth_pkts == 0, (est_pkts, truth_pkts)
 
-    # Without red's estimate its missiles go dead once the support time runs out.
-    lost = 0
-    for ep in range(4):
-        e.reset()
-        for r in e._red_obs:
-            r._guidance_packet = lambda: {"valid": 0}
-        w, step_all = e._world, e._world.step_all
-        def spy_step(cmds, w=w, step_all=step_all):
-            nonlocal lost
-            step_all(cmds)
-            lost += sum(1 for ev in w.events
-                        if ev.get("type") == "MISSILE_MISS" and ev.get("cause") == "SUPPORT_LOST"
-                        and ev.get("owner") == e.RED)
-        w.step_all = spy_step
-        done = False
-        while not done:
-            _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
-            done = t or tr
-        if lost:
-            break
-    assert lost >= 1, "red's unsupported missile did not go dead"
+    # Without red's estimate: with BvrEnv.SUPPORT_RULE its missiles go dead once the support time runs out;
+    # by default (SIM_REV 22, as in DCS) no missile has the rule and none does.
+    from bvr_env import BvrEnv
+    def support_lost(rule):
+        old, BvrEnv.SUPPORT_RULE = BvrEnv.SUPPORT_RULE, rule
+        lost, fired = 0, 0
+        try:
+            for ep in range(4):
+                e.reset()
+                for r in e._red_obs:
+                    r._guidance_packet = lambda: {"valid": 0}
+                w, step_all = e._world, e._world.step_all
+                def spy_step(cmds, w=w, step_all=step_all):
+                    nonlocal lost, fired
+                    step_all(cmds)
+                    for ev in w.events:
+                        if ev.get("owner") != e.RED:
+                            continue
+                        fired += ev.get("type") == "MISSILE_LAUNCH"
+                        lost += ev.get("type") == "MISSILE_MISS" and ev.get("cause") == "SUPPORT_LOST"
+                w.step_all = spy_step
+                done = False
+                while not done:
+                    _, _, t, tr, _ = e.step([[0, 2, 3, 0], [0, 2, 3, 0]])
+                    done = t or tr
+                if lost:
+                    break
+        finally:
+            BvrEnv.SUPPORT_RULE = old
+        return lost, fired
+    lost, _ = support_lost(True)
+    assert lost >= 1, "with the support rule, red's unsupported missile did not go dead"
+    lost, fired = support_lost(False)
+    assert fired >= 1 and lost == 0, (fired, lost)
+    assert lost == 0, f"{lost} of red's missiles went dead without the support rule"
     print(f"  2v1 red radar ............... OK  ({shots} shots, all on a firm track; "
-          f"{est_pkts} guidance updates from red's estimate)")
+          f"{est_pkts} guidance updates from red's estimate; without it {fired} missiles fly on, "
+          f"none lost to the support rule)")
 
 
 def test_team_open_rules():
@@ -1076,7 +1091,7 @@ def test_team_ucav_options():
 
 
 def test_team_end_potential():
-    """SIM_REV 18: in 2v1, as in 1v1, an aircraft's end-state potential is 0,
+    """SIM_REV 22: in 2v1, as in 1v1, an aircraft's end-state potential is 0,
     so its discounted shaping sums to -phi(start); and each aircraft's (and
     red's) observation reads the run's episode length."""
     from bvr_team import TeamBvrEnv
@@ -1101,6 +1116,62 @@ def test_team_end_potential():
             assert abs(tot[k] + phi0[k]) < 1e-6, (k, tot[k], phi0[k])
     print(f"  2v1 end potential ........... OK  (discounted shaping = -phi(start) to 1e-6; "
           f"observations read MAX_STEPS 25)")
+
+
+def test_team_rev22():
+    """SIM_REV 22: 1v1's SIM_REV 18 and 21 in 2v1. No missile has the support rule (the team env builds its
+    own world, which had kept it for all three aircraft), and each aircraft's heading reference at the start
+    is the bearing to its bandit (it was None, so the first command read the heading as 0, north)."""
+    import math
+    from bvr_env import BvrEnv, HDG_OFFSETS_DEG, DEG2RAD
+    from bvr_team import TeamBvrEnv
+    from bvr_opponents import BvrOpponentType as T
+
+    def brg(w, a, b):
+        d = w.pos(b) - w.pos(a)
+        return math.atan2(float(d[0]), float(d[1]))
+
+    def off(a, b):
+        return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+
+    e = TeamBvrEnv(opponent_type=T.SHOOTER, seed=5, doctrine="AGGRESSIVE")
+    launched, checked = [], 0
+    for ep in range(6):
+        e.reset()
+        w = e._world
+        assert w.no_support_rule == {1, 2, 3}, w.no_support_rule
+        for k, o in enumerate(e._obs, start=1):
+            assert o._hdg_ref is not None
+            if not o._est()["valid"]:          # no track yet: the picture call's bearing
+                assert off(o._hdg_ref, brg(w, k, e.RED)) < 0.02, (ep, k, o._hdg_ref, brg(w, k, e.RED))
+                assert off(o._cmd_hdg, o._hdg_ref + HDG_OFFSETS_DEG[0] * DEG2RAD) < 1e-9
+                checked += 1
+        for _ in range(60):
+            _, _, t, tr, _ = e.step([[0, 2, 3, 1], [0, 2, 3, 1]])
+            launched += [m for m in w.missiles if m not in launched]
+            if t or tr:
+                break
+    assert checked >= 4, checked
+    assert launched and not any(m.support_rule for m in launched), [m.support_rule for m in launched]
+    owners = sorted({m.owner for m in launched})
+
+    # BvrEnv.SUPPORT_RULE puts the rule back for all three aircraft.
+    old = BvrEnv.SUPPORT_RULE
+    try:
+        BvrEnv.SUPPORT_RULE = True
+        e.reset()
+        assert e._world.no_support_rule == set()
+    finally:
+        BvrEnv.SUPPORT_RULE = old
+
+    # A policy-flown red starts on the bearing to each blue aircraft.
+    pe = TeamBvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=6, doctrine="AGGRESSIVE",
+                    red_policies=("models_bvr/dcsfit_v6.zip",), red_policy_frac=1.0)
+    pe.reset()
+    for k, r in enumerate(pe._red_obs, start=1):
+        assert off(r._hdg_ref, brg(pe._world, pe.RED, k)) < 0.02, (k, r._hdg_ref)
+    print(f"  2v1 SIM_REV 22 .............. OK  ({len(launched)} missiles from aircraft {owners}, none with "
+          f"the support rule; {checked} starts without a track on the picture call's bearing; policy red too)")
 
 
 def test_team_roles_far_target():
@@ -1248,6 +1319,7 @@ def test_dcs_live_stick():
             return super().next(timeout)
     defs = cockpit.load_defs()
     stick = SlowLink(cockpit_defs=defs, scan_needed=999)
+    stick.cockpit.icp_aa_works = False      # as in DCS on 15 October: A-A has to come from missile override
     gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
              "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
     fake = FakeDcs(opponent="STRAIGHT", seed=2, speed=8.0, max_time=200.0, lockstep=True)
@@ -1258,10 +1330,25 @@ def test_dcs_live_stick():
     try:
         with tempfile.TemporaryDirectory() as d:
             args = SimpleNamespace(shadow=False, out=d, opp_platform=None, max_steps=200, doctrine="AGGRESSIVE",
-                                   stick_link=stick, stick_gains=gains)
+                                   stick_link=stick, stick_gains=gains, point_before_fire=20.0)
+            # The fake bridge's BLUE-1 does not fly the policy's headings (the fake cockpit's aircraft does), so
+            # its nose is not on the target: the old 60 deg fire cone lets this test reach the cockpit's fire job.
+            from bvr_env import BvrEnv as _B
+            _gate = (_B.MAX_OFF_BORESIGHT_DEG, _B.OFFAXIS_IN_MASK)
+            _B.MAX_OFF_BORESIGHT_DEG, _B.OFFAXIS_IN_MASK = 60.0, False
             rec, agent, red = dcs_live.wait_for_fight(link, log=lambda m: None)
-            row, _ = dcs_live.run_episode(link, Scripted(), args, {"platform": "F-16C", "opponent_platform": "F-16C"},
-                                          rec, agent, red, 1, log=logs.append)
+            try:
+                row, _ = dcs_live.run_episode(link, Scripted(), args, {"platform": "F-16C", "opponent_platform": "F-16C"},
+                                              rec, agent, red, 1, log=logs.append)
+            finally:
+                _B.MAX_OFF_BORESIGHT_DEG, _B.OFFAXIS_IN_MASK = _gate
+            import json as _json
+            recs = [_json.loads(x) for x in open(os.path.join(d, "episodes.jsonl"))]
+            # (the fake cockpit's missile never reaches the fake DCS world, so the record has no missiles here)
+            assert len(recs) == 1 and recs[0]["red"]["style"] == "DCS AI" and recs[0]["phases"], recs
+            # the console kept beside the fight's files, with the pilot's events in it
+            con = [f for f in os.listdir(d) if f.endswith("_console.txt")]
+            assert len(con) == 1 and "A-A master mode by the missile override" in open(os.path.join(d, con[0])).read(), con
     finally:
         th.join(timeout=120)
         link.close(); fake.close()
@@ -1270,6 +1357,10 @@ def test_dcs_live_stick():
     launched = [m for m in logs if "fire launched" in m]
     assert launched and stick.cockpit.missile is not None and stick.cockpit.mode == "TWS", (logs[-15:], row)
     assert not stick.controlling, "the axes were not released at the end"
+    assert row["red_style"] == "DCS AI" and row["first_shot"] in ("ours", "red", "none") and row["hdg_err_med_deg"] != "", row
+    assert row["hud_aa_pct"] != "" and row["hud_aa_pct"] > 50 and row["first_bug_km"] != "", row
+    assert any("point: nose to the target before the release" in m for m in logs), logs[-20:]
+    assert any("A-A master mode by the missile override" in m for m in logs), logs[:20]
     delays = [float(x) for x in row["launch_delays_s"].split(";") if x]
     assert delays and all(d > 0 for d in delays), row
     assert dcs_live.launch_delays([(1.0, "requested"), (5.5, "launched"), (9.0, "requested"), (19.0, "timeout"),
@@ -1464,14 +1555,15 @@ def test_adaptive_defence():
         assert cmd["altTarget"] == o.DIVE_FLOOR, cmd["altTarget"]
         off = math.degrees(abs((cmd["hdgCmd"] - o._bearing_to_ac1(state) + math.pi) % (2 * math.pi) - math.pi))
         assert abs(off - (90.0 if style == "deep_beam" else 180.0)) < 1.0, (style, off)
-    # The DCS-like episodes (SIM_REV 12): a third shoot at the edge of R-max and
-    # press on after their missile goes active; 2v1 red never does.
+    # The DCS-like episodes (SIM_REV 12): a third shoot where the DCS AI does
+    # (0.72-0.90 of R-max, a fifth at the edge: SIM_REV 18) and press on after
+    # their missile goes active; 2v1 red never does.
     longs = 0
     for _ in range(300):
         o.reset(ic)
         if o.LONG_SHOT:
             longs += 1
-            assert 0.95 <= o.SHOT_RMAX_FRAC <= 1.0 and o.PRESS
+            assert (0.72 <= o.SHOT_RMAX_FRAC <= 0.90 or 0.95 <= o.SHOT_RMAX_FRAC <= 1.0) and o.PRESS
         else:
             assert o.SHOT_RMAX_FRAC <= 0.95 and not o.PRESS
     assert 70 <= longs <= 130, longs
@@ -1535,7 +1627,7 @@ def test_adaptive_runner():
     assert o._phase == "COMMIT", o._phase
     off = abs(math.degrees((cmd["hdgCmd"] - o._bearing_to_ac1(near) + math.pi) % (2 * math.pi) - math.pi))
     assert off < 1.0, off                                   # hot: it turns to fight
-    # In the environment: a runner opens the range on an agent flying at it slowly.
+    # In the environment: a runner keeps its distance from an agent flying at it slowly.
     env = E.BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=4)
     class Runner(AdaptiveShooterOpponent):          # the env resets it: draw until a runner
         def reset(self, ic):
@@ -1545,9 +1637,13 @@ def test_adaptive_runner():
             self.TURN_RANGE, self.RUN_FAR = 20_000.0, 200_000.0     # running from the start
     env._opponent_factory = lambda e: Runner(rng=np.random.default_rng(11))
     env.reset()
-    r0 = env._state["range"]
     hot = list(E.HDG_OFFSETS_DEG).index(0.0)
-    for _ in range(60):
+    # Red starts nose on and takes about 20 s to turn away. Since SIM_REV 21 "hot" is at red from the start (it
+    # was north before the first track, so this agent flew away and the range opened from the first step).
+    for _ in range(20):
+        env.step([hot, 2, 0, 0])
+    r0 = env._state["range"]
+    for _ in range(100):
         env.step([hot, 2, 0, 0])
     assert env._opponent._phase == "RUN" and env._state["range"] > r0 - 5_000.0, (r0, env._state["range"])
     # Wide start altitudes.
@@ -1637,6 +1733,60 @@ def test_env_pickles():
     team.reset()
     pickle.loads(pickle.dumps(team))
     print("  envs pickle ................. OK")
+
+
+def test_dcs_unnamed_events():
+    """A death or ammo event whose unit DCS could not name (the bridge's getName() failed, so Lua dropped the
+    field) is skipped, live and replayed; it ended a live run with a KeyError on 21 October."""
+    import json
+    from dcs_world import DcsRecording, DcsLiveRecording, FORMAT
+
+    def unit(name, coal, x, t):
+        return {"name": name, "coal": coal, "type": "F-16C_50", "x": x + 250.0 * t, "y": 8000.0, "z": 0.0,
+                "vx": 250.0, "vy": 0.0, "vz": 0.0, "fx": 1.0, "fy": 0.0, "fz": 0.0, "ux": 0.0, "uy": 1.0, "uz": 0.0,
+                "fuel": 0.9, "radar_on": False}
+    lines = [{"format": FORMAT, "agent": "BLUE-1", "red": "RED-1", "rate": 0.1, "t0": 0, "bridge": 7}]
+    lines += [{"t": round(0.1 * k, 1), "units": [unit("BLUE-1", 2, 0.0, 0.1 * k), unit("RED-1", 1, 50_000.0, 0.1 * k)],
+               "weapons": []} for k in range(1, 6)]
+    lines += [{"ev": "dead", "t": 0.3, "cause": "crash"},              # no "unit": the name was nil in Lua
+              {"ev": "ammo", "t": 0.3, "items": []},
+              {"ev": "dead", "t": 0.4, "unit": "RED-1", "cause": "dead"}]
+    rec = DcsRecording([json.dumps(x) for x in lines])
+    live = DcsLiveRecording()
+    live.extend(lines)
+    for r in (rec, live):
+        assert list(r.dead) == ["RED-1"] and abs(r.dead["RED-1"][0] - 0.4) < 1e-9, r.dead
+    print("  DCS unnamed events .......... OK  (a death with no unit is skipped, live and replayed)")
+
+
+def test_dcs_unlimited_weapons():
+    """With DCS's Unlimited Weapons on, a fired missile comes back on the rail (live_20261021_142940: 4 -> 2 -> 4,
+    eight shots from four). The policy's missile count is loaded minus fired, as in training, and the refills are
+    counted."""
+    import json
+    from dcs_world import DcsRecording, DcsReplayWorld, FORMAT
+
+    def unit(name, coal, x, t):
+        return {"name": name, "coal": coal, "type": "F-16C_50", "x": x + 250.0 * t, "y": 8000.0, "z": 0.0,
+                "vx": 250.0, "vy": 0.0, "vz": 0.0, "fx": 1.0, "fy": 0.0, "fz": 0.0, "ux": 0.0, "uy": 1.0, "uz": 0.0,
+                "fuel": 0.9, "radar_on": False}
+    aim = lambda n: [{"type": "weapons.missiles.AIM_120C", "count": n, "aam": True, "guidance": 3}]
+    lines = [{"format": FORMAT, "agent": "BLUE-1", "red": "RED-1", "rate": 0.1, "t0": 0, "bridge": 7}]
+    lines += [{"t": round(0.5 * k, 1), "units": [unit("BLUE-1", 2, 0.0, 0.5 * k), unit("RED-1", 1, 50_000.0, 0.5 * k)],
+               "weapons": []} for k in range(0, 41)]
+    lines += [{"ev": "ammo", "t": 0.0, "unit": "BLUE-1", "items": aim(4)}]
+    for i, ts in enumerate((2.0, 4.0, 12.0), start=1):           # three shots; the rail refilled after the second
+        lines.append({"ev": "shot", "t": ts, "id": i, "shooter": "BLUE-1", "target": "RED-1", "type": "AIM_120C"})
+    lines += [{"ev": "ammo", "t": 2.1, "unit": "BLUE-1", "items": aim(3)},
+              {"ev": "ammo", "t": 4.1, "unit": "BLUE-1", "items": aim(2)},
+              {"ev": "ammo", "t": 10.0, "unit": "BLUE-1", "items": aim(4)},     # refilled
+              {"ev": "ammo", "t": 12.1, "unit": "BLUE-1", "items": aim(3)}]
+    rec = DcsRecording([json.dumps(x) for x in lines])
+    w = DcsReplayWorld(rec, "BLUE-1", "RED-1")
+    got = {t: w._wpn("BLUE-1", t) for t in (1.0, 3.0, 5.0, 11.0, 13.0)}
+    assert got == {1.0: 4, 3.0: 3, 5.0: 2, 11.0: 2, 13.0: 1}, got
+    assert rec.ammo_refills("BLUE-1") == 1 and rec.ammo_refills("BLUE-1", 9.0) == 0
+    print("  DCS unlimited weapons ....... OK  (refilled rails: the count stays loaded minus fired, 4 3 2 2 1)")
 
 
 def test_dcs_round_trip():
@@ -1742,7 +1892,8 @@ def test_selfplay_heading_history():
 
 
 def test_fire_off_boresight():
-    """The fire action is masked for a target more than 60 deg off the nose."""
+    """The fire action is masked for a target more than 40 deg off the nose (SIM_REV 19; it was 60); scripted
+    red's own fire rule keeps 60."""
     import math
     from bvr_env import BvrEnv
     from bvr_opponents import BvrOpponentType as T
@@ -1763,15 +1914,19 @@ def test_fire_off_boresight():
         env._est = lambda: est
         return env._can_fire(), bool(env.action_masks()[-1])
 
-    for az in (0, 30, -45, 59):
+    assert env.MAX_OFF_BORESIGHT_DEG == 40.0
+    for az in (0, 30, -39):
         assert fire_ok(az) == (True, True), az
-    for az in (61, -75, 90, 180):
+    for az in (41, -45, 59, -75, 90, 180):
         assert fire_ok(az) == (False, False), az
-    assert fire_ok(0, el_deg=55) == (True, True)
-    assert fire_ok(0, el_deg=65) == (False, False)
-    assert fire_ok(40, el_deg=40) == (True, True)            # 54 deg off the nose in all
-    assert fire_ok(50, el_deg=45) == (False, False)          # 63 deg off the nose in all
-    print("  fire off-boresight gate ..... OK")
+    assert fire_ok(0, el_deg=35) == (True, True)
+    assert fire_ok(0, el_deg=45) == (False, False)
+    assert fire_ok(25, el_deg=30) == (True, True)            # 38 deg off the nose in all
+    assert fire_ok(30, el_deg=30) == (False, False)          # 41 deg off the nose in all
+    red = BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, seed=1)
+    red.reset(seed=1)
+    assert red._opp_radar.MAX_OFF_BORESIGHT_DEG == 60.0 and not red._opp_radar.OFFAXIS_IN_MASK
+    print("  fire off-boresight gate ..... OK  (40 deg for the policy, 60 for scripted red)")
 
 
 def test_launch_delay():
@@ -1913,6 +2068,326 @@ def test_missile_endgame():
             worst = max(worst, out["miss_dist"])
     assert worst < 2.0, worst
     print(f"  missile endgame ............. OK  (6 intercepts on a straight target hit, worst miss {worst:.2f} m)")
+
+
+def test_red_as_dcs():
+    """SIM_REV 18: no missile has the support rule (ours and red's alike; dcs_live leaves them to DCS), the radar's
+    azimuth limit is drawn from 57-63 deg, the DCS-like red shoots at 0.72-0.90 of R-max (a fifth at 0.95-1.0);
+    dcs_live.chaff_wanted reads the RWR inputs."""
+    import numpy as np
+    from missile_sim import AIM120
+    from bvr_library import missile_config
+    from bvr_env import BvrEnv, OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T, AdaptiveShooterOpponent
+    from bvr_radar_sim import RadarSim
+    cfg = missile_config("AIM-120C-DCS")
+    ends = {}
+    for rule in (True, False):
+        m = AIM120(2, 1, np.array([0.0, 0.0, 9000.0]), np.array([0.0, 300.0, 0.0]), 12000.0, cfg=cfg)
+        m.support_rule = rule
+        tp, vel = np.array([0.0, 45000.0, 9000.0]), np.array([0.0, -250.0, 0.0])
+        out = None
+        for k in range(7500):
+            # guidance for 2 s, then none: the shooter lost its track
+            m.update_guidance({"valid": 1, "tgt_pos": tp, "tgt_vel": vel} if k < 100 else {"valid": 0})
+            ev = m.step(0.02, tp, vel)
+            tp = tp + vel * 0.02
+            out = next((e for e in ev if e["type"] in ("MISSILE_HIT", "MISSILE_MISS")), None)
+            if out:
+                break
+        ends[rule] = out
+    assert ends[True]["cause"] == "SUPPORT_LOST", ends[True]
+    assert ends[False]["type"] == "MISSILE_HIT", ends[False]      # flew on to the target and its seeker took it
+    # the env: no missile has the rule, ours and red's alike (True: the old rule for both)
+    env = BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, privileged_critic=False, seed=3)
+    env.reset(seed=3)
+    assert env._world.no_support_rule == {1, 2}
+    env._world._launch(1, {}); env._world._launch(2, {})
+    owners = {m.owner: m.support_rule for m in env._world.missiles}
+    assert owners == {1: False, 2: False}, owners
+    env.SUPPORT_RULE = True
+    env._ready = False          # a second reset() without a step is otherwise a no-op
+    env.reset(seed=4)
+    env._world._launch(1, {}); env._world._launch(2, {})
+    assert {m.owner: m.support_rule for m in env._world.missiles} == {1: True, 2: True}
+    # DCS live leaves every missile to DCS by default, as training does
+    import inspect, dcs_live as _dl
+    assert inspect.signature(_dl.DcsLiveWorld.__init__).parameters["support_rule"].default == "dcs"
+    # radar azimuth limit
+    fov = [np.degrees(RadarSim(rng=np.random.default_rng(i)).fov_az) for i in range(200)]
+    assert 56.9 < min(fov) and max(fov) < 63.1 and max(fov) - min(fov) > 4, (min(fov), max(fov))
+    # where the DCS-like red shoots
+    fr = []
+    for i in range(400):
+        o = AdaptiveShooterOpponent(rng=np.random.default_rng(i))
+        o.long_shot_frac = 1.0
+        o.reset({"ac2_psi": 0.0})
+        assert o.LONG_SHOT
+        fr.append(o.SHOT_RMAX_FRAC)
+    fr = np.array(fr)
+    edge = (fr >= 0.95).mean()
+    assert np.all(((fr >= 0.72) & (fr <= 0.90)) | ((fr >= 0.95) & (fr <= 1.0))) and 0.13 < edge < 0.27, edge
+    # chaff from the RWR inputs
+    import dcs_live
+    o = np.zeros(len(OBS_LABELS))
+    ix = {k: OBS_LABELS.index(k) for k in ("rwr_warn", "rwr_seeker_active", "inbound_tti")}
+    assert not dcs_live.chaff_wanted(o)
+    o[ix["rwr_warn"]] = 1; o[ix["inbound_tti"]] = 35.0
+    assert not dcs_live.chaff_wanted(o)
+    o[ix["inbound_tti"]] = 15.0
+    assert dcs_live.chaff_wanted(o)
+    o[ix["inbound_tti"]] = 35.0; o[ix["rwr_seeker_active"]] = 1
+    assert dcs_live.chaff_wanted(o)
+    print(f"  missiles as in DCS .......... OK  (no rule: the missile flew on and hit, with it removed; both sides; "
+          f"radar limit {min(fov):.1f}-{max(fov):.1f} deg; long shots at the edge {edge:.0%}; chaff on the RWR)")
+
+
+def test_offaxis_envelope():
+    """SIM_REV 18: the envelope shaping term counts our R-max as launched along our heading: all of it pointing
+    at the target or at the lead point of a crossing one, less off the nose (more so low down)."""
+    import math
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, privileged_critic=False, seed=1)
+    env.reset(seed=1)
+    def f(crank, alt=9000.0, tv=(0.0, -270.0)):
+        a = math.radians(crank)
+        env._own_pos_enu = lambda: np.array([0.0, 0.0, alt])
+        env._own_vel_enu = lambda: np.array([400.0 * math.sin(a), 400.0 * math.cos(a), 0.0])
+        env._state = dict(env._state, alt=alt)
+        return env._offaxis_factor({"valid": True, "pos": np.array([0.0, 50000.0, alt]),
+                                    "vel": np.array([tv[0], tv[1], 0.0]), "speed": 270.0})
+    assert abs(f(0) - 1.0) < 1e-9 and abs(f(-30) - f(30)) < 1e-9
+    assert 0.93 < f(50) < 0.96 and 0.80 < f(50, alt=5000.0) < 0.86 and f(90) < f(60) < f(50)
+    # a target crossing at 200 m/s: pointing at its lead point keeps all of the reach, at it does not
+    lead = math.degrees(math.asin(200.0 / env.OFFAXIS_V_MSL))
+    assert f(lead, tv=(200.0, -180.0)) > 0.999 and f(-lead, tv=(200.0, -180.0)) < f(0, tv=(200.0, -180.0))
+    assert env._offaxis_factor({"valid": False}) == 1.0
+    print(f"  off-axis envelope ........... OK  (50 deg off: {f(50):.2f} at 9 km, {f(50, alt=5000.0):.2f} at 5 km; "
+          f"the lead point of a crossing target keeps it all)")
+
+
+def test_episode_report():
+    """bvr_report: each fight's record (info["report"]): red's style, every missile, each defence against a red
+    missile, who fired first, heading choices by phase, track losses, and a timeout's end state."""
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from bvr_report import EpisodeReport, summarise
+    env = BvrEnv(opponent_type=T.ADAPTIVE_SHOOTER, privileged_critic=False, seed=7, adaptive_dcs_frac=1.0)
+    reps = []
+    for seed in range(6):
+        env.reset(seed=seed)
+        while True:
+            m = env.action_masks()
+            _, _, d, tr, info = env.step([0, 2, 3, int(m[-1])])     # fly at red, fire whenever allowed
+            if d or tr:
+                break
+        r = info["report"]
+        reps.append(r)
+        assert r["outcome"] == info["terminal_outcome"] and r["red"]["style"] == "DCS-like", r["red"]
+        n_dec = sum(sum(c.values()) for c in r["phases"].values())
+        assert n_dec == info["step"], (n_dec, info["step"])
+        ours = [x for x in r["missiles"] if x["owner"] == "ours"]
+        assert len(ours) == info["shots_fired"]
+        for x in r["missiles"]:
+            assert x["end"] in ("HIT", "KINEMATIC", "ENDGAME", "SUPPORT_LOST", "in flight"), x
+            assert x["range_km"] > 0 and x["t_flight"] is not None and x["r_over_rmax"] is not None
+        reds = [x for x in r["missiles"] if x["owner"] == "red"]
+        assert len(r["defence"]) == len(reds)
+        for dd in r["defence"]:
+            assert dd["end"] == next(x["end"] for x in reds if x["id"] == dd["id"])
+            if dd["t_break"] is not None:
+                assert dd["tti_break"] is not None and dd["track_at_break"] in ("TRACK", "COAST", "NONE", "ACQUIRING")
+        assert r["first"]["who"] in ("ours", "red", "none")
+        if r["outcome"] == "TIMEOUT":
+            assert r["timeout"]["cause"] and len(r["timeout"]["last_headings"]) <= 60
+    assert any(r["defence"] for r in reps), "no red missile in 6 fights against the DCS-like red"
+    assert all(set(r["phases"]["before_shot"]) <= {"0"} for r in reps)           # we flew at red throughout
+    # the timeout labels
+    tc = EpisodeReport.timeout_cause
+    assert tc({"aa_deg_t": 170, "aa_deg": 10, "wpn_remaining": 2}) == "red running, we follow"
+    assert tc({"aa_deg_t": 100, "aa_deg": 120, "wpn_remaining": 2}) == "both turned away"
+    assert tc({"aa_deg_t": 10, "aa_deg": 20, "wpn_remaining": 2}) == "both pointing"
+    assert tc({"wpn_remaining": 0, "wpn_remaining_t": 0}) == "both out of missiles"
+    sm = summarise(reps)
+    assert sm["n"] == 6 and sum(sm["first"].values()) == 6
+    print(f"  fight records ............... OK  ({sum(len(r['missiles']) for r in reps)} missiles, "
+          f"{sm['defence']['missiles']} red at us ({sm['defence']['hit']} hit, {sm['defence']['broke']} broken from) "
+          f"in 6 fights; first shot {sm['first']})")
+
+
+def test_geometry_inputs():
+    """SIM_REV 19's inputs: which way the target crosses our line of sight (+ to our right), the signed
+    line-of-sight rate, and range over the off-axis R-max (above the table's when cranked); a mirror image
+    flips the first two."""
+    import math
+    import numpy as np
+    from bvr_env import BvrEnv, OBS_LABELS
+    from bvr_opponents import BvrOpponentType as T
+    env = BvrEnv(opponent_type=T.STRAIGHT, privileged_critic=False, seed=2)
+    env.reset(seed=2)
+    ix = {k: OBS_LABELS.index(k) for k in ("trk_aspect_side", "los_rate_signed", "r_over_rmax_axis",
+                                         "r_over_rmax_own", "trk_aspect_sin")}
+    def obs(tvx, crank=0.0, mirror=1.0):
+        a = math.radians(crank) * mirror
+        env._own_pos_enu = lambda: np.array([0.0, 0.0, 9000.0])
+        env._own_vel_enu = lambda: np.array([400.0 * math.sin(a), 400.0 * math.cos(a), 0.0])
+        env._state = dict(env._state, alt=9000.0, psi=a, speed=400.0, mach=1.3)
+        est = {"valid": True, "pos": np.array([0.0, 40000.0, 9000.0]), "vel": np.array([mirror * tvx, -250.0, 0.0]),
+               "speed": float(math.hypot(tvx, 250.0)), "age": 0.0, "pos_sigma": 80.0, "vel_sigma": 5.0}
+        env._est = lambda: est
+        o = env._build_obs()
+        lo, hi = env._obs_lo, env._obs_hi
+        return {k: float(lo[i] + (o[i] + 1) * (hi[i] - lo[i]) / 2) for k, i in ix.items()}
+    right, left = obs(200.0), obs(200.0, mirror=-1.0)
+    assert right["trk_aspect_side"] > 0.5 and right["los_rate_signed"] > 0, right       # red flies to our right
+    assert abs(left["trk_aspect_side"] + right["trk_aspect_side"]) < 1e-6
+    assert abs(left["los_rate_signed"] + right["los_rate_signed"]) < 1e-6
+    assert abs(left["trk_aspect_sin"] - right["trk_aspect_sin"]) < 1e-6                 # the old input cannot tell
+    hot, cranked = obs(0.0), obs(0.0, crank=50.0)
+    assert abs(hot["r_over_rmax_axis"] - hot["r_over_rmax_own"]) < 1e-3
+    assert cranked["r_over_rmax_axis"] > 1.04 * cranked["r_over_rmax_own"]
+    print(f"  geometry inputs ............. OK  (crossing {right['trk_aspect_side']:+.2f} / {left['trk_aspect_side']:+.2f}, "
+          f"LOS rate {right['los_rate_signed']:+.2f} deg/s; cranked 50 deg r/Rmax {cranked['r_over_rmax_own']:.2f} -> "
+          f"{cranked['r_over_rmax_axis']:.2f} off-axis)")
+
+
+def test_threat_only_while_closing():
+    """SIM_REV 20: a red missile warns (RWR, threat input) while it closes on us and 3 s after; one that has
+    overshot drops off though it flies on."""
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    from missile_sim import THREAT_HOLD_S
+    env = BvrEnv(opponent_type=T.STRAIGHT, privileged_critic=False, seed=4)
+    env.reset(seed=4)
+    w = env._world
+    w._launch(2, {})
+    m = w.missiles[-1]
+    a1 = w.acs[0]
+    # put the missile 3 km behind us, flying away from us: it has overshot
+    fwd = np.array([np.sin(a1.chi), np.cos(a1.chi), 0.0])
+    m.pos = np.array([a1.x, a1.y, a1.z]) - 3000.0 * fwd
+    m.vel = -900.0 * fwd
+    m.guidance_valid = False; m.support_rule = False
+    t0 = w.t_sim
+    warn = []
+    for _ in range(int((THREAT_HOLD_S + 2.0) / w.SIM_DT)):
+        w.step(env._encode_cmd(0, 2, 2, 0), {"mode": 0, "V": 250.0, "hdgCmd": 0.0, "altTarget": 9000.0, "fire": 0})
+        tel = w.telemetry(1)
+        warn.append((w.t_sim - t0, tel["rwr"]["launch_warn"], [x["threat"] for x in tel["missiles"] if x["owner"] == 2]))
+    assert warn[0][1] == 1 and warn[-1][1] == 0, (warn[0], warn[-1])
+    off = next(t for t, wn, _ in warn if not wn)
+    assert THREAT_HOLD_S - 0.1 <= off <= THREAT_HOLD_S + 0.2, off
+    assert m in w.missiles and warn[-1][2] == [0]                         # still flying, no longer a threat
+    env._state = w.telemetry(1)
+    assert env._missile_summary()[1] is None
+    print(f"  threat only while closing ... OK  (an overshot missile warns {off:.1f} s, then drops off; it flies on)")
+
+
+def test_start_reference():
+    """SIM_REV 21: before the first track the heading choices are offsets from the bandit's bearing at the
+    start (the picture call), not from north; without GCI_START, from the own start heading. Self-play's AC2
+    gets the same."""
+    import math
+    import numpy as np
+    from bvr_env import BvrEnv
+    from bvr_opponents import BvrOpponentType as T
+    e = BvrEnv(opponent_type=T.STRAIGHT, seed=3)
+    errs = []
+    for seed in range(12):
+        e._ready = False
+        _, info = e.reset(seed=seed)
+        ic = info["ic"]
+        d = e._to_enu(ic["ac2_lat"], ic["ac2_lon"], 0) - e._to_enu(ic["ac1_lat"], ic["ac1_lon"], 0)
+        brg = math.atan2(d[0], d[1])
+        if not e._est()["valid"]:                      # the reference has not been replaced by a track yet
+            errs.append(abs(math.remainder(e._hdg_ref - brg, 2 * math.pi)))
+        assert abs(math.remainder(e._start_ref(ic, 2) - (brg + math.pi), 2 * math.pi)) < 1e-9
+    assert errs and max(errs) < 1e-9, errs
+    e.GCI_START = False
+    e._ready = False
+    _, info = e.reset(seed=1)
+    assert e._est()["valid"] or abs(math.remainder(e._hdg_ref - info["ic"]["ac1_psi"], 2 * math.pi)) < 1e-9
+    print(f"  start reference ............. OK  ({len(errs)} starts without a track: offsets from the bandit's bearing)")
+
+
+def test_turn_hold():
+    """SIM_REV 21: commands alternating either side of the tail (161/191 deg while flying 0, as dcsfit_v6 in
+    DCS on 21 October) turn the aircraft round instead of reversing the bank every second (the stick pilot:
+    dcs/stick/test_stick.py test_turn_hold)."""
+    import math
+    from f16_sim import F16Aircraft, turn_hold, isa
+    r = math.radians
+    assert turn_hold(r(-170), r(20)) > math.pi and turn_hold(r(170), r(-20)) < -math.pi   # held against the bank
+    assert turn_hold(r(-170), r(2)) == r(-170)                                            # wings level: shorter way
+    assert turn_hold(r(-140), r(30)) == r(-140)                                           # inside 150: shorter way
+    ac = F16Aircraft()
+    ac.reset_state(0, 0, 5000.0, 0.0, 0.85 * isa(5000.0)[3], 0.6)
+    revs, sign = 0, 0
+    for k in range(int(40 / 0.02)):
+        cmd = r(161.0) if int(k * 0.02) % 2 == 0 else r(191.0)
+        ac.step(0.02, {"hdgCmd": cmd, "altTarget": 5000.0, "V": ac.V})
+        turned = abs(math.degrees(math.remainder(ac.chi - 0.0, 2 * math.pi)))
+        if turned > 140:                            # round: the commands are ahead of the nose now
+            break
+        if abs(ac.phi) > r(15):
+            sg = 1 if ac.phi > 0 else -1
+            revs += sign and sg != sign
+            sign = sg
+    assert turned > 140 and revs <= 1, (turned, revs)
+    print(f"  turn hold ................... OK  (alternating 161/191 deg off the tail: turned 140 deg in "
+          f"{k * 0.02:.0f} s with {revs} bank reversal(s))")
+
+
+def test_symmetric_policy():
+    """--symmetric-policy: the mirror image of the inputs gives the mirror image of the choice, exactly;
+    the policy trains and saves with it; off, it is the plain policy."""
+    import tempfile, os
+    import numpy as np, torch as th
+    from gymnasium import spaces
+    from sb3_contrib import MaskablePPO
+    from bvr_env import OBS_DIM, PRIV_DIM, ACTION_NVEC
+    from bvr_policy import AsymmetricMaskablePolicy, mirror_columns, heading_mirror
+    from bvr_selfplay import N_STACK
+    box = lambda n: spaces.Box(low=-1.0, high=1.0, shape=(n * N_STACK,), dtype=np.float32)
+    class Dummy:
+        observation_space = spaces.Dict({"obs": box(OBS_DIM), "priv": box(PRIV_DIM)})
+        action_space = spaces.MultiDiscrete(ACTION_NVEC)
+    import gymnasium as gym
+    class E(gym.Env):
+        observation_space = Dummy.observation_space; action_space = Dummy.action_space
+        def reset(self, seed=None, options=None): return self.observation_space.sample(), {}
+        def step(self, a): return self.observation_space.sample(), 0.0, False, False, {}
+        def action_masks(self): return np.ones(sum(ACTION_NVEC), bool)
+    m = MaskablePPO(AsymmetricMaskablePolicy, E(), n_steps=64, batch_size=32, n_epochs=1,
+                    policy_kwargs=dict(pi_arch=(64, 64), vf_arch=(64, 64), symmetric=True), seed=0)
+    rng = np.random.default_rng(0)
+    o = rng.uniform(-1, 1, (8, OBS_DIM * N_STACK)).astype(np.float32)
+    om = o.copy(); om[:, mirror_columns(OBS_DIM * N_STACK)] *= -1
+    pv = rng.uniform(-1, 1, (8, PRIV_DIM * N_STACK)).astype(np.float32)
+    def probs(model, x):
+        t = {"obs": th.as_tensor(x), "priv": th.as_tensor(pv)}
+        with th.no_grad():
+            d = model.policy.get_distribution(t, action_masks=np.ones((8, sum(ACTION_NVEC)), bool))
+        return [p.probs.numpy() for p in d.distributions]
+    p, pm = probs(m, o), probs(m, om)
+    mir = heading_mirror()
+    assert np.allclose(p[0], pm[0][:, mir], atol=1e-6) and all(np.allclose(a, b, atol=1e-6) for a, b in zip(p[1:], pm[1:]))
+    m.learn(128)                                                      # gradients through both views
+    p, pm = probs(m, o), probs(m, om)
+    assert np.allclose(p[0], pm[0][:, mir], atol=1e-6)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.zip"); m.save(path)
+        m2 = MaskablePPO.load(path, env=E())
+        assert m2.policy.symmetric and np.allclose(probs(m2, o)[0], p[0], atol=1e-6)
+    m.policy.set_symmetric(False)                                     # off: the plain, asymmetric choice
+    q, qm = probs(m, o), probs(m, om)
+    assert not np.allclose(q[0], qm[0][:, mir], atol=1e-3)
+    print("  symmetric policy ............ OK  (mirrored inputs give the mirrored choice exactly, after training "
+          "too; kept on save and load)")
 
 
 def test_mission_seed_starts():
@@ -2157,6 +2632,10 @@ if __name__ == "__main__":
         ("missile time-to-go",      test_missile_tgo),
         ("defence potential",       test_defence_potential),
         ("heading reference",       test_heading_reference),
+        ("DCS unnamed events",      test_dcs_unnamed_events),
+        ("DCS unlimited weapons",   test_dcs_unlimited_weapons),
+        ("start reference",         test_start_reference),
+        ("turn hold",               test_turn_hold),
         ("stern starts",            test_stern_starts),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
@@ -2179,6 +2658,7 @@ if __name__ == "__main__":
         ("2v1 launch delay",        test_team_launch_delay),
         ("2v1 UCAV options",        test_team_ucav_options),
         ("2v1 end potential",       test_team_end_potential),
+        ("2v1 SIM_REV 22",          test_team_rev22),
         ("DCS round trip",          test_dcs_round_trip),
         ("DCS live link",           test_dcs_live_link),
         ("DCS live stick",          test_dcs_live_stick),
@@ -2192,6 +2672,12 @@ if __name__ == "__main__":
         ("ADAPTIVE DCS-like share", test_adaptive_dcs_frac),
         ("episode end", test_episode_end),
         ("missile endgame", test_missile_endgame),
+        ("missiles as in DCS", test_red_as_dcs),
+        ("off-axis envelope", test_offaxis_envelope),
+        ("fight records", test_episode_report),
+        ("geometry inputs", test_geometry_inputs),
+        ("threat only while closing", test_threat_only_while_closing),
+        ("symmetric policy", test_symmetric_policy),
         ("mission seed starts", test_mission_seed_starts),
         ("fire off-boresight gate", test_fire_off_boresight),
         ("heading switches",        test_heading_switches),

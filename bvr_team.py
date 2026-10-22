@@ -23,12 +23,14 @@ command code are the 1v1 agent's, fed this aircraft's telemetry every frame
     After that it engages the nearest blue aircraft, switching only when the
     other is clearly closer. It sees the fight as a 1v1 against its target
     with both blue aircraft's missiles counted as inbound.
-  * Red's radar (RED_RADAR, SIM_REV 18). As in 1v1 since SIM_REV 9, red
+  * Red's radar (RED_RADAR, SIM_REV 22). As in 1v1 since SIM_REV 9, red
     fights under the agent's rules: one track per blue aircraft, from the
     agent's own radar and track code run from red's side; it fires at an
     aircraft only when the agent's fire mask would allow it on that track,
-    and each missile is guided on red's track of its target, so the 3-second
-    support rule binds it. Red still flies on truth, as in 1v1. Before, 2v1
+    and each missile is guided on red's track of its target. No missile has
+    the 3-second support rule (1v1's SIM_REV 18, as in DCS): one whose shooter
+    loses the track flies on to its last estimate. Red still flies on truth,
+    as in 1v1. Before, 2v1
     red guided on truth and shot without a track, and the old cranks and
     defence were kept for it (legacy_crank).
   * Losing an aircraft. A blue aircraft shot down or crashed leaves the
@@ -137,7 +139,7 @@ class TeamBvrEnv:
     RED_AWARENESS = ("gci", "radar")
 
     # Scripted red fights on its own radar tracks (see the module notes).
-    # False: the pre-SIM_REV 18 red, truth-guided with the old cranks.
+    # False: the pre-SIM_REV 22 red, truth-guided with the old cranks.
     RED_RADAR = True
 
     def __init__(self, opponent_type=BvrOpponentType.STRAIGHT, gamma_discount=0.997,
@@ -259,6 +261,10 @@ class TeamBvrEnv:
         # Scripted opponents read their start from the 1v1 key names.
         self._opponent.reset({**ic, "ac2_psi": ic["ac3_psi"], "ac2_alt": ic["ac3_alt"],
                               "ac2_spd": ic["ac3_spd"]})
+        # No support rule for any missile (SIM_REV 18 in 1v1): a missile whose
+        # shooter loses the track flies on to its last estimate and turns its
+        # seeker on, as in DCS. BvrEnv.SUPPORT_RULE puts it back for all three.
+        w.no_support_rule = set() if self._obs[0].SUPPORT_RULE else {1, 2, self.RED}
         w.reset(ic, episode_id=self._episode_id)
         # Red's opening target, by this episode's rule (OPEN_RULES).
         red = w.pos(self.RED)
@@ -281,6 +287,10 @@ class TeamBvrEnv:
         for k, o in enumerate(self._obs, start=1):
             o._cmd_hdg = float(ic[f"ac{k}_psi"]); o._cmd_alt = float(ic[f"ac{k}_alt"])
             o._cmd_spd = float(ic[f"ac{k}_spd"])
+            o._hdg_ref = self._start_ref(o, k, self.RED)
+        if policy_red:
+            for k, r in enumerate(self._red_obs, start=1):
+                r._hdg_ref = self._start_ref(r, self.RED, k)
 
         cmds = [o._encode_cmd(0, 2, 2, 0) for o in self._obs]
         self._advance(0.5, cmds, [False, False])
@@ -340,7 +350,7 @@ class TeamBvrEnv:
                 terms = {t: 0.0 for t in PHI_TERMS}
                 shaping_terms = {t: 0.0 for t in PHI_TERMS}
             elif (flying[k] and not o._alive) or terminated:
-                # SIM_REV 18, as 1v1 since SIM_REV 16: the potential of an
+                # SIM_REV 22, as 1v1 since SIM_REV 16: the potential of an
                 # aircraft's end state is 0 (lost this step, or the episode
                 # ends), so its shaping sums to -phi(start) whatever happens
                 # and leaves the best policy as it was (Ng et al. 1999). Lost
@@ -399,6 +409,16 @@ class TeamBvrEnv:
                 "red_awareness": self._red_awareness})
             self._ready = False
         return obs, np.array(rewards, dtype=np.float32), terminated, truncated, infos
+
+    def _start_ref(self, o, me, other):
+        """The heading reference at the start (SIM_REV 22, 1v1's SIM_REV 21): the picture call's bearing
+        from aircraft `me` to `other` until the radar has a track (o.GCI_START), else `me`'s own heading.
+        Without it the reference was None and the first command read the heading before any state: 0, north."""
+        w = self._world
+        if not o.GCI_START:
+            return float(w.acs[me - 1].chi)
+        d = w.pos(other) - w.pos(me)
+        return math.atan2(float(d[0]), float(d[1]))
 
     def action_masks(self) -> np.ndarray:
         rows = []

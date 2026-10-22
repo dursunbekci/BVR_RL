@@ -57,6 +57,11 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+if ROOT not in sys.path:
+    sys.path.append(ROOT)
+
+from f16_sim import turn_hold                       # noqa: E402  the simulator's autopilot rule, shared
 
 TEL_PORT, CMD_PORT = 15401, 15402
 G = 9.80665
@@ -427,7 +432,7 @@ class Hold:
         self.last = {"nz_avail": nz_av, "bank_lim": bank_lim}
         trk = getattr(f, "crs", None)
         trk = f.hdg if trk is None else trk        # the course, as the simulator's autopilot (its chi)
-        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * wrap_pi(hdg - trk)))
+        bank_cmd = max(-bank_lim, min(bank_lim, self.K_HDG_BANK * turn_hold(wrap_pi(hdg - trk), f.bank)))
         if self.prev_bank is not None and 0.0 < f.t - self.prev_bank[0] < 0.1:
             inst = wrap_pi(f.bank - self.prev_bank[1]) / (f.t - self.prev_bank[0])
             self.roll_rate = 0.7 * self.roll_rate + 0.3 * inst        # smoothed roll rate, rad/s

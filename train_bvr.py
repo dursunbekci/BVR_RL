@@ -572,9 +572,12 @@ def main():
     ap.add_argument("--sp-pool-size", type=int, default=MAX_POOL,
                     help="self-play: snapshots kept; the oldest is deleted beyond this "
                          "(default %(default)s)")
+    ap.add_argument("--symmetric-policy", action="store_true",
+                    help="average each choice over the fight and its mirror image (SIM_REV 20): no fixed crank "
+                         "side; a resumed checkpoint is switched over (bvr_policy.AsymmetricMaskablePolicy)")
     ap.add_argument("--adaptive-dcs-frac", type=float, default=None,
                     help="share of ADAPTIVE_SHOOTER episodes (as a stage, and as self-play's scripted "
-                         "opponent) flown like the DCS AI: shoot at 0.95-1.0 of R-max and keep pressing "
+                         "opponent) flown like the DCS AI: shoot at 0.72-0.90 of R-max (a fifth at 0.95-1.0) and keep pressing "
                          "(default 1/3, as since SIM_REV 12). dcsfit_v3: 0.67")
     ap.add_argument("--no-privileged", action="store_true")
     ap.add_argument("--viz", action="store_true")
@@ -752,7 +755,8 @@ def main():
     kwargs["batch_size"]    = args.batch_size
     if privileged:
         policy = AsymmetricMaskablePolicy
-        kwargs["policy_kwargs"] = dict(pi_arch=(256, 256), vf_arch=(256, 256))
+        kwargs["policy_kwargs"] = dict(pi_arch=(256, 256), vf_arch=(256, 256),
+                                       symmetric=bool(getattr(args, "symmetric_policy", False)))
     else:
         policy = "MlpPolicy"
         kwargs["policy_kwargs"] = dict(net_arch=dict(pi=[256, 256], vf=[256, 256]))
@@ -774,6 +778,14 @@ def main():
             note(f"NOTE: {msg}")
     else:
         model = MaskablePPO(policy, vec, tensorboard_log="tb_logs_bvr/", **kwargs)
+    if getattr(args, "symmetric_policy", False):
+        if not privileged:
+            raise SystemExit("--symmetric-policy needs the privileged (asymmetric) policy")
+        # A resumed checkpoint is switched over too; recorded in policy_kwargs so every checkpoint this run
+        # saves (self-play snapshots included) loads symmetric.
+        model.policy.set_symmetric(True)
+        model.policy_kwargs = dict(model.policy_kwargs, symmetric=True)
+        note("symmetric policy: each choice averaged over the fight and its mirror image (no fixed crank side)")
     # Saved inside every checkpoint this run writes, self-play snapshots included.
     model.bvr_scenario = scenario_record(args.platform, args.opponent_platform,
                                          wingman_platform_id=wingman, fmt=args.format)
@@ -796,7 +808,7 @@ def main():
 
     note(cb.describe_curriculum())
     if args.adaptive_dcs_frac is not None:
-        note(f"ADAPTIVE_SHOOTER flies like the DCS AI (shoots at 0.95-1.0 of R-max, presses) in "
+        note(f"ADAPTIVE_SHOOTER flies like the DCS AI (shoots at 0.72-0.90 of R-max, a fifth at 0.95-1.0, presses) in "
              f"{args.adaptive_dcs_frac:.0%} of its episodes (default 33%)")
     if not (heterogeneous or team) and (opponent == BvrOpponentType.SELF_PLAY
                                         or not args.no_curriculum):
