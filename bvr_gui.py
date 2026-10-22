@@ -240,6 +240,16 @@ def _library_summary() -> dict:
                 calibrated[it["id"]] = L.envelope_path(L.missile_config(it["id"])).exists()
             except Exception:
                 calibrated[it["id"]] = False
+    # Platforms that differ only in radar are one aircraft to the policy (SIM_REV 22): the page compares this key
+    # to allow self-play between them, as train_bvr.py does.
+    for it in items:
+        if it["kind"] == "platform":
+            try:
+                prm = dict(L.get_item("platform", it["id"])["params"])
+                prm.pop("radar", None)
+                it["aircraft_key"] = json.dumps(prm, sort_keys=True)
+            except Exception:
+                pass
     return {"items": items, "schema": L.schema_json(), "calibrated": calibrated,
             "problems": L.list_problems(), "library_dir": str(L.LIB_DIR)}
 
