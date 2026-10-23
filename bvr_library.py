@@ -426,7 +426,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 22
+SIM_REV = 23
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -538,6 +538,9 @@ _SIM_REV_NOTES = {
         "a pressing (DCS-like) red runs a fleeing target down at its dash speed; and platform F-16C-DCSFIT-R "
         "carries the APG-68-DCS radar: 55 km detection and 15 s to build a new track, as the player's F-16 "
         "in DCS. Missile physics were right (the model hit all 12 of red's DCS hits on our recorded paths)",
+    23: "every decision costs 0.002, so a fight that drifts to a timeout costs about what losing one does "
+        "(a timeout's -0.8 comes 400 s in, -0.24 seen from the start; dcsfit_v7 on SIM_REV 22 learned to keep "
+        "away and timed out in every fight), and a beaming target decoys an active seeker at 0.15/s (was 0.30)",
 }
 
 

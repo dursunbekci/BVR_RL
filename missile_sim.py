@@ -105,7 +105,8 @@ THREAT_HOLD_S = 3.0
 # five of our active seekers that the model hit, our jet's defence one of thirteen of red's. Rough: few shots.
 DECOY_RANGE = 10_000.0
 DECOY_BEAM_DEG = 25.0
-DECOY_P_BEAM = 0.30
+DECOY_P_BEAM = 0.15     # SIM_REV 23: was 0.30 (fitted to five DCS shots); at 0.30 the scripted red, beaming, decoyed
+                        # nearly every seeker and dcsfit_v6 won one fight in 24. 0.15 for 10 s still decoys 80%
 DECOY_P_OTHER = 0.01
 
 

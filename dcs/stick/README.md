@@ -971,3 +971,10 @@ tracks at once, at full range). For fights against a human, red flies F-16C-DCSF
 55 km, but 4 s to a track (a narrowed scan or a single-target lock; an estimate, not measured). Platforms differing only
 in radar now count as the same aircraft, so self-play runs on F-16C-DCSFIT-R v F-16C-DCSFIT-H, its snapshots flying red
 with the human's radar.
+
+**SIM_REV 23 (23 October): dcsfit_v7 on SIM_REV 22 kept away.** Resumed from dcsfit_v6 (16M) and left on the ADAPTIVE
+stage against a human-radar red, it timed out in every fight after about 10,000 episodes (0% wins, a track 0% of the
+time, 0.02 shots a fight): a timeout's -0.8 comes 400 s in (-0.24 seen from the start) where a loss at 100 s is -0.74,
+and against SIM_REV 22's scripted red (beaming our missiles away at 0.30/s, chasing runners) dcsfit_v6 won one fight
+in 24. Every decision now costs 0.002 (keeping away to a timeout -0.71, lost at 100 s -0.91, won at 100 s +0.57), and
+the beaming decoy rate is 0.15/s. Train on self-play, both sides F-16C-DCSFIT-R.

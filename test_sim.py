@@ -2259,8 +2259,16 @@ def test_reward_balance():
     timeout = BvrEnv.R_TIMEOUT * g ** T - rocking
     loss_mid = BvrEnv.R_KILLED * g ** (T // 2) - sum(flip * g ** t for t in range(0, T // 2, 2))
     assert timeout > loss_mid - 0.5, (timeout, loss_mid)
+    # SIM_REV 23: with the cost per decision, keeping away to a timeout is no refuge: it costs about what losing at
+    # 100 s does, while a kill at 100 s still pays well
+    c = BvrEnv.TIME_COST
+    hide = BvrEnv.R_TIMEOUT * g ** T - c * sum(g ** t for t in range(T))
+    lose100 = BvrEnv.R_KILLED * g ** 100 - c * sum(g ** t for t in range(100))
+    win100 = BvrEnv.R_KILL * g ** 100 - c * sum(g ** t for t in range(100))
+    assert abs(hide - lose100) < 0.25 and hide < -0.6 and win100 > 0.5, (hide, lose100, win100)
     print(f"  reward balance .............. OK  (rocking all episode costs {rocking:.2f} discounted; "
-          f"timeout {timeout:+.2f}, loss at half time {loss_mid:+.2f})")
+          f"timeout {timeout:+.2f}, loss at half time {loss_mid:+.2f}; with the time cost: keeping away "
+          f"{hide:+.2f}, lost at 100 s {lose100:+.2f}, won at 100 s {win100:+.2f})")
 
 # ────────────────────────────────────────────────────────────────────
 def _wrap_pi(a): return (a+math.pi)%(2*math.pi)-math.pi

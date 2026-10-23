@@ -216,6 +216,11 @@ class BvrEnv(gym.Env):
     # (discounted, per episode) a kill came to about -0.2, a mutual kill -1.2,
     # a loss -1.4 and a TIMEOUT -1.9: dying beat surviving.
     R_KILL=+1.0; R_KILLED=-1.0; R_MUTUAL=-0.4; R_TIMEOUT=-0.8
+    # SIM_REV 23: every decision costs this, so a fight that drifts to a timeout costs about what losing one does.
+    # A timeout's -0.8 comes 400 s in, worth 0.997^400 = 0.30 of it seen from the start (-0.24), against -0.74 for
+    # a loss at 100 s: dcsfit_v7 (SIM_REV 22, ADAPTIVE) learned to keep away and timed out in 100% of fights.
+    # Summed and discounted over 400 decisions it comes to -0.47 (-0.18 by 100 s), so a kill still pays.
+    TIME_COST=0.002
     R_ESCAPE=-0.6; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
     # Longest wait for missiles still in flight after the agent is killed; a
     # missile's own lifetime (MAX_FLIGHT, 120 s) ends it sooner.
@@ -472,7 +477,7 @@ class BvrEnv(gym.Env):
                              for k in PHI_TERMS}
         self._prev_phi = phi
         self._prev_phi_terms = dict(terms)
-        reward = float(shaping) - hdg_cost - shot_cost
+        reward = float(shaping) - hdg_cost - shot_cost - self.TIME_COST
 
         # SIM_REV 16: running out of time ends the episode (terminated), with R_TIMEOUT. As "truncated",
         # stable-baselines3 added gamma * V(last state) to it, as if the fight went on; the critic's value
@@ -482,7 +487,7 @@ class BvrEnv(gym.Env):
         truncated  = False
         info = {"shaping":shaping,"phi":phi,"step":self._step_num,
                 "phi_terms":dict(terms),"shaping_terms":shaping_terms,
-                "cost_terms":{"heading":-hdg_cost,"shots":-shot_cost},
+                "cost_terms":{"heading":-hdg_cost,"shots":-shot_cost,"time":-self.TIME_COST},
                 "doctrine":self._doctrine,
                 "t_sim":self._t_sim,"track_state":TrackState.NAMES[self._trk_state()],
                 "fired":want_fire,"opponent":self._opponent_type.name,
