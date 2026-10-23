@@ -158,6 +158,7 @@ class FakeCockpit:
         self.bx = ac.x + 485000.0 * math.cos(ac.hdg)     # DCS's default bullseye was 262 NM away
         self.bz = ac.z + 485000.0 * math.sin(ac.hdg)
         self.scale = 40
+        self.scale_bumps = 0
         self.mode = "RWS"
         self.tms_right_t = None            # when target management right went down
         self.az_sel, self.bars = 6, 4              # TWS scan: A6, 4 bars (DCS's default); the OSBs step them
@@ -185,6 +186,11 @@ class FakeCockpit:
                 lim = {"cur_r": (0.0, 80.0), "cur_az": (-60.0, 60.0), "el": (-60.0, 60.0)}[attr]
                 v = getattr(self, attr) + r * (self.ac0.t - self.held.pop(name))
                 setattr(self, attr, max(lim[0], min(lim[1], v)))
+                if attr == "cur_r" and self.cur_r > self.scale and self.scale < 160:
+                    # past the top edge DCS steps the range scale up and the TWS scan goes back to A6 (181545)
+                    self.scale *= 2
+                    self.az_sel = 6
+                    self.scale_bumps += 1
         if name == "dms_left" and value != 0.0:            # the keymap sends -1.0 for left and down, +1.0 for right and up
             self.soi_left = True
         elif name == "dms_right" and value != 0.0:

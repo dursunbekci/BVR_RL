@@ -1042,3 +1042,12 @@ tried again at the next radar jobs (3 in a fight) before it gives up. The four f
 and 63.1 km (mean 62), each with red in the scan and the coverage since well beyond that range and the button pressed
 every 0.5 s, put DCS's F-16 radar's detection of an F-16 at about 53-70 km; the wide scan bugged as far out as the
 narrow one, so the scan's frame time is not what limits the first bug.
+
+**181147-182203 (four more fights, same options): first bugs at 72.8, none, 75.3 and 62.7 km.** In 181545 (start 73
+km) the cursor, sent to red's range (34 NM on the 40 NM scale), passed the top edge: DCS stepped the scale to 80 NM
+and put the scan back to A6; the pilot set A3 2B again, and nothing was bugged from 56 km to 30 km with red inside
+the scan. The antenna aim now keeps the cursor below 0.75 of the scale and carries the coverage read there out to
+red's range. After a bug the page reads "A 2" and the azimuth button changes nothing (three tries each in three
+fights): the scan is no longer checked while a track is bugged. Over the eight fights the first bug came at 52.8-75.3
+km (63.2, 52.8, 69.3, 63.1, 72.8, 75.3, 62.7; mean 65.6), always with red in the scan and the coverage from further
+out: DCS's detection range for an F-16, not the scan, sets it.

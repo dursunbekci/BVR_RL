@@ -367,8 +367,11 @@ class StickPilot(threading.Thread):
             self.events.put(("radar", "page_unread", "the radar page did not answer: the mode is left as it is"))
         # each radar job checks the scan: DCS put it back to A6 during a fight (live_20261023_175236, at 166 s A6 2B)
         if self.tws_scan and not self.tws_scan_done:
+            # not while a track is bugged: the page then reads "A 2" and the azimuth button changes nothing (three
+            # fights of 23 October tried it three times each after the bug)
             pg = info if info["mode"] == "TWS" else self._page()
-            if pg["mode"] == "TWS" and pg["az"] is not None and (pg["az"], pg["bars"]) != tuple(self.tws_scan):
+            if (pg["mode"] == "TWS" and pg["az"] is not None and (pg["az"], pg["bars"]) != tuple(self.tws_scan)
+                    and self._state() not in ("designated", "stt")):
                 self._set_scan()
         if self._state() not in ("designated", "stt"):
             az = self._target_az()
@@ -511,12 +514,16 @@ class StickPilot(threading.Thread):
                 why = "no target" if nr is None else "no readout"
                 break
             rt = nr[1] / cockpit.NM
-            talt = ((f.alt or 0.0) + nr[3]) / 304.8          # thousands of feet
-            hi, lo = info["hi"], info["lo"]
-            dr = rt - rc
-            # the coverage is read at the cursor's range; within 2.5 NM will do: the bullseye readout is good to about 2
-            # (live_20261023_174626: at 29 km the cursor chased the range for all 10 steps)
-            if abs(dr) > max(2.5, 0.08 * rt):
+            own = (f.alt or 0.0) / 304.8                    # thousands of feet
+            talt = own + nr[3] / 304.8
+            # The cursor goes to the target's range, but no further than 0.75 of the range scale: at the top edge DCS
+            # steps the scale up (40 -> 80 NM) and the scan goes back to A6 (181545, which then bugged nothing). The
+            # coverage read at the cursor's range is carried out to the target's along the lines from our aircraft.
+            # Within 2.5 NM will do: the bullseye readout is good to about 2 (174626: at 29 km the cursor chased the
+            # range for all 10 steps).
+            want = min(rt, 0.75 * (info["scale"] or 40))
+            dr = want - rc
+            if abs(dr) > max(2.5, 0.08 * want):
                 spec = "hotas.THROTTLE_RDR_CURSOR_FWD" if dr > 0 else "hotas.THROTTLE_RDR_CURSOR_AFT"
                 t = min(max(abs(dr) / self._rate_r, 0.05), 1.5)
                 cockpit.click(r, spec, d, hold=t, fn=fn, verbose=False)
@@ -525,18 +532,20 @@ class StickPilot(threading.Thread):
                 if rc2 is not None and abs(rc2 - rc) > 1.0:
                     self._rate_r = min(max(abs(rc2 - rc) / t, 1.0), 60.0)
                 continue
+            k = rt / max(rc, 3.0)
+            hi, lo = round(own + (info["hi"] - own) * k), round(own + (info["lo"] - own) * k)
             m = self.ELEV_MARGIN * (hi - lo)
             if lo + m <= talt <= hi - m:
                 ok, why = True, "inside"
                 break
-            need = talt - 0.5 * (hi + lo)
+            need = (talt - 0.5 * (hi + lo)) / k              # at the cursor's range, where the readout is
             spec = "hotas.THROTTLE_ANT_ELEV_UP" if need > 0 else "hotas.THROTTLE_ANT_ELEV_DOWN"
             t = min(max(abs(need) / self._rate_el, 0.05), 1.0)
             cockpit.click(r, spec, d, hold=t, fn=fn, verbose=False)
             cockpit.settle(r, 0.4, fn)
             info2 = self._page()
             if info2["hi"] is not None and info2["lo"] is not None:
-                moved = 0.5 * (info2["hi"] + info2["lo"] - hi - lo)
+                moved = 0.5 * (info2["hi"] + info2["lo"] - info["hi"] - info["lo"])
                 if abs(moved) >= 1.0:
                     self._rate_el = min(max(abs(moved) / t, 1.0), 100.0)
         self.elev_tries += 1

@@ -868,6 +868,7 @@ def test_radar_procedure():
             finally:
                 p.stop()
         cs = p.cockpit_summary()
+        assert c.scale_bumps == 0, (case, c.scale_bumps)        # the cursor kept off the top edge
         out[case] = {"bug_s": None if cs["first_bug_t"] == "" else cs["first_bug_t"] - t_vis,
                      "scan": cs["scan"], "stt": cs["stt_shots"], "fire": fire, "elev": cs["elev"], "ev": ev}
     w, n, a = out["wide"], out["narrow"], out["aimed"]
