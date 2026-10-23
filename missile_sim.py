@@ -109,6 +109,13 @@ DECOY_P_BEAM = 0.15     # SIM_REV 23: was 0.30 (fitted to five DCS shots); at 0.
                         # nearly every seeker and dcsfit_v6 won one fight in 24. 0.15 for 10 s still decoys 80%
 DECOY_P_OTHER = 0.01
 
+# SIM_REV 24: a missile whose shooter lost the target (no guidance for more than SUPPORT_TIMEOUT) flies on to the
+# extrapolated last estimate, and its seeker finds the target at hand-off only within UNSUPPORTED_BASKET_DEG of that
+# estimate, not anywhere in its field of view. dcs/missile_replay.py, 23 October: two of our AIM-120s that the model
+# hits with full support flew on unsupported in DCS (our jet turned the target 60-110 deg off its nose) and passed
+# 1.4 and 4.0 km from it (5 and 15 deg at hand-off), the target having turned 20-30 deg.
+UNSUPPORTED_BASKET_DEG = 3.0
+
 
 def decoy_rate(msl_pos, tgt_pos, tgt_vel) -> float:
     """Per-second chance that an active seeker is decoyed now (0 beyond DECOY_RANGE)."""
@@ -245,7 +252,12 @@ class AIM120:
         if (self.phase == MslPhase.MIDCOURSE and not self.seeker_active
                 and rng_to_tgt <= self.handoff_range):
             look = _angle_between(tgt_pos_true - self.pos, self.vel)
-            if look < self.cfg.SEEKER_FOV and rng_to_tgt < self.seeker_range:
+            basket = True
+            if self.t_since_update > self.cfg.SUPPORT_TIMEOUT:          # unsupported: it looks where it was told
+                est = self.last_tgt_pos + self.last_tgt_vel * self.t_since_update
+                basket = (_angle_between(tgt_pos_true - self.pos, est - self.pos)
+                          < math.radians(UNSUPPORTED_BASKET_DEG))
+            if look < self.cfg.SEEKER_FOV and rng_to_tgt < self.seeker_range and basket:
                 self.seeker_active = True
                 self.phase = MslPhase.TERMINAL
 

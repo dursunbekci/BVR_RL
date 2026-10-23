@@ -2,9 +2,9 @@
   "id": "APG-68-DCS-HUMAN",
   "kind": "radar",
   "name": "APG-68-class radar in DCS, run by a skilled human",
-  "description": "The player's F-16 radar in DCS (APG-68-DCS's 55 km detection, the same physics), run as a skilled human does: the scan narrowed on the target or a single-target lock from RWS, so a track is ready about 4 s after first detection instead of the stick pilot's 15-20 s in wide TWS (SIM_REV 22).",
+  "description": "The player's F-16 radar in DCS run by a skilled human: since SIM_REV 24 the same numbers as APG-68-DCS (65 km, 4 s), which the stick pilot now reaches with a narrowed scan and the antenna aimed.",
   "params": {
-    "MAX_RANGE": 55000.0,
+    "MAX_RANGE": 65000.0,
     "REF_RCS_M2": 1.2,
     "FOV_AZ": 59.99999999999999,
     "FOV_EL": 59.99999999999999,
@@ -20,7 +20,7 @@
     "ACQUIRE_S": 4.0
   },
   "sources": {
-    "MAX_RANGE": "DCS: first bugged track 35-72 km (median about 47) in 20-22 October fights; 55 km \u00b115% spans 47-63",
+    "MAX_RANGE": "DCS, 23 October: first bugged track 52.8-75.3 km (mean 65.6) in 7 stick fights, the target in the scan and the antenna's coverage from further out; 65 km +-15% spans 55-75",
     "FOV_AZ": "bvr_radar_sim.py model value",
     "FOV_EL": "bvr_radar_sim.py model value",
     "REF_RANGE": "bvr_radar_sim.py model value",
@@ -33,6 +33,6 @@
     "LOWDOP_CLOSURE": "bvr_radar_sim.py model value",
     "LOWDOP_MAX_INFLATE": "bvr_radar_sim.py model value",
     "REF_RCS_M2": "set equal to the F-16's RCS, so F-16 targets are detected at MAX_RANGE",
-    "ACQUIRE_S": "estimate: a few scan frames of a narrowed TWS or an RWS search then a single-target lock; not measured in DCS yet"
+    "ACQUIRE_S": "as APG-68-DCS since SIM_REV 24 (the stick pilot now runs the radar as a skilled human does)"
   }
 }

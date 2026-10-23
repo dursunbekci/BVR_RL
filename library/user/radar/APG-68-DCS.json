@@ -2,9 +2,9 @@
   "id": "APG-68-DCS",
   "kind": "radar",
   "name": "APG-68-class radar, as DCS's F-16 tracked in practice",
-  "description": "APG-68 with DCS's numbers (SIM_REV 22): the player's F-16 in DCS first held a buggable TWS track at 35-72 km against the AI's F-16 (22 fights, 20-22 October), and took 15-20 s with the target in the scan to build it. Range randomised \u00b115% per episode as APG-68.",
+  "description": "APG-68 with DCS's numbers (SIM_REV 24): the player's F-16 in DCS, its radar run with a narrowed TWS scan and the antenna on the target's altitude, first bugged an F-16 at 53-75 km (8 fights, 23 October), a few seconds after detection. Range randomised +-15% per episode as APG-68.",
   "params": {
-    "MAX_RANGE": 55000.0,
+    "MAX_RANGE": 65000.0,
     "REF_RCS_M2": 1.2,
     "FOV_AZ": 59.99999999999999,
     "FOV_EL": 59.99999999999999,
@@ -17,10 +17,10 @@
     "TAU": 2.0,
     "LOWDOP_CLOSURE": 40.0,
     "LOWDOP_MAX_INFLATE": 4.0,
-    "ACQUIRE_S": 15.0
+    "ACQUIRE_S": 4.0
   },
   "sources": {
-    "MAX_RANGE": "DCS: first bugged track 35-72 km (median about 47) in 20-22 October fights; 55 km \u00b115% spans 47-63",
+    "MAX_RANGE": "DCS, 23 October: first bugged track 52.8-75.3 km (mean 65.6) in 7 stick fights, the target in the scan and the antenna's coverage from further out; 65 km +-15% spans 55-75",
     "FOV_AZ": "bvr_radar_sim.py model value",
     "FOV_EL": "bvr_radar_sim.py model value",
     "REF_RANGE": "bvr_radar_sim.py model value",
@@ -33,6 +33,6 @@
     "LOWDOP_CLOSURE": "bvr_radar_sim.py model value",
     "LOWDOP_MAX_INFLATE": "bvr_radar_sim.py model value",
     "REF_RCS_M2": "set equal to the F-16's RCS, so F-16 targets are detected at MAX_RANGE",
-    "ACQUIRE_S": "DCS: 15-20 s from the target entering the TWS A6 4B scan to a buggable track (stick logs, 22 October)"
+    "ACQUIRE_S": "DCS, 23 October, 8 stick fights with the narrowed scan and the antenna aimed (dcs/stick/README.md): with the target in the scan and pressed for every 0.5 s, the bug came within a few seconds of first detection; 4 s"
   }
 }

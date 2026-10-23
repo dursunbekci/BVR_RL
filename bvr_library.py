@@ -426,7 +426,7 @@ N_SPEED_CMDS = 5
 # Changes to the simulation that are not library parameters but alter what a
 # model trained on: stored in each checkpoint's scenario record so a resume
 # can say it is a warm start. 1 = before these revisions were recorded.
-SIM_REV = 23
+SIM_REV = 24
 _SIM_REV_NOTES = {
     2: "missile time-to-go fixed (it read 999 s while a missile closed): the "
        "time-to-go inputs, the defence reward and the scripted opponents' "
@@ -542,6 +542,10 @@ _SIM_REV_NOTES = {
         "(a timeout's -0.8 comes 400 s in, -0.24 seen from the start; dcsfit_v7 on SIM_REV 22 learned to keep "
         "away and timed out in every fight), a beaming target decoys an active seeker at 0.15/s (was 0.30), and an "
         "escape (range beyond 150 km) counts as a loss, -1.0 (was -0.6: in self-play both sides then ran apart)",
+    24: "APG-68-DCS (and -HUMAN) detect an F-16 at 65 km +-15% and build a track in 4 s (was 55 km, 15 s), as the "
+        "stick pilot's narrowed scan and aimed antenna did in 8 DCS fights; and a missile that lost its shooter's "
+        "guidance finds the target at hand-off only within 3 deg of the extrapolated estimate (two of our DCS shots "
+        "flown on unsupported missed by 1.4 and 4 km; the model gave them anywhere in the seeker's 20 deg)",
 }
 
 

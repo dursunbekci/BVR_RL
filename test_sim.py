@@ -1960,7 +1960,7 @@ def test_sim_rev_22():
     from bvr_env import BvrEnv
     from bvr_opponents import BvrOpponentType as T, AdaptiveShooterOpponent
     e = BvrEnv(opponent_type=T.STRAIGHT, seed=2, platform="F-16C-DCSFIT-R", opponent_platform="F-16C-DCSFIT")
-    assert e._track.acquire_first_hits == 150
+    assert e._track.acquire_first_hits == 40                      # SIM_REV 24: 4 s (was 15)
     # the human red: the same radar, a 4 s track, in the scripted red's own radar and self-play's observer
     h = BvrEnv(opponent_type=T.STRAIGHT, seed=2, platform="F-16C-DCSFIT-R", opponent_platform="F-16C-DCSFIT-H")
     assert h._opponent_radar()._track.acquire_first_hits == 40 and h.selfplay_observer(False)._track.acquire_first_hits == 40
@@ -1980,7 +1980,7 @@ def test_sim_rev_22():
                 break
         if t_first:
             break
-    assert t_first is not None and t_first >= 14, t_first
+    assert t_first is not None and t_first >= 3, t_first
     o = AdaptiveShooterOpponent(rng=np.random.default_rng(1))
     o.reset({"ac2_psi": 0.0, "ac2_alt": 9000.0, "ac2_spd": 300.0, "ac1_psi": 0.0})
     o.PRESS, o._phase, o.FAST_SPEED, o.COMMIT_SPEED = True, "REATTACK", 480.0, 400.0
@@ -1990,6 +1990,32 @@ def test_sim_rev_22():
     assert away["V"] == 480.0 and at["V"] == 400.0, (away["V"], at["V"])
     print(f"  SIM_REV 22 .................. OK  (decoy {DECOY_P_BEAM}/s beaming, {DECOY_P_OTHER}/s otherwise; first "
           f"track after {t_first} s on APG-68-DCS; red chases a runner at dash speed)")
+
+
+def test_sim_rev_24():
+    """SIM_REV 24: a missile without its shooter's guidance finds the target at hand-off only near the extrapolated
+    estimate (3 deg); a supported one anywhere in its seeker's view, as before. APG-68-DCS: 65 km, 4 s."""
+    import numpy as np
+    from missile_sim import AIM120, MslPhase, UNSUPPORTED_BASKET_DEG
+    from bvr_library import radar_config
+
+    def seeker_on(supported, off_m):
+        m = AIM120(1, 2, np.array([0.0, 0.0, 9000.0]), np.array([900.0, 0.0, 0.0]), handoff_range=16000.0)
+        m.phase, m.t_flight = MslPhase.MIDCOURSE, 10.0
+        m.update_guidance({"valid": 1, "tgt_pos": [15250.0, 0.0, 9000.0], "tgt_vel": [-250.0, 0.0, 0.0]})
+        if not supported:
+            m.update_guidance(None)
+            m.t_since_update = 5.0                   # the estimate has flown on to 14 km ahead
+        else:
+            m.last_tgt_pos = np.array([14000.0, 0.0, 9000.0])
+        m.step(0.02, np.array([14000.0, off_m, 9000.0]), np.array([-250.0, 0.0, 0.0]))
+        return m.seeker_active
+    assert seeker_on(False, 0.0) and not seeker_on(False, 1500.0)      # straight on: found; turned 1.5 km: lost
+    assert seeker_on(True, 1500.0)                                       # supported: found 6 deg off
+    r = radar_config("APG-68-DCS")
+    assert r.MAX_RANGE == 65000.0 and r.ACQUIRE_S == 4.0, (r.MAX_RANGE, r.ACQUIRE_S)
+    print(f"  SIM_REV 24 .................. OK  (unsupported seeker finds the target within {UNSUPPORTED_BASKET_DEG} "
+          f"deg of the estimate, not 6 deg off; supported as before; APG-68-DCS 65 km, 4 s)")
 
 
 def test_symmetric_policy():
@@ -2297,6 +2323,7 @@ if __name__ == "__main__":
         ("start reference",         test_start_reference),
         ("turn hold",               test_turn_hold),
         ("SIM_REV 22",              test_sim_rev_22),
+        ("SIM_REV 24",              test_sim_rev_24),
         ("stern starts",            test_stern_starts),
         ("world support timeout",   test_world_support_timeout_via_env),
         ("env reset & step",        test_env_reset_and_step),
