@@ -94,8 +94,9 @@ class StickPilot(threading.Thread):
         # --tws-scan (dcs_live.py): the TWS scan to set, (azimuth A-number, bars), e.g. (3, 4) for A3 4B; None leaves
         # DCS's A6 4B. A6 4B took 15-20 s to make a track of a target nose-on in the scan (22 October)
         self.tws_scan = None
-        self.tws_scan_done = False
+        self.tws_scan_done = False    # True: the scan buttons did nothing, not tried again in the fight
         self.scan_set = None          # the scan the page showed after _set_scan, e.g. "A3 2B"
+        self.scan_resets = 0          # times the scan was found back on another setting and set again
         # --ant-elev (dcs_live.py): before the bug, the cursor goes to the target's range and the antenna elevation
         # up or down until the target's altitude is inside the height coverage there, as a pilot does with the
         # bandit's altitude from AWACS or the datalink (here from the world objects). DCS's radar page gives the
@@ -106,6 +107,7 @@ class StickPilot(threading.Thread):
         self._rate_el = 10.0          # kft/s the coverage moves at the cursor's range per second of ANT ELEV held
         self.elev_said = None
         self.elev_ok = self.elev_tries = 0
+        self._elev_ok_t = -1e9        # DCS time the target was last found inside the coverage
         # --stt (dcs_live.py): a fire job asks for a single-target track (target management up) after the bug and
         # before the release: the missile is then supported by a lock that follows the target, not a TWS track file
         # (dcsfit_v6's missiles in DCS lost their TWS support 6-33 s after launch). The target's RWR sees the lock.
@@ -194,7 +196,7 @@ class StickPilot(threading.Thread):
         return {"aa_pct": round(100.0 * self.aa_frames / self.rd_frames) if self.rd_frames else "",
                 "first_bug_km": "" if fb is None or fb[1] is None else round(fb[1] / 1000.0, 1),
                 "first_bug_t": "" if fb is None else round(fb[0], 1),
-                "scan": self.scan_set or "",
+                "scan": (self.scan_set or "") + (f" (set again {self.scan_resets}x)" if self.scan_resets else ""),
                 "elev": f"{self.elev_ok}/{self.elev_tries}" if self.ant_elev else "",
                 "stt_shots": self.stt_shots if self.stt else ""}
 
@@ -362,8 +364,11 @@ class StickPilot(threading.Thread):
             self.events.put(("radar", "tws" if after == "TWS" else "no_tws", f"radar RWS -> {after}"))
         elif info["mode"] is None:
             self.events.put(("radar", "page_unread", "the radar page did not answer: the mode is left as it is"))
-        if self.tws_scan and not self.tws_scan_done and (info["mode"] == "TWS" or self._page()["mode"] == "TWS"):
-            self._set_scan()
+        # each radar job checks the scan: DCS put it back to A6 during a fight (live_20261023_175236, at 166 s A6 2B)
+        if self.tws_scan and not self.tws_scan_done:
+            pg = info if info["mode"] == "TWS" else self._page()
+            if pg["mode"] == "TWS" and pg["az"] is not None and (pg["az"], pg["bars"]) != tuple(self.tws_scan):
+                self._set_scan()
         if self._state() not in ("designated", "stt"):
             az = self._target_az()
             # the cursor goes to the target's bearing, again only when that has moved by a third of the scan's
@@ -378,7 +383,10 @@ class StickPilot(threading.Thread):
                 back = max(0.0, (60.0 - min(58.0, abs(az))) / cockpit.CURSOR_AZ_RATE)
                 r.note({"ev": "cursor", "az": round(az, 1), "back_s": round(back, 2)})
                 self.events.put(("radar", "cursor", f"cursor to {az:+.0f} deg (edge, then {back:.2f} s back)"))
-            if self.ant_elev and az is not None and abs(az) < 60.0:
+            # a fire job (prebug False) aims the antenna only if no radar job has in the last 20 s: in 175236 the aim
+            # took 7 s of a fire job while the target drifted from -27 to -55 deg, and out of the scan
+            if self.ant_elev and az is not None and abs(az) < 60.0 and (
+                    prebug or r.frames[-1].t - self._elev_ok_t > self.ELEV_FRESH_S):
                 self._aim_elev()
             if prebug and az is not None and abs(az) < 50.0 and self._press_bug(self.PREBUG_S):
                 self.events.put(("radar", "bugged", f"track bugged ahead of a shot (target {az:+.0f} deg)"))
@@ -398,7 +406,6 @@ class StickPilot(threading.Thread):
         press; a route that changes nothing is dropped for the next (SCAN_ROUTES), and with none left the scan is left
         as it is, said once, not tried again in the fight."""
         r, d, fn = self.r, self.defs, self.fn
-        self.tws_scan_done = True
         info = self._page()
         routes = list(self.SCAN_ROUTES)
         for key, want in (("az", self.tws_scan[0]), ("bars", self.tws_scan[1])):
@@ -415,19 +422,25 @@ class StickPilot(threading.Thread):
                         break
                     routes.pop(0)
                 if not routes:
+                    self.tws_scan_done = True
                     self.events.put(("radar", "scan_failed", f"OSB {self.SCAN_OSB[key]} (left MFD clicked and by "
                                      f"SetCommand, right MFD clicked) did not change the scan's {key} ({before}): "
                                      f"left as it is"))
                     return
         side, mode = routes[0]
+        again = self.scan_set is not None
+        self.scan_resets += again
         self.scan_set = f"A{info['az']} {info['bars']}B"
-        r.note({"ev": "scan", "az": info["az"], "bars": info["bars"], "mfd": side, "route": mode})
-        self.events.put(("radar", "scan", f"TWS scan {self.scan_set} (OSBs on the {side} MFD"
-                                          f"{', by SetCommand' if mode == 's' else ''})"))
+        # the route that worked goes first next time
+        self.SCAN_ROUTES = (routes[0],) + tuple(x for x in self.SCAN_ROUTES if x != routes[0])
+        r.note({"ev": "scan", "az": info["az"], "bars": info["bars"], "mfd": side, "route": mode, "again": again})
+        self.events.put(("radar", "scan", f"TWS scan {'back to ' if again else ''}{self.scan_set} (OSBs on the "
+                                          f"{side} MFD{', by SetCommand' if mode == 's' else ''})"))
 
     # ── the antenna elevation (--ant-elev) ─────────────────────────────
     ELEV_MARGIN = 0.2          # the target is kept this share of the coverage's height inside its edges
     ELEV_STEPS = 10            # cursor and antenna presses per radar job, at most
+    ELEV_FRESH_S = 20.0        # a fire job leaves the antenna as a radar job aimed it this recently
 
     def _magvar(self, f):
         """Magnetic variation, rad (the radar page's bearings are magnetic)."""
@@ -522,6 +535,8 @@ class StickPilot(threading.Thread):
                     self._rate_el = min(max(abs(moved) / t, 1.0), 100.0)
         self.elev_tries += 1
         self.elev_ok += ok
+        if ok:
+            self._elev_ok_t = r.frames[-1].t
         r.note({"ev": "elev", "ok": ok, "why": why, "talt_kft": None if talt is None else round(talt, 1),
                 "lo": lo, "hi": hi, "rate_r": round(self._rate_r, 1), "rate_el": round(self._rate_el, 1)})
         said = "ok" if ok else why

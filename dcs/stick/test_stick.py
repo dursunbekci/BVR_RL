@@ -851,6 +851,8 @@ def test_radar_procedure():
                 p.radar()
                 idle(p)
                 c.visible, t_vis = True, link.ac.t
+                if case == "aimed":
+                    c.az_sel = 6                      # DCS put the scan back to A6 (175236): the next job sets it again
                 while c.stage == 0 and link.ac.t - t_vis < 45.0:
                     p.radar()
                     idle(p)
@@ -871,10 +873,11 @@ def test_radar_procedure():
     # (the wide scan's bug comes at the first press after two frames: when that is depends on the radar jobs' rhythm)
     assert w["bug_s"] is not None and w["bug_s"] >= 14.0, w
     assert n["bug_s"] is None and n["scan"] == "A3 2B", n
-    assert a["bug_s"] is not None and a["bug_s"] <= 10.0 and a["scan"] == "A3 2B", a
+    assert a["bug_s"] is not None and a["bug_s"] <= 10.0 and a["scan"] == "A3 2B (set again 1x)", a
     assert a["fire"] and a["fire"][0][1] == "launched" and a["stt"] == 1, a
     print(f"  radar procedure ............. OK  (target 3 km below: A6 4B bugged {w['bug_s']:.0f} s after it showed, A3 2B "
-          f"never, A3 2B with the antenna aimed {a['bug_s']:.0f} s (right MFD's OSBs); launched from STT)")
+          f"never, A3 2B with the antenna aimed {a['bug_s']:.0f} s (right MFD's OSBs, the scan set again after a reset); "
+          f"launched from STT)")
 
 
 def test_manoeuvre():

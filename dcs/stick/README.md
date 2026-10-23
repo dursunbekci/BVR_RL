@@ -1026,3 +1026,10 @@ missile hit. Target management up after the bug left the radar designated at all
 target: `--stt` gets no single-target track from a TWS bug in DCS. The contact and track counters read 0 at both
 bugs: they are not where DCS lists tracks. The antenna's third job ran out of steps chasing the cursor's range with
 the bullseye's 2 NM readout; the range is now good within 2.5 NM.
+
+**175236 (episode 2 of the same run): first bug at 52.8 km.** Red 0.8 km below, inside the scan's azimuth and the
+coverage (11-41 kft, red at 24) from 19 s at 63 km; target management right every 0.5 s bugged it at 36.7 s, 52.8
+km. Again the detection range sets it, here 10 km shorter than 174626 with red slightly below. A fire job at 140 s
+spent 7 s aiming the antenna while red drifted from -27 to -55 deg and out of the scan (bug timeout at -90): a fire
+job now leaves the antenna alone if a radar job aimed it in the last 20 s. At 166 s the page read A6 2B: DCS had
+put the azimuth back. Each radar job now checks the scan and sets it again (`scan` in results.csv says how often).
