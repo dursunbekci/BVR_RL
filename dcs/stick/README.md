@@ -1014,3 +1014,15 @@ python dcs_live.py models_bvr\dcsfit_v7.zip --stick --episodes 5 --tws-scan A3,2
 
 and compare `first_bug_km` / `first_bug_t` in `results.csv` with the earlier runs (first bugs 35-72 km). If the track
 then takes about 5 s and comes at 60 km or more, APG-68-DCS is set from these numbers (SIM_REV 24).
+
+**174626 (23 October, dcsfit_v6 at 3M, `--tws-scan A3,2B --ant-elev --stt`): the scan and the antenna work, STT does
+not.** The scan went to A3 2B by SetCommand on the left MFD (the mouse click route is what did nothing in 103934).
+The antenna aiming found the readout's origin (a bullseye 196 NM away) and had red, 0.5 km above, inside the coverage
+(16-47 kft) at 76 km, 28 s in; red was inside the scan's azimuth from 12 s (86 km). Target management right every
+0.5 s from 29 s bugged nothing until 47.5 s, at 63.2 km: so with the target in a 2 s scan, the bug waits on DCS's
+detection range (about 63-65 km here, head-on), not on building the track. A later re-bug (28 km) took 0.5 s.
+Four launches, no fire request timed out (launch delays 17.7, 13.0 and 4.9 s); all four missed, and red's third
+missile hit. Target management up after the bug left the radar designated at all four launches, the cursor on the
+target: `--stt` gets no single-target track from a TWS bug in DCS. The contact and track counters read 0 at both
+bugs: they are not where DCS lists tracks. The antenna's third job ran out of steps chasing the cursor's range with
+the bullseye's 2 NM readout; the range is now good within 2.5 NM.

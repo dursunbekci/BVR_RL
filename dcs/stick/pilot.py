@@ -495,7 +495,9 @@ class StickPilot(threading.Thread):
             talt = ((f.alt or 0.0) + nr[3]) / 304.8          # thousands of feet
             hi, lo = info["hi"], info["lo"]
             dr = rt - rc
-            if abs(dr) > max(1.5, 0.08 * rt):                 # the coverage is read at the cursor's range
+            # the coverage is read at the cursor's range; within 2.5 NM will do: the bullseye readout is good to about 2
+            # (live_20261023_174626: at 29 km the cursor chased the range for all 10 steps)
+            if abs(dr) > max(2.5, 0.08 * rt):
                 spec = "hotas.THROTTLE_RDR_CURSOR_FWD" if dr > 0 else "hotas.THROTTLE_RDR_CURSOR_AFT"
                 t = min(max(abs(dr) / self._rate_r, 0.05), 1.5)
                 cockpit.click(r, spec, d, hold=t, fn=fn, verbose=False)
