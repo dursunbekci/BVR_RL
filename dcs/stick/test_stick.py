@@ -809,8 +809,9 @@ def test_tws_scan():
         out[works] = ((link.cockpit.az_sel, link.cockpit.bars), ev)
     assert out[True][0] == (3, 4) and out[True][1][0][1] == "scan", out[True]
     assert out[False][0] == (6, 4) and [e[1] for e in out[False][1]] == ["scan_failed"], out[False]
+    assert "trying again" in out[False][1][0][2], out[False]
     print("  TWS scan setting ............ OK  (A6 4B -> A3 4B by OSB 18 and 17, read back; buttons that do nothing: "
-          "said once, left alone)")
+          "said, tried again at the next radar job)")
 
 
 def test_radar_procedure():

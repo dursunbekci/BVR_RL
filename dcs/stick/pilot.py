@@ -94,7 +94,8 @@ class StickPilot(threading.Thread):
         # --tws-scan (dcs_live.py): the TWS scan to set, (azimuth A-number, bars), e.g. (3, 4) for A3 4B; None leaves
         # DCS's A6 4B. A6 4B took 15-20 s to make a track of a target nose-on in the scan (22 October)
         self.tws_scan = None
-        self.tws_scan_done = False    # True: the scan buttons did nothing, not tried again in the fight
+        self.tws_scan_done = False    # True: the scan buttons did nothing SCAN_TRIES times, not tried again in the fight
+        self.scan_fails = 0
         self.scan_set = None          # the scan the page showed after _set_scan, e.g. "A3 2B"
         self.scan_resets = 0          # times the scan was found back on another setting and set again
         # --ant-elev (dcs_live.py): before the bug, the cursor goes to the target's range and the antenna elevation
@@ -400,6 +401,7 @@ class StickPilot(threading.Thread):
     # element, on the left MFD through the device's SetCommand, on the right MFD (should the radar page be there). In
     # 103934 (22 October) the first changed nothing.
     SCAN_ROUTES = (("left", "c"), ("left", "s"), ("right", "c"))
+    SCAN_TRIES = 3             # radar jobs in a fight that try the scan buttons before giving up
 
     def _set_scan(self):
         """The TWS scan to tws_scan, by stepping the azimuth and bar buttons and reading the page back after each
@@ -422,10 +424,14 @@ class StickPilot(threading.Thread):
                         break
                     routes.pop(0)
                 if not routes:
-                    self.tws_scan_done = True
+                    # in 175957 all three failed in the first radar job, right after the radar went to TWS, where the
+                    # same SetCommand route worked in three other fights: tried again at the next jobs
+                    self.scan_fails += 1
+                    self.tws_scan_done = self.scan_fails >= self.SCAN_TRIES
                     self.events.put(("radar", "scan_failed", f"OSB {self.SCAN_OSB[key]} (left MFD clicked and by "
                                      f"SetCommand, right MFD clicked) did not change the scan's {key} ({before}): "
-                                     f"left as it is"))
+                                     + ("left as it is" if self.tws_scan_done else
+                                        f"trying again at the next radar job ({self.scan_fails}/{self.SCAN_TRIES})")))
                     return
         side, mode = routes[0]
         again = self.scan_set is not None

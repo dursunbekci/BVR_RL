@@ -1033,3 +1033,12 @@ km. Again the detection range sets it, here 10 km shorter than 174626 with red s
 spent 7 s aiming the antenna while red drifted from -27 to -55 deg and out of the scan (bug timeout at -90): a fire
 job now leaves the antenna alone if a radar job aimed it in the last 20 s. At 166 s the page read A6 2B: DCS had
 put the azimuth back. Each radar job now checks the scan and sets it again (`scan` in results.csv says how often).
+
+**175957 and 180343 (episodes 3 and 4 of a `--tws-scan A3,2B --ant-elev` run): first bugs at 69.3 and 63.1 km.**
+In 175957 every scan button route failed in the first radar job (the radar had just gone to TWS) and the fight ran
+on A6 4B; red, level, was inside the scan and the coverage from 11 s (87 km) and bugged at 37.0 s, 69.3 km. In
+180343 (A3 2B) red, 5 km above, was inside from 24 s (68 km) and bugged at 31.3 s, 63.1 km. The scan setting is now
+tried again at the next radar jobs (3 in a fight) before it gives up. The four fights' first bugs, 63.2, 52.8, 69.3
+and 63.1 km (mean 62), each with red in the scan and the coverage since well beyond that range and the button pressed
+every 0.5 s, put DCS's F-16 radar's detection of an F-16 at about 53-70 km; the wide scan bugged as far out as the
+narrow one, so the scan's frame time is not what limits the first bug.
