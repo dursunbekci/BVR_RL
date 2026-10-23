@@ -544,6 +544,8 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
                            airframe=load_platform(scen["platform"]).airframe)
         pilot.point_deg = getattr(args, "point_before_fire", None)
         pilot.tws_scan = parse_tws_scan(getattr(args, "tws_scan", None))
+        pilot.ant_elev = bool(getattr(args, "ant_elev", False))
+        pilot.stt = bool(getattr(args, "stt", False))
         pilot.start()
         pilot.radar()
 
@@ -644,7 +646,10 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
            # times DCS put a fired missile back on our rails (Unlimited Weapons on)
            "ammo_refills": world.rec.ammo_refills(agent),
            "hud_aa_pct": cp.get("aa_pct", ""), "first_bug_km": cp.get("first_bug_km", ""),
-           "first_bug_t": cp.get("first_bug_t", "")}
+           "first_bug_t": cp.get("first_bug_t", ""),
+           # the radar procedure: the TWS scan set (--tws-scan), radar jobs that got the target inside the height
+           # coverage (--ant-elev, "ok/tries"), launches from a single-target track (--stt)
+           "scan": cp.get("scan", ""), "ant_elev": cp.get("elev", ""), "stt_shots": cp.get("stt_shots", "")}
     # How often BLUE-1 flew well below the speed the policy asked for. The DCS
     # AI following a route may not use afterburner; the simulator always does.
     short = [c - f > SPEED_SHORT_MPS for c, f in spd]
@@ -704,7 +709,11 @@ def run_episode(link, model, args, scen, rec, agent, red, ep, log=print):
     if cp:
         log(f"  cockpit: HUD in A-A {cp['aa_pct']}% of the fight"
             + (f"; first bugged track at {cp['first_bug_km']} km ({cp['first_bug_t']} s)" if cp.get("first_bug_km") != ""
-               else "; no track was ever bugged"))
+               else "; no track was ever bugged")
+            + (f"; scan {cp['scan']}" if cp.get("scan") else "")
+            + (f"; target inside the antenna's coverage in {cp['elev']} radar jobs" if cp.get("elev") else "")
+            + (f"; {cp['stt_shots']} launches from a single-target track" if cp.get("stt_shots") not in ("", None)
+               else ""))
     log(f"  written: {os.path.join(args.out, name)}.jsonl, _steps.csv, _console.txt; the fight's record in "
         f"episodes.jsonl")
     con_fh.close()
@@ -754,6 +763,15 @@ def main(argv=None):
                     help="--stick, a test: the TWS scan the pilot sets, e.g. A3,4B (azimuth A1/A2/A3/A6, bars "
                          "1B/2B/4B); DCS's default A6,4B took 15-20 s to make a track of a target nose-on in the "
                          "scan. Set by stepping the radar page's OSB 18 and 17 and reading the page back")
+    ap.add_argument("--ant-elev", action="store_true",
+                    help="--stick, a test: before the bug the pilot puts the radar cursor at the target's range and "
+                         "the antenna elevation (ANT ELEV) where the target's altitude is inside the height coverage, "
+                         "as a pilot does with the bandit's altitude from AWACS; needed for a 2-bar scan "
+                         "(--tws-scan A3,2B), whose coverage is half a 4-bar scan's")
+    ap.add_argument("--stt", action="store_true",
+                    help="--stick, a test: a fire job asks for a single-target track (target management up) after "
+                         "the bug, before the release: the missile is then supported by a lock (the target's RWR "
+                         "sees it), not by a TWS track file")
     ap.add_argument("--no-chaff", action="store_true",
                     help="--stick: no chaff (by default the pilot presses CMS forward every 1.5 s while a missile is "
                          "inbound with its seeker on or under 20 s from impact)")

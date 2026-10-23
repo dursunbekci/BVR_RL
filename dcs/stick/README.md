@@ -982,3 +982,35 @@ The first SIM_REV 23 run (self-play, both sides F-16C-DCSFIT-R) found the next w
 time, 0.04 shots a fight, and win, loss and timeout together about 40% of fights; the rest ESCAPE (range beyond 150 km),
 worth -0.6 and reached in about two minutes when both copies turn away (-0.62 discounted, against -0.71 for a
 timeout). An escape is now a loss (-1.0), and the dashboard's outcome chart draws escapes.
+
+**The radar procedure (23 October), to try in DCS: `--tws-scan`, `--ant-elev`, `--stt`.** APG-68-DCS's 15 s and 55 km
+are what this pilot got out of DCS's radar, not what the radar can do: it searched in DCS's widest TWS scan, A6 4B,
+whose frame takes about 8 s (two frames before a track: the 15-20 s measured), and it never moved the antenna
+elevation. Three options, off by default, try what a skilled pilot does:
+
+- `--tws-scan A3,2B`: a narrower scan, about 2 s a frame. The scan buttons (OSB 18 azimuth, 17 bars) are now
+  pressed by a mouse click on the left MFD, then by SetCommand, then on the right MFD, until a press changes the
+  page (in 103934 the first did nothing); the console says which worked (`TWS scan A3 2B (OSBs on the left MFD)`)
+  and `results.csv` has the scan in `scan`.
+- `--ant-elev`: before the bug the cursor goes to the target's range and the antenna (ANT ELEV up/down) until the
+  target's altitude is inside the height coverage the page gives at the cursor (`Max/Min_Search_Altitude`), 20% in
+  from its edges: a pilot does this with the bandit's altitude from AWACS, the pilot here from the world objects. The
+  cursor's range comes from its bearing-range readout, once a fight referred to our own position by holding the cursor
+  to the bottom edge (a bullseye 100+ NM away makes it coarse: about 2 NM). A 2-bar scan covers half the height of a
+  4-bar one, so `A3,2B` needs this. `results.csv`'s `ant_elev` is "radar jobs with the target inside / radar jobs";
+  the stick log has `ev: elev` for each (the coverage and the rates learnt).
+- `--stt`: a fire job asks for a single-target track (target management up) between the bug and the release, so
+  the missile is supported by a lock that follows the target, not a TWS track file (dcsfit_v6's lost theirs 6-33 s
+  after launch). On 13 October target management up after a TWS bug stayed designated; with the cursor on the target
+  (`--ant-elev` puts it there) it may not. The console says `single-target track` or `firing on the TWS track`;
+  `results.csv` counts `stt_shots`. The target's RWR sees the lock, a DCS AI or a human reacts to it.
+
+On the fake cockpit (a track after two scan frames with the target inside the scan, 2 km below us): A6 4B bugged it
+16-18 s after it could be seen, A3 2B alone never, A3 2B with the antenna aimed 5-6 s. To measure in DCS:
+
+```
+python dcs_live.py models_bvr\dcsfit_v7.zip --stick --episodes 5 --tws-scan A3,2B --ant-elev --stt
+```
+
+and compare `first_bug_km` / `first_bug_t` in `results.csv` with the earlier runs (first bugs 35-72 km). If the track
+then takes about 5 s and comes at 60 km or more, APG-68-DCS is set from these numbers (SIM_REV 24).

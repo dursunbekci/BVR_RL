@@ -16,6 +16,9 @@ bridge (bvr_bridge.lua) still reports both aircraft, shots, hits and kills and f
       fire:  bug the TWS track (target management right until the AIM-120 launch zone is drawn),
              master arm on, weapon release held 1.5 s, and the launch confirmed by the HUD's
              missile count or a new AIM-120 in the world objects.
+  and, as tests (off by default; README.md, "The radar procedure"): a narrower TWS scan (tws_scan), the cursor
+  at the target's range and the antenna elevation on its altitude (ant_elev), a single-target track before the
+  release (stt).
 
 Its results come back as events (("fire", "launched"|"timeout", reason), ...) for dcs_live.py's fire
 bookkeeping. Everything measured here is in README.md (results log).
@@ -37,7 +40,9 @@ from stick_test import Hold, Limits, Run, Abort, drive, load_gains   # noqa: E40
 
 GAINS_PATH = os.path.join(HERE, "..", "..", "dcs_runs", "stick_gains.json")
 
-BANK_MAX_DEG = 80.0        # the simulator's PHI_MAX: the policy was trained on its turn rates
+SCAN_HALF_DEG = {1: 10.0, 2: 25.0, 3: 30.0, 6: 60.0}   # TWS scan A1/A2/A3/A6: degrees either side of the cursor
+
+BANK_MAX_DEG = 80.0       # the simulator's PHI_MAX: the policy was trained on its turn rates
 NZ_MAX = 8.0               # g; the simulator allows 9 (and less where the wing cannot give it)
 VS_MAX = 80.0              # m/s climb or descent while changing altitude
 
@@ -90,6 +95,22 @@ class StickPilot(threading.Thread):
         # DCS's A6 4B. A6 4B took 15-20 s to make a track of a target nose-on in the scan (22 October)
         self.tws_scan = None
         self.tws_scan_done = False
+        self.scan_set = None          # the scan the page showed after _set_scan, e.g. "A3 2B"
+        # --ant-elev (dcs_live.py): before the bug, the cursor goes to the target's range and the antenna elevation
+        # up or down until the target's altitude is inside the height coverage there, as a pilot does with the
+        # bandit's altitude from AWACS or the datalink (here from the world objects). DCS's radar page gives the
+        # coverage at the cursor's range only; the cursor's range comes from its bearing-range readout.
+        self.ant_elev = False
+        self._ref = None              # the readout's origin: ("own",) or ("bull", x, z); found once a fight
+        self._rate_r = 6.0            # NM/s the cursor moves in range while held, learnt as it goes
+        self._rate_el = 10.0          # kft/s the coverage moves at the cursor's range per second of ANT ELEV held
+        self.elev_said = None
+        self.elev_ok = self.elev_tries = 0
+        # --stt (dcs_live.py): a fire job asks for a single-target track (target management up) after the bug and
+        # before the release: the missile is then supported by a lock that follows the target, not a TWS track file
+        # (dcsfit_v6's missiles in DCS lost their TWS support 6-33 s after launch). The target's RWR sees the lock.
+        self.stt = False
+        self.stt_shots = 0
         self.chaff_on = False
         self.cmds_tried = False       # the countermeasures panel set to MAN, program 1, chaff on (once)
         self.cmds_ok = False
@@ -172,7 +193,10 @@ class StickPilot(threading.Thread):
         fb = self.first_bug
         return {"aa_pct": round(100.0 * self.aa_frames / self.rd_frames) if self.rd_frames else "",
                 "first_bug_km": "" if fb is None or fb[1] is None else round(fb[1] / 1000.0, 1),
-                "first_bug_t": "" if fb is None else round(fb[0], 1)}
+                "first_bug_t": "" if fb is None else round(fb[0], 1),
+                "scan": self.scan_set or "",
+                "elev": f"{self.elev_ok}/{self.elev_tries}" if self.ant_elev else "",
+                "stt_shots": self.stt_shots if self.stt else ""}
 
     def run(self):
         # frames left from before this pilot (the previous mission's last seconds) are not this fight's
@@ -342,10 +366,11 @@ class StickPilot(threading.Thread):
             self._set_scan()
         if self._state() not in ("designated", "stt"):
             az = self._target_az()
-            # the cursor goes to the target's bearing, again only when that has moved by 10 deg: each move swings
-            # the 25 deg scan away for a moment
+            # the cursor goes to the target's bearing, again only when that has moved by a third of the scan's
+            # half-width (10 deg in A3 or A6): each move swings the scan away for a moment
+            half = SCAN_HALF_DEG.get(info["az"] or 6, 60.0)
             if az is not None and abs(az) < 60.0 and (force or self.center_az is None
-                                                       or abs(az - self.center_az) > 10.0):
+                                                       or abs(az - self.center_az) > min(10.0, half / 3.0)):
                 cockpit.center_cursor(r, d, fn, az, verbose=False)
                 self.center_az = az
                 # where the cursor should now be, for the log: no readout says where it is (in two fights on 21 and
@@ -353,6 +378,8 @@ class StickPilot(threading.Thread):
                 back = max(0.0, (60.0 - min(58.0, abs(az))) / cockpit.CURSOR_AZ_RATE)
                 r.note({"ev": "cursor", "az": round(az, 1), "back_s": round(back, 2)})
                 self.events.put(("radar", "cursor", f"cursor to {az:+.0f} deg (edge, then {back:.2f} s back)"))
+            if self.ant_elev and az is not None and abs(az) < 60.0:
+                self._aim_elev()
             if prebug and az is not None and abs(az) < 50.0 and self._press_bug(self.PREBUG_S):
                 self.events.put(("radar", "bugged", f"track bugged ahead of a shot (target {az:+.0f} deg)"))
                 if not self.armed:                   # and master arm on, as a pilot does before the shot
@@ -360,29 +387,164 @@ class StickPilot(threading.Thread):
                     cockpit.settle(r, 0.5, fn)
                     self.armed = True
 
-    SCAN_OSB = {"az": 18, "bars": 17}   # the radar page's azimuth and bar-scan buttons (left MFD; each press steps)
+    SCAN_OSB = {"az": 18, "bars": 17}   # the radar page's azimuth and bar-scan buttons (each press steps)
+    # How the button is pressed, tried in turn until a press changes the page: on the left MFD as a mouse click on the
+    # element, on the left MFD through the device's SetCommand, on the right MFD (should the radar page be there). In
+    # 103934 (22 October) the first changed nothing.
+    SCAN_ROUTES = (("left", "c"), ("left", "s"), ("right", "c"))
 
     def _set_scan(self):
         """The TWS scan to tws_scan, by stepping the azimuth and bar buttons and reading the page back after each
-        press; a press that changes nothing ends the try (the button is not the one thought), and it is not tried
-        again in the fight."""
+        press; a route that changes nothing is dropped for the next (SCAN_ROUTES), and with none left the scan is left
+        as it is, said once, not tried again in the fight."""
         r, d, fn = self.r, self.defs, self.fn
         self.tws_scan_done = True
         info = self._page()
+        routes = list(self.SCAN_ROUTES)
         for key, want in (("az", self.tws_scan[0]), ("bars", self.tws_scan[1])):
             for _ in range(4):
                 if info[key] == want or info[key] is None:
                     break
                 before = info[key]
-                cockpit.click(r, f"left_osb.{self.SCAN_OSB[key]}", d, fn=fn, verbose=False)
-                cockpit.settle(r, 0.5, fn)
-                info = self._page()
-                if info[key] == before:
-                    self.events.put(("radar", "scan_failed", f"OSB {self.SCAN_OSB[key]} did not change the scan's "
-                                     f"{key} ({before}): left as it is"))
+                while routes:
+                    side, mode = routes[0]
+                    cockpit.click(r, f"{side}_osb.{self.SCAN_OSB[key]}", d, fn=fn, verbose=False, mode=mode)
+                    cockpit.settle(r, 0.5, fn)
+                    info = self._page()
+                    if info[key] != before:
+                        break
+                    routes.pop(0)
+                if not routes:
+                    self.events.put(("radar", "scan_failed", f"OSB {self.SCAN_OSB[key]} (left MFD clicked and by "
+                                     f"SetCommand, right MFD clicked) did not change the scan's {key} ({before}): "
+                                     f"left as it is"))
                     return
-        r.note({"ev": "scan", "az": info["az"], "bars": info["bars"]})
-        self.events.put(("radar", "scan", f"TWS scan A{info['az']} {info['bars']}B"))
+        side, mode = routes[0]
+        self.scan_set = f"A{info['az']} {info['bars']}B"
+        r.note({"ev": "scan", "az": info["az"], "bars": info["bars"], "mfd": side, "route": mode})
+        self.events.put(("radar", "scan", f"TWS scan {self.scan_set} (OSBs on the {side} MFD"
+                                          f"{', by SetCommand' if mode == 's' else ''})"))
+
+    # ── the antenna elevation (--ant-elev) ─────────────────────────────
+    ELEV_MARGIN = 0.2          # the target is kept this share of the coverage's height inside its edges
+    ELEV_STEPS = 10            # cursor and antenna presses per radar job, at most
+
+    def _magvar(self, f):
+        """Magnetic variation, rad (the radar page's bearings are magnetic)."""
+        if f.myaw is None or f.hdg is None:
+            return 0.0
+        return (f.hdg - f.myaw + math.pi) % (2 * math.pi) - math.pi
+
+    def _find_ref(self):
+        """Where the cursor's bearing-range readout is measured from: the cursor to the B-scope's bottom edge (range 0,
+        on our own aircraft), where a readout of 0-1 NM means our own aircraft and anything else gives the bullseye."""
+        r, d, fn = self.r, self.defs, self.fn
+        prev = None
+        for _ in range(8):                               # held aft until the readout stops changing: the bottom edge
+            cockpit.click(r, "hotas.THROTTLE_RDR_CURSOR_AFT", d, hold=1.0, fn=fn, verbose=False)
+            cockpit.settle(r, 0.3, fn)
+            info = self._page()
+            if info["br"] is None or info["br"] == prev:
+                break
+            prev = info["br"]
+        f = r.frames[-1]
+        if info["br"] is None or f.x is None:
+            return False
+        b, rng = info["br"]
+        if rng <= 1:
+            self._ref = ("own",)
+        else:
+            a = math.radians(b) + self._magvar(f)
+            self._ref = ("bull", f.x - rng * cockpit.NM * math.cos(a), f.z - rng * cockpit.NM * math.sin(a))
+        r.note({"ev": "cursor_ref", "ref": self._ref[0], "br": [b, rng]})
+        return True
+
+    def _cursor_nm(self, info, f):
+        """The cursor's range from us, NM, from the readout (None if there is none)."""
+        if info["br"] is None or self._ref is None or f.x is None:
+            return None
+        b, rng = info["br"]
+        if self._ref[0] == "own":
+            return float(rng)
+        a = math.radians(b) + self._magvar(f)
+        cx, cz = self._ref[1] + rng * cockpit.NM * math.cos(a), self._ref[2] + rng * cockpit.NM * math.sin(a)
+        return math.hypot(cx - f.x, cz - f.z) / cockpit.NM
+
+    def _aim_elev(self):
+        """The cursor to the target's range, then the antenna elevation up or down until the target's altitude is
+        inside the height coverage the page gives there (Max/Min_Search_Altitude, thousands of feet, at the cursor's
+        range), ELEV_MARGIN in from its edges. The rates (cursor NM/s, coverage kft/s) are learnt from the readout."""
+        r, d, fn = self.r, self.defs, self.fn
+        if self._ref is None and not self._find_ref():
+            if self.elev_said != "no_readout":
+                self.elev_said = "no_readout"
+                self.events.put(("radar", "elev_none", "the radar page shows no cursor bearing and range: the "
+                                 "antenna elevation is left as it is"))
+            return
+        ok, why, talt, hi, lo = False, "steps", None, None, None
+        for _ in range(self.ELEV_STEPS):
+            f = r.frames[-1]
+            fo = cockpit.last_with(r.frames[-200:], "obj")
+            nr = cockpit.nearest(fo) if fo else None
+            info = self._page()
+            rc = self._cursor_nm(info, f)
+            if nr is None or rc is None or info["hi"] is None or info["lo"] is None:
+                why = "no target" if nr is None else "no readout"
+                break
+            rt = nr[1] / cockpit.NM
+            talt = ((f.alt or 0.0) + nr[3]) / 304.8          # thousands of feet
+            hi, lo = info["hi"], info["lo"]
+            dr = rt - rc
+            if abs(dr) > max(1.5, 0.08 * rt):                 # the coverage is read at the cursor's range
+                spec = "hotas.THROTTLE_RDR_CURSOR_FWD" if dr > 0 else "hotas.THROTTLE_RDR_CURSOR_AFT"
+                t = min(max(abs(dr) / self._rate_r, 0.05), 1.5)
+                cockpit.click(r, spec, d, hold=t, fn=fn, verbose=False)
+                cockpit.settle(r, 0.3, fn)
+                rc2 = self._cursor_nm(self._page(), r.frames[-1])
+                if rc2 is not None and abs(rc2 - rc) > 1.0:
+                    self._rate_r = min(max(abs(rc2 - rc) / t, 1.0), 60.0)
+                continue
+            m = self.ELEV_MARGIN * (hi - lo)
+            if lo + m <= talt <= hi - m:
+                ok, why = True, "inside"
+                break
+            need = talt - 0.5 * (hi + lo)
+            spec = "hotas.THROTTLE_ANT_ELEV_UP" if need > 0 else "hotas.THROTTLE_ANT_ELEV_DOWN"
+            t = min(max(abs(need) / self._rate_el, 0.05), 1.0)
+            cockpit.click(r, spec, d, hold=t, fn=fn, verbose=False)
+            cockpit.settle(r, 0.4, fn)
+            info2 = self._page()
+            if info2["hi"] is not None and info2["lo"] is not None:
+                moved = 0.5 * (info2["hi"] + info2["lo"] - hi - lo)
+                if abs(moved) >= 1.0:
+                    self._rate_el = min(max(abs(moved) / t, 1.0), 100.0)
+        self.elev_tries += 1
+        self.elev_ok += ok
+        r.note({"ev": "elev", "ok": ok, "why": why, "talt_kft": None if talt is None else round(talt, 1),
+                "lo": lo, "hi": hi, "rate_r": round(self._rate_r, 1), "rate_el": round(self._rate_el, 1)})
+        said = "ok" if ok else why
+        if said != self.elev_said:
+            self.elev_said = said
+            self.events.put(("radar", "elev" if ok else "elev_off",
+                             f"antenna elevation: the target ({talt:.0f} kft) inside the coverage {lo}-{hi} kft at its "
+                             f"range" if ok else
+                             f"antenna elevation: target not inside the coverage ({why}; target "
+                             f"{'?' if talt is None else f'{talt:.0f}'} kft, coverage {lo}-{hi} kft)"))
+
+    def _lock_stt(self):
+        """Target management up (twice at most) from the bugged TWS track to a single-target track; True if the
+        display markers then say stt."""
+        r, d, fn = self.r, self.defs, self.fn
+        for _ in range(2):
+            if self._state() == "stt":
+                break
+            cockpit.click(r, "hotas.STICK_TGT_MANAGE_UP", d, fn=fn, verbose=False)
+            cockpit.settle(r, 1.0, fn)
+        st = self._state()
+        self.events.put(("radar", "stt" if st == "stt" else "no_stt",
+                         "single-target track" if st == "stt" else f"target management up left the radar {st}: "
+                                                                   f"firing on the TWS track"))
+        return st == "stt"
 
     def _aa(self):
         """The A-A master mode, so that weapon release launches the AIM-120: the throttle's DOGFIGHT switch to MISSILE
@@ -533,6 +695,7 @@ class StickPilot(threading.Thread):
                              + ("?" if self.center_az is None else f"{self.center_az:+.0f}") + " deg"))
             return
         t_bug = r.frames[-1].t
+        stt = self._lock_stt() if self.stt else False
         mrm0 = cockpit.hud_mrm(r, self.link)
         fo = cockpit.last_with(r.frames[-200:], "obj")
         ids0 = cockpit._ids(fo, "obj")
@@ -552,6 +715,7 @@ class StickPilot(threading.Thread):
             if new or (mrm0 is not None and mrm1 is not None and mrm1 < mrm0):
                 self.fire_times.append({"bug_s": round(t_bug - t0, 2), "total_s": round(r.frames[-1].t - t0, 2),
                                         "ok": True})
+                self.stt_shots += stt
                 self.events.put(("fire", "launched", f"HUD {mrm0} -> {mrm1} MRM"
                                  + (f", {new[0].get('name')} off the rail" if new else "")))
                 return

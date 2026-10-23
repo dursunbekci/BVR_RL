@@ -116,6 +116,8 @@ class FakeCockpit:
                      (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_19"]): "rng_up",
                      (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_18"]): "osb_az",
                      (d["MFD_LEFT"], defs["commands"]["mfd"]["OSB_17"]): "osb_bars",
+                     (d["MFD_RIGHT"], defs["commands"]["mfd"]["OSB_18"]): "osb_az_right",
+                     (d["MFD_RIGHT"], defs["commands"]["mfd"]["OSB_17"]): "osb_bars_right",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_LEFT"]): "dms_left",
                      (d["HOTAS"], h["STICK_DISP_MANAGE_RIGHT"]): "dms_right",
                      (d["HOTAS"], h["STICK_WEAPON_RELEASE"]): "release",
@@ -160,6 +162,16 @@ class FakeCockpit:
         self.tms_right_t = None            # when target management right went down
         self.az_sel, self.bars = 6, 4              # TWS scan: A6, 4 bars (DCS's default); the OSBs step them
         self.scan_osbs_work = True                 # False: the azimuth and bar OSBs do nothing
+        self.scan_route = ("left", None)           # the MFD and click route (None: the default) the OSBs answer on
+        self.mode_in = None                        # the route of the click being pressed (FakeLink.click)
+        # tws_build: a TWS track can be bugged only after the target has been inside the scan (azimuth and height
+        # coverage) for two scan frames, a frame taking bars x the scan's width at 60 deg/s (A6 4B: 8 s, as DCS's
+        # 15-20 s to a track); False: at once, as before
+        self.tws_build = False
+        self.in_scan_s, self._t_scan = 0.0, None
+        self.t_tws = None                          # when the radar last went to TWS
+        self.visible = True                        # False: the radar cannot see the target (too far, say)
+        self.stt_works = True                      # False: target management up leaves a bugged track bugged
         self.bull_on = True                # the readout is from the bullseye until the DED's BULL page toggles it
         self.last_key = None
 
@@ -199,15 +211,22 @@ class FakeCockpit:
         elif name == "tms_up" and value == 1.0 and self.aa and self.soi_left and (
                 self.stage >= 1 or self.cursor >= self.scan_needed or self.under_cursor()):
             # scan_needed 999: only by aiming; a designated target goes to a track on the next press wherever the cursor is
-            self.stage = (self.stage + 1) % 3          # a third press drops the track
+            if self.stage == 1 and not self.stt_works:
+                pass
+            else:
+                self.stage = (self.stage + 1) % 3      # a third press drops the track
         elif name in ("dig8", "dig0") and value == 1.0:
             if name == "dig0" and self.last_key == "dig8":       # M-SEL on the BULL page (LIST, 0, 8, 0)
                 self.bull_on = not self.bull_on
             self.last_key = name
-        elif name == "osb_az" and value == 1.0 and self.scan_osbs_work:
-            self.az_sel = {1: 2, 2: 3, 3: 6, 6: 1}[self.az_sel]
-        elif name == "osb_bars" and value == 1.0 and self.scan_osbs_work:
-            self.bars = {1: 2, 2: 4, 4: 1}[self.bars]
+        elif name in ("osb_az", "osb_az_right", "osb_bars", "osb_bars_right") and value == 1.0 and self.scan_osbs_work:
+            side = "right" if name.endswith("_right") else "left"
+            if (side, self.mode_in) == self.scan_route or (side == self.scan_route[0] and self.scan_route[1] is None
+                                                           and self.mode_in in (None, "c")):
+                if name.startswith("osb_az"):
+                    self.az_sel = {1: 2, 2: 3, 3: 6, 6: 1}[self.az_sel]
+                else:
+                    self.bars = {1: 2, 2: 4, 4: 1}[self.bars]
         elif name == "rng_up" and value == 1.0:
             self.scale = min(160, self.scale * 2)
         elif name == "tms_right" and value == 1.0:
@@ -219,7 +238,10 @@ class FakeCockpit:
             elif held >= self.TMS_LONG_S:          # long: RWS <-> TWS, as in DCS (a track bugged in TWS is dropped)
                 self.mode = "TWS" if self.mode == "RWS" else "RWS"
                 self.stage = 0
-            elif self.mode == "TWS" and self.stage == 0 and abs(self.target_polar()[1] - self.cur_az) <= 25.0:
+                self.t_tws = self.ac0.t if self.mode == "TWS" else None
+            elif self.mode == "TWS" and self.stage == 0 and (
+                    self.in_scan_s >= 2 * self.frame_s() if self.tws_build
+                    else abs(self.target_polar()[1] - self.cur_az) <= 25.0):
                 self.stage = 1                     # bug the (only) track: TWS scans 25 deg either side of the cursor
         elif name == "tms_down" and value != 0.0:            # the keymap sends -1.0
             self.stage = 0
@@ -242,10 +264,21 @@ class FakeCockpit:
         return math.hypot(dx, dz) / 1852.0, az, self.ty / 0.3048
 
     def coverage(self, r_nm):
-        """The radar's height coverage at r_nm, in thousands of feet: 4 bars, about 3.4 deg either side."""
-        alt_ft, r_ft = self.ac0.alt / 0.3048, r_nm * 6076.1
-        return ((alt_ft + r_ft * math.tan(math.radians(self.el + 3.4))) / 1000.0,
-                (alt_ft + r_ft * math.tan(math.radians(self.el - 3.4))) / 1000.0)
+        """The radar's height coverage at r_nm, in thousands of feet: about 0.85 deg either side per bar (4 bars:
+        3.4 deg)."""
+        alt_ft, r_ft, h = self.ac0.alt / 0.3048, r_nm * 6076.1, 0.85 * self.bars
+        return ((alt_ft + r_ft * math.tan(math.radians(self.el + h))) / 1000.0,
+                (alt_ft + r_ft * math.tan(math.radians(self.el - h))) / 1000.0)
+
+    def frame_s(self):
+        """One TWS scan frame, s: bars x the scan's width at 60 deg/s."""
+        return self.bars * 2 * {1: 10.0, 2: 25.0, 3: 30.0, 6: 60.0}[self.az_sel] / 60.0
+
+    def in_scan(self):
+        tr, taz, talt = self.target_polar()
+        hi, lo = self.coverage(tr)
+        half = {1: 10.0, 2: 25.0, 3: 30.0, 6: 60.0}[self.az_sel]
+        return self.visible and self.aa and self.mode == "TWS" and abs(taz - self.cur_az) <= half and lo <= talt / 1000.0 <= hi
 
     def under_cursor(self):
         if not self.aa:
@@ -279,6 +312,11 @@ class FakeCockpit:
         self.stage = 2 if v else 0
 
     def extras(self, ac):
+        if self._t_scan is not None and self.in_scan():
+            self.in_scan_s += ac.t - self._t_scan
+        elif not self.in_scan():
+            self.in_scan_s = 0.0
+        self._t_scan = ac.t
         rng = math.hypot(self.tx - ac.x, self.tz - ac.z)
         tgt = {"id": 10, "name": "F-16C_50", "unit": "TGT-1", "coal": 1, "l1": 1, "l2": 1,
                "x": self.tx, "y": self.ty, "z": self.tz}
@@ -367,6 +405,8 @@ class FakeLink:
         self.events["ind_end"] = {"ev": "ind_end", "count": 2}
 
     def click(self, dev, cmd, value, mode=None):
+        if self.cockpit:
+            self.cockpit.mode_in = mode
         ok = self.cockpit.press(dev, cmd, value) if self.cockpit else False
         self.events["click"] = {"ev": "click", "ok": True, "dev": dev, "cmd": cmd, "value": value, "known": ok}
 

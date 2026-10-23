@@ -813,6 +813,66 @@ def test_tws_scan():
           "said once, left alone)")
 
 
+def test_radar_procedure():
+    """--tws-scan, --ant-elev, --stt on a fake radar that needs two scan frames with the target inside the scan
+    (azimuth and height coverage) to make a track, 2 km below us. After a first radar job with the target out of
+    sight (the setup), from when it can be seen: DCS's A6 4B bugs it after two 8 s frames; A3 2B alone never (half
+    the coverage, the target below it); A3 2B with the antenna aimed in about 4 s, the scan set through the right
+    MFD's OSBs (the left's do nothing), and the shot fired from a single-target track."""
+    import time as _time
+    from pilot import StickPilot
+    from fake_export import FakeLink
+    import cockpit
+    defs = cockpit.load_defs()
+    gains = {"roll_sign": 1, "pitch_sign": 1, "thr_sign": 1, "thr_u_trim": 0.1,
+             "roll_curve": [[0.5, 1.3], [1.0, 2.6]], "pitch_curve": [[0.5, 3.0], [1.0, 6.0]]}
+
+    def idle(p):
+        t0 = _time.time()
+        _time.sleep(0.1)
+        while (p.busy is not None or not p.jobs.empty()) and _time.time() - t0 < 60:
+            _time.sleep(0.02)
+    out = {}
+    for case, scan, elev in (("wide", None, False), ("narrow", (3, 2), False), ("aimed", (3, 2), True)):
+        link = FakeLink(cockpit_defs=defs)
+        c = link.cockpit
+        c.tws_build, c.ty = True, link.ac.alt - 2000.0
+        if case == "aimed":
+            c.scan_route = ("right", None)
+        with tempfile.TemporaryDirectory() as d:
+            p = StickPilot(link, gains=gains, log=lambda m: None, out_dir=d)
+            p.tws_scan, p.ant_elev, p.stt = scan, elev, case == "aimed"
+            p.start()
+            try:
+                c.visible = False                     # a first radar job sets the radar up, the target out of sight
+                p.radar()
+                idle(p)
+                c.visible, t_vis = True, link.ac.t
+                while c.stage == 0 and link.ac.t - t_vis < 45.0:
+                    p.radar()
+                    idle(p)
+                fire = []
+                if case == "aimed":
+                    p.fire()
+                    t0 = _time.time()
+                    while not fire and _time.time() - t0 < 60:
+                        _time.sleep(0.05)
+                        fire = [e for e in p.drain_events() if e[0] == "fire"]
+                ev = p.drain_events()
+            finally:
+                p.stop()
+        cs = p.cockpit_summary()
+        out[case] = {"bug_s": None if cs["first_bug_t"] == "" else cs["first_bug_t"] - t_vis,
+                     "scan": cs["scan"], "stt": cs["stt_shots"], "fire": fire, "elev": cs["elev"], "ev": ev}
+    w, n, a = out["wide"], out["narrow"], out["aimed"]
+    assert w["bug_s"] is not None and 14.0 <= w["bug_s"] <= 26.0, w
+    assert n["bug_s"] is None and n["scan"] == "A3 2B", n
+    assert a["bug_s"] is not None and a["bug_s"] < w["bug_s"] - 6.0 and a["scan"] == "A3 2B", a
+    assert a["fire"] and a["fire"][0][1] == "launched" and a["stt"] == 1, a
+    print(f"  radar procedure ............. OK  (target 2 km below: A6 4B bugged {w['bug_s']:.0f} s after it showed, A3 2B "
+          f"never, A3 2B with the antenna aimed {a['bug_s']:.0f} s (right MFD's OSBs); launched from STT)")
+
+
 def test_manoeuvre():
     """The manoeuvre program flown on the fake aircraft, saved, replayed through the simulator and compared; the
     fit recovers a known change of the airframe from a record the simulator itself made."""
@@ -1402,6 +1462,7 @@ if __name__ == "__main__":
     test_fcr_contacts()
     test_nearest_not_chaff()
     test_tws_scan()
+    test_radar_procedure()
     test_manoeuvre()
     test_sim_g_lag()
     test_course()
