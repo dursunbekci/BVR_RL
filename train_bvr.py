@@ -383,7 +383,7 @@ class BvrCallback(BaseCallback):
             point = ({
                 "ep": self.ep_count, "steps": int(self.model.num_timesteps),
                 "win": r3(win_rate), "loss": r3(losses / n), "mut": r3(mutual / n),
-                "to": r3(timeouts / n),
+                "to": r3(timeouts / n), "esc": r3(self.outcomes.count("ESCAPE") / n),
                 "exch": round((kills + mutual) / max(losses + mutual, 1), 2),
                 "pk": r3((kills + mutual) / total_shots), "shots": r3(total_shots / n),
                 "rrmax": r3(np.mean(self.launch_ratios)) if self.launch_ratios else None,

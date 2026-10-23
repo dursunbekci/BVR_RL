@@ -2266,6 +2266,8 @@ def test_reward_balance():
     lose100 = BvrEnv.R_KILLED * g ** 100 - c * sum(g ** t for t in range(100))
     win100 = BvrEnv.R_KILL * g ** 100 - c * sum(g ** t for t in range(100))
     assert abs(hide - lose100) < 0.25 and hide < -0.6 and win100 > 0.5, (hide, lose100, win100)
+    # nor is running apart: an escape is a loss, whenever it comes
+    assert BvrEnv.R_ESCAPE <= BvrEnv.R_KILLED
     print(f"  reward balance .............. OK  (rocking all episode costs {rocking:.2f} discounted; "
           f"timeout {timeout:+.2f}, loss at half time {loss_mid:+.2f}; with the time cost: keeping away "
           f"{hide:+.2f}, lost at 100 s {lose100:+.2f}, won at 100 s {win100:+.2f})")

@@ -540,7 +540,8 @@ _SIM_REV_NOTES = {
         "in DCS. Missile physics were right (the model hit all 12 of red's DCS hits on our recorded paths)",
     23: "every decision costs 0.002, so a fight that drifts to a timeout costs about what losing one does "
         "(a timeout's -0.8 comes 400 s in, -0.24 seen from the start; dcsfit_v7 on SIM_REV 22 learned to keep "
-        "away and timed out in every fight), and a beaming target decoys an active seeker at 0.15/s (was 0.30)",
+        "away and timed out in every fight), a beaming target decoys an active seeker at 0.15/s (was 0.30), and an "
+        "escape (range beyond 150 km) counts as a loss, -1.0 (was -0.6: in self-play both sides then ran apart)",
 }
 
 

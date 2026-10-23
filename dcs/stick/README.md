@@ -978,3 +978,7 @@ time, 0.02 shots a fight): a timeout's -0.8 comes 400 s in (-0.24 seen from the 
 and against SIM_REV 22's scripted red (beaming our missiles away at 0.30/s, chasing runners) dcsfit_v6 won one fight
 in 24. Every decision now costs 0.002 (keeping away to a timeout -0.71, lost at 100 s -0.91, won at 100 s +0.57), and
 the beaming decoy rate is 0.15/s. Train on self-play, both sides F-16C-DCSFIT-R.
+The first SIM_REV 23 run (self-play, both sides F-16C-DCSFIT-R) found the next way out: at 4M steps a track 0.4% of the
+time, 0.04 shots a fight, and win, loss and timeout together about 40% of fights; the rest ESCAPE (range beyond 150 km),
+worth -0.6 and reached in about two minutes when both copies turn away (-0.62 discounted, against -0.71 for a
+timeout). An escape is now a loss (-1.0), and the dashboard's outcome chart draws escapes.

@@ -2375,7 +2375,7 @@ function updateCurriculum(name) {
 // One time series per card, x = episodes of this run. Colours validated for
 // the dark card surface (dataviz validator: all checks pass for the four
 // outcome colours); several series get a legend and direct labels.
-const TS_COL = {win:'#3987e5', loss:'#d95926', to:'#199e70', mut:'#c98500'};
+const TS_COL = {win:'#3987e5', loss:'#d95926', to:'#199e70', mut:'#c98500', esc:'#a46be0'};
 let dashHist = [];
 function histPoints(h){
   // older trainers wrote [episode, win rate, exchange ratio]
@@ -2384,7 +2384,8 @@ function histPoints(h){
 const DASH = [
   {id:'outcomes', y0:0, y1:1, fmt:v=>(v*100).toFixed(0)+'%', ref:0.65,
    series:[{k:'win',name:'win',c:TS_COL.win},{k:'loss',name:'loss',c:TS_COL.loss},
-           {k:'to',name:'timeout',c:TS_COL.to},{k:'mut',name:'mutual',c:TS_COL.mut}]},
+           {k:'to',name:'timeout',c:TS_COL.to},{k:'mut',name:'mutual',c:TS_COL.mut},
+           {k:'esc',name:'escape',c:TS_COL.esc}]},
   {id:'exch',  y0:0, fmt:v=>v.toFixed(2), series:[{k:'exch',name:'exchange ratio',c:TS_COL.win}]},
   {id:'pk',    y0:0, y1:1, fmt:v=>v.toFixed(2), series:[{k:'pk',name:'realised Pk',c:TS_COL.win}]},
   {id:'shots', y0:0, fmt:v=>v.toFixed(2), series:[{k:'shots',name:'shots per episode',c:TS_COL.win}]},

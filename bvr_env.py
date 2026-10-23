@@ -221,7 +221,9 @@ class BvrEnv(gym.Env):
     # a loss at 100 s: dcsfit_v7 (SIM_REV 22, ADAPTIVE) learned to keep away and timed out in 100% of fights.
     # Summed and discounted over 400 decisions it comes to -0.47 (-0.18 by 100 s), so a kill still pays.
     TIME_COST=0.002
-    R_ESCAPE=-0.6; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
+    # SIM_REV 23: leaving the fight (range beyond ESCAPE_RANGE) is losing it. At -0.6 it was the cheapest way out:
+    # dcsfit_v7 in self-play (both sides the same policy) turned away from each other and escaped in most fights.
+    R_ESCAPE=-1.0; R_CRASH=-1.0; R_BANDIT_CRASH=+0.4; R_WASTED_MSL=-0.03
     # Longest wait for missiles still in flight after the agent is killed; a
     # missile's own lifetime (MAX_FLIGHT, 120 s) ends it sooner.
     RESOLVE_MAX_S=130.0
